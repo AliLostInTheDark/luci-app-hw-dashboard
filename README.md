@@ -33,5 +33,5 @@ git clone https://github.com/AliLostInTheDark/luci-app-hw-dashboard.git package/
 
 Run `make menuconfig`, navigate to **LuCI -> Applications**, select `luci-app-hardware-dashboard`, and compile your firmware!
 
-## 📸 Screenshots
+## Screenshots
 *(Coming soon)*
