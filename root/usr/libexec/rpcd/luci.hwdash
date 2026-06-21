@@ -1,5 +1,18 @@
 #!/bin/sh
 
+read_file() {
+	local __var=$1
+	local __file=$2
+	local __default=$3
+	if [ -f "$__file" ]; then
+		read -r "$__var" 2>/dev/null < "$__file"
+		[ -z "$(eval echo "\$$__var")" ] && eval "$__var="\$__default""
+	else
+		eval "$__var="\$__default""
+	fi
+}
+
+
 case "$1" in
 	list)
 		echo '{ "info": { } }'
@@ -103,9 +116,11 @@ case "$1" in
 
 				ZRAM_TOTAL=0
 				ZRAM_USED=0
+				ZRAM_ORIG=0
 				if [ -f /sys/block/zram0/disksize ]; then
 					ZRAM_TOTAL=$(( $(cat /sys/block/zram0/disksize 2>/dev/null || echo 0) / 1024 ))
 					ZRAM_USED=$(( $(cat /sys/block/zram0/compr_data_size 2>/dev/null || echo 0) / 1024 ))
+					ZRAM_ORIG=$(( $(cat /sys/block/zram0/orig_data_size 2>/dev/null || echo 0) / 1024 ))
 				fi
 
 				get_disk_meta() {
@@ -432,11 +447,15 @@ EOF
 							lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
 						esac
 						if [ -f "$netdev/speed" ]; then
-							speed=$(cat "$netdev/speed" 2>/dev/null)
-							duplex=$(cat "$netdev/duplex" 2>/dev/null)
+							read_file speed "$netdev/speed" ""
+							read_file duplex "$netdev/duplex" ""
+							read_file rx_d "$netdev/statistics/rx_dropped" "0"
+							read_file tx_d "$netdev/statistics/tx_dropped" "0"
+							read_file rx_e "$netdev/statistics/rx_errors" "0"
+							read_file tx_e "$netdev/statistics/tx_errors" "0" 
 							if [ "$speed" = "-1" ] || [ -z "$speed" ]; then speed="Down"; fi
 							if [ $FIRST_ETH -eq 0 ]; then ETH_LINKS="$ETH_LINKS,"; fi
-							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\"}"
+							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\",\"rx_drop\":$rx_d,\"tx_drop\":$tx_d,\"rx_err\":$rx_e,\"tx_err\":$tx_e}"
 							FIRST_ETH=0
 						fi
 					fi
@@ -472,6 +491,7 @@ EOF
 					model="Unknown"
 					dtype="Unknown"
 					removable="0"
+					health="Unknown"
 					
 					if [ -f "$dev/removable" ]; then
 						removable=$(cat "$dev/removable" 2>/dev/null)
@@ -481,6 +501,9 @@ EOF
 						mmcblk*)
 							dtype="eMMC/SD"
 							[ -f "$dev/device/name" ] && model=$(cat "$dev/device/name" 2>/dev/null)
+							if [ -f "$dev/device/life_time" ]; then
+								health=$(cat "$dev/device/life_time" 2>/dev/null)
+							fi
 							;;
 						nvme*)
 							dtype="NVMe"
@@ -541,7 +564,7 @@ EOF
 					[ -z "$model" ] && model="Storage Device"
 					
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
-					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
+					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\",\"health\":\"$health\"}"
 					FIRST_BDEV=0
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
@@ -550,10 +573,10 @@ EOF
 				FIRST_USB=1
 				for usb in /sys/bus/usb/devices/*; do
 					if [ -f "$usb/speed" ] && [ -f "$usb/idVendor" ]; then
-						product=$(cat "$usb/product" 2>/dev/null || echo "Unknown Device")
-						manufacturer=$(cat "$usb/manufacturer" 2>/dev/null || echo "")
-						speed=$(cat "$usb/speed" 2>/dev/null || echo "Unknown")
-						version=$(cat "$usb/version" 2>/dev/null || echo "")
+						read_file product "$usb/product" "Unknown Device"
+						read_file manufacturer "$usb/manufacturer" ""
+						read_file speed "$usb/speed" "Unknown"
+						read_file version "$usb/version" """"
 						
 						if [ -n "$manufacturer" ]; then
 							name="$manufacturer $product"
@@ -569,6 +592,25 @@ EOF
 					fi
 				done
 				USB_DEVS="$USB_DEVS]"
+
+				PCIE_DEVS="["
+				FIRST_PCIE=1
+				for pci in /sys/bus/pci/devices/*; do
+					if [ -f "$pci/current_link_speed" ]; then
+						read_file vendor "$pci/vendor" "Unknown"
+						read_file device "$pci/device" "Unknown"
+						read_file speed "$pci/current_link_speed" "Unknown"
+						read_file width "$pci/current_link_width" "Unknown"
+						read_file max_speed "$pci/max_link_speed" "Unknown"
+						read_file max_width "$pci/max_link_width" "Unknown"
+						name="PCIe Device ($vendor:$device)"
+						
+						if [ $FIRST_PCIE -eq 0 ]; then PCIE_DEVS="$PCIE_DEVS,"; fi
+						PCIE_DEVS="$PCIE_DEVS{\"name\":\"$name\",\"speed\":\"$speed\",\"width\":\"$width\",\"max_speed\":\"$max_speed\",\"max_width\":\"$max_width\"}"
+						FIRST_PCIE=0
+					fi
+				done
+				PCIE_DEVS="$PCIE_DEVS]"
 
 				WIFI_RADIOS="["
 				FIRST_WIFI=1
@@ -599,8 +641,14 @@ EOF
 							band="Unknown"
 						fi
 
+						clients="Unknown"
+						assoc=$(iwinfo "$iface" assoclist 2>/dev/null)
+						if [ -n "$assoc" ]; then
+							clients=$(echo "$assoc" | grep -c "SNR")
+						fi
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\"}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\",\"clients\":\"$clients\"}"
 						FIRST_WIFI=0
 					done
 				fi
@@ -620,7 +668,7 @@ EOF
 				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
+				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
 				;;
 		esac
 		;;
