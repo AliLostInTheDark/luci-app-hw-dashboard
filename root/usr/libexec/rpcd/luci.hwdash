@@ -458,6 +458,81 @@ EOF
 					esac
 				done < /proc/net/dev
 
+				BLOCK_DEVS="["
+				FIRST_BDEV=1
+				for dev in /sys/class/block/*; do
+					[ ! -d "$dev" ] && continue
+					devname=${dev##*/}
+					# Ignore loop, ram, mtd blocks
+					case "$devname" in
+						loop*|ram*|mtdblock*) continue ;;
+					esac
+					
+					# Get model/type
+					model="Unknown"
+					dtype="Unknown"
+					removable="0"
+					
+					if [ -f "$dev/removable" ]; then
+						removable=$(cat "$dev/removable" 2>/dev/null)
+					fi
+					
+					case "$devname" in
+						mmcblk*)
+							dtype="eMMC/SD"
+							[ -f "$dev/device/name" ] && model=$(cat "$dev/device/name" 2>/dev/null)
+							;;
+						nvme*)
+							dtype="NVMe"
+							[ -f "$dev/device/model" ] && model=$(cat "$dev/device/model" 2>/dev/null)
+							;;
+						sd*)
+							parent=${devname%%[0-9]*}
+							local rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
+							if [ "$removable" = "1" ]; then dtype="USB"
+							elif [ "$rot" = "1" ]; then dtype="HDD"
+							elif [ "$rot" = "0" ]; then dtype="SSD"
+							else dtype="USB/SATA"
+							fi
+							[ -f "/sys/class/block/$parent/device/model" ] && model=$(cat "/sys/class/block/$parent/device/model" 2>/dev/null)
+							;;
+					esac
+					
+					# Get size
+					size_bytes=0
+					[ -f "$dev/size" ] && size_bytes=$(($(cat "$dev/size" 2>/dev/null) * 512))
+					
+					# Get IO stats
+					read_bytes=0
+					write_bytes=0
+					if [ -f "$dev/stat" ]; then
+						stat_data=$(cat "$dev/stat" 2>/dev/null)
+						# stat fields: 3=sectors read, 7=sectors written
+						read_sect=$(echo "$stat_data" | awk '{print $3}')
+						write_sect=$(echo "$stat_data" | awk '{print $7}')
+						[ -n "$read_sect" ] && read_bytes=$((read_sect * 512))
+						[ -n "$write_sect" ] && write_bytes=$((write_sect * 512))
+					fi
+					
+					# Find mount info
+					mount_point=""
+					fs_type="Unknown"
+					mount_info=$(df -T | grep -w "/dev/$devname")
+					if [ -n "$mount_info" ]; then
+						fs_type=$(echo "$mount_info" | awk '{print $2}')
+						mount_point=$(echo "$mount_info" | awk '{print $7}')
+					fi
+					
+					# Escape model name
+					model=$(echo "$model" | sed 's/"/\\"/g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+					[ -z "$model" ] && model="Storage Device"
+					
+					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
+					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
+					FIRST_BDEV=0
+				done
+				BLOCK_DEVS="$BLOCK_DEVS]"
+
 				USB_DEVS="["
 				FIRST_USB=1
 				for usb in /sys/bus/usb/devices/*; do

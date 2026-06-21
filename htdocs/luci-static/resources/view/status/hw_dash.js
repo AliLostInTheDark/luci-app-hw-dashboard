@@ -176,7 +176,20 @@
    }
   ');var getDynColor=function(pct,invert){if(invert===true){if(pct>=40)return'#00bcd4';if(pct>=20)return'#ffea00';return'#ff1744';}
 if(pct<60)return'#00bcd4';if(pct<80)return'#ffea00';return'#ff1744';};var updateDial=function(id,pct,circ){var dash=(pct/100)*circ;var prog=document.getElementById('dial-prog-'+id);if(prog){prog.style.strokeDasharray=dash+' '+circ;prog.style.stroke=getDynColor(pct);}
-var txt=document.getElementById('dial-txt-'+id);if(txt){txt.textContent=Math.round(pct)+'%';txt.style.fill=getDynColor(pct);txt.style.color=getDynColor(pct);}};var createDial=function(id,title){var radius=70;var circumference=2*Math.PI*radius;var svgContainer=E('div',{id:'dial-svg-'+id,style:'position:absolute; top:0; left:0; width:100%; height:100%;'});svgContainer.innerHTML='<svg viewBox="0 0 160 160"><circle class="hw-dial-bg" cx="80" cy="80" r="'+radius+'"/><circle id="dial-prog-'+id+'" class="hw-dial-progress" cx="80" cy="80" r="'+radius+'" style="stroke: #00bcd4; stroke-dasharray: 0 '+circumference+';"/></svg>';var card=E('div',{class:'hw-card'},[E('h3',{id:'title-'+id},title),E('div',{class:'hw-dial'},[svgContainer,E('div',{id:'dial-txt-'+id,class:'hw-dial-text'},'0%'),E('div',{id:'dial-sub-'+id,class:'hw-dial-subtext'},'')]),E('div',{id:'stats-'+id,class:'hw-stats-list'})]);return{node:card,circ:circumference};};var cpuCard=createDial('cpu','CPU');var ramCard=createDial('ram','MEMORY');var dskCard=createDial('dsk','STORAGE');var coresNode=E('div',{id:'hw-cores',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'});cpuCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 15px 0 10px 0; text-transform: uppercase;'},'PER-CORE USAGE'));cpuCard.node.appendChild(coresNode);cpuCard.node.appendChild(E('div',{style:'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'}));cpuCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'},'SYSTEM STATUS'));var cpuMetaNode=E('div',{id:'hw-cpu-meta',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'});cpuCard.node.appendChild(cpuMetaNode);var advCard=E('div',{class:'hw-card'},[E('h3',{},'CPU Detailed Load'),E('div',{id:'hw-adv',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]);var extCard=E('div',{id:'hw-ext-card',class:'hw-card',style:'display: none;'},[E('h3',{},'EXTERNAL STORAGE'),E('div',{id:'hw-ext-list',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; width: 100%;'}),E('div',{id:'hw-ext-meta',style:'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'})]);dskCard.node.appendChild(E('div',{id:'dial-meta-dsk',style:'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'}));dskCard.node.appendChild(E('div',{style:'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'}));dskCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'},'Ethernet Link Status'));dskCard.node.appendChild(E('div',{id:'hw-eth-links',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'}));var thermCard=E('div',{class:'hw-card wide'},[E('h3',{},'Thermal Sensors'),E('div',{class:'hw-thermals-container'},[E('div',{class:'hw-thermals-col hw-thermals-col-left'},[E('div',{class:'hw-thermals-title'},'CPU'),E('div',{id:'hw-thermals-cpu',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]),E('div',{id:'hw-thermals-divider-wifi',class:'hw-thermals-divider'}),E('div',{id:'hw-thermals-col-wifi',class:'hw-thermals-col hw-thermals-col-mid'},[E('div',{class:'hw-thermals-title'},'Wi-Fi'),E('div',{id:'hw-thermals-wifi',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]),E('div',{id:'hw-thermals-divider-misc',class:'hw-thermals-divider'}),E('div',{id:'hw-thermals-col-misc',class:'hw-thermals-col hw-thermals-col-right'},[E('div',{class:'hw-thermals-title'},'MISCELLANEOUS'),E('div',{id:'hw-thermals-misc',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})])])]);var usbCard=E('div',{class:'hw-card',style:'justify-content: flex-start;'},[E('h3',{},'USB Devices'),E('div',{id:'hw-usb-devs',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'})]);var wifiCard=E('div',{class:'hw-card',style:'justify-content: flex-start;'},[E('h3',{},'Wi-Fi PHY Status'),E('div',{id:'hw-wifi-radios',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'})]);container.appendChild(style);container.appendChild(cpuCard.node);container.appendChild(ramCard.node);container.appendChild(dskCard.node);container.appendChild(extCard);container.appendChild(advCard);container.appendChild(thermCard);container.appendChild(usbCard);container.appendChild(wifiCard);var self=this;var parseCpu=function(line){var parts=line.trim().split(/\s+/);var name=parts[0];var user=parseInt(parts[1])||0;var nice=parseInt(parts[2])||0;var sys=parseInt(parts[3])||0;var idle=parseInt(parts[4])||0;var iowait=parseInt(parts[5])||0;var irq=parseInt(parts[6])||0;var softirq=parseInt(parts[7])||0;var idleAll=idle+iowait;var systemAll=sys+irq+softirq;var virtAll=0;var total=user+nice+systemAll+idleAll+virtAll;return{name:name,total:total,idleAll:idleAll,user:user,nice:nice,sys:sys,idle:idle,iowait:iowait,irq:irq,softirq:softirq};};poll.add(function(){return callHwInfo().then(function(res){if(!res||!res.cpus)return;var coresNode=document.getElementById('hw-cores');coresNode.innerHTML='';var advStats=null;res.cpus.forEach(function(cpuLine){var stat=parseCpu(cpuLine);if(self.prevCpu[stat.name]){var prev=self.prevCpu[stat.name];var totalDiff=stat.total-prev.total;var idleDiff=stat.idleAll-prev.idleAll;var pct=0;if(totalDiff>0){pct=100*(totalDiff-idleDiff)/totalDiff;}
+var txt=document.getElementById('dial-txt-'+id);if(txt){txt.textContent=Math.round(pct)+'%';txt.style.fill=getDynColor(pct);txt.style.color=getDynColor(pct);}};var createDial=function(id,title){var radius=70;var circumference=2*Math.PI*radius;var svgContainer=E('div',{id:'dial-svg-'+id,style:'position:absolute; top:0; left:0; width:100%; height:100%;'});svgContainer.innerHTML='<svg viewBox="0 0 160 160"><circle class="hw-dial-bg" cx="80" cy="80" r="'+radius+'"/><circle id="dial-prog-'+id+'" class="hw-dial-progress" cx="80" cy="80" r="'+radius+'" style="stroke: #00bcd4; stroke-dasharray: 0 '+circumference+';"/></svg>';var card=E('div',{class:'hw-card'},[E('h3',{id:'title-'+id},title),E('div',{class:'hw-dial'},[svgContainer,E('div',{id:'dial-txt-'+id,class:'hw-dial-text'},'0%'),E('div',{id:'dial-sub-'+id,class:'hw-dial-subtext'},'')]),E('div',{id:'stats-'+id,class:'hw-stats-list'})]);return{node:card,circ:circumference};};var cpuCard=createDial('cpu','CPU');var ramCard=createDial('ram','MEMORY');var dskCard=createDial('dsk','STORAGE');var coresNode=E('div',{id:'hw-cores',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'});cpuCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 15px 0 10px 0; text-transform: uppercase;'},'PER-CORE USAGE'));cpuCard.node.appendChild(coresNode);cpuCard.node.appendChild(E('div',{style:'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'}));cpuCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'},'SYSTEM STATUS'));var cpuMetaNode=E('div',{id:'hw-cpu-meta',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'});cpuCard.node.appendChild(cpuMetaNode);var advCard=E('div',{class:'hw-card'},[E('h3',{},'CPU Detailed Load'),E('div',{id:'hw-adv',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]);var extCard=E('div',{id:'hw-ext-card',class:'hw-card',style:'display: none;'},[E('h3',{},'EXTERNAL STORAGE'),E('div',{id:'hw-ext-list',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; width: 100%;'}),E('div',{id:'hw-ext-meta',style:'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'})]);dskCard.node.appendChild(E('div',{id:'dial-meta-dsk',style:'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'}));dskCard.node.appendChild(E('div',{style:'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'}));dskCard.node.appendChild(E('h4',{style:'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'},'Ethernet Link Status'));dskCard.node.appendChild(E('div',{id:'hw-eth-links',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'}));var thermCard=E('div',{class:'hw-card wide'},[E('h3',{},'Thermal Sensors'),E('div',{class:'hw-thermals-container'},[E('div',{class:'hw-thermals-col hw-thermals-col-left'},[E('div',{class:'hw-thermals-title'},'CPU'),E('div',{id:'hw-thermals-cpu',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]),E('div',{id:'hw-thermals-divider-wifi',class:'hw-thermals-divider'}),E('div',{id:'hw-thermals-col-wifi',class:'hw-thermals-col hw-thermals-col-mid'},[E('div',{class:'hw-thermals-title'},'Wi-Fi'),E('div',{id:'hw-thermals-wifi',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})]),E('div',{id:'hw-thermals-divider-misc',class:'hw-thermals-divider'}),E('div',{id:'hw-thermals-col-misc',class:'hw-thermals-col hw-thermals-col-right'},[E('div',{class:'hw-thermals-title'},'MISCELLANEOUS'),E('div',{id:'hw-thermals-misc',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0;'})])])]);var usbCard=E('div',{class:'hw-card',style:'justify-content: flex-start;'},[E('h3',{},'USB Devices'),E('div',{id:'hw-usb-devs',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'})]);var wifiCard=E('div',{class:'hw-card',style:'justify-content: flex-start;'},[E('h3',{},'Wi-Fi PHY Status'),E('div',{id:'hw-wifi-radios',class:'hw-stats-list',style:'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;'})]);container.appendChild(style);container.appendChild(cpuCard.node);container.appendChild(ramCard.node);container.appendChild(dskCard.node);container.appendChild(extCard);container.appendChild(advCard);container.appendChild(thermCard);
+var extCard = E('div', { id: 'hw-ext-card', class: 'hw-card wide', style: 'display: none; justify-content: flex-start;' }, [
+	E('h3', {}, 'External & Hot-Swap Storage'),
+	E('div', { id: 'hw-ext-list', class: 'hw-thermals-container', style: 'margin-top: 15px;' })
+]);
+container.appendChild(extCard);
+
+
+		var extCard = E('div', { id: 'hw-ext-card', class: 'hw-card wide', style: 'display: none; justify-content: flex-start;' }, [
+			E('h3', {}, 'External & Hot-Swap Storage'),
+			E('div', { id: 'hw-ext-list', class: 'hw-thermals-container', style: 'margin-top: 15px;' })
+		]);
+		container.appendChild(extCard);
+container.appendChild(usbCard);container.appendChild(wifiCard);var self=this;var parseCpu=function(line){var parts=line.trim().split(/\s+/);var name=parts[0];var user=parseInt(parts[1])||0;var nice=parseInt(parts[2])||0;var sys=parseInt(parts[3])||0;var idle=parseInt(parts[4])||0;var iowait=parseInt(parts[5])||0;var irq=parseInt(parts[6])||0;var softirq=parseInt(parts[7])||0;var idleAll=idle+iowait;var systemAll=sys+irq+softirq;var virtAll=0;var total=user+nice+systemAll+idleAll+virtAll;return{name:name,total:total,idleAll:idleAll,user:user,nice:nice,sys:sys,idle:idle,iowait:iowait,irq:irq,softirq:softirq};};poll.add(function(){return callHwInfo().then(function(res){if(!res||!res.cpus)return;var coresNode=document.getElementById('hw-cores');coresNode.innerHTML='';var advStats=null;res.cpus.forEach(function(cpuLine){var stat=parseCpu(cpuLine);if(self.prevCpu[stat.name]){var prev=self.prevCpu[stat.name];var totalDiff=stat.total-prev.total;var idleDiff=stat.idleAll-prev.idleAll;var pct=0;if(totalDiff>0){pct=100*(totalDiff-idleDiff)/totalDiff;}
 pct=Math.max(0,Math.min(100,pct));if(stat.name==='cpu'){var pctRound=Math.round(pct);updateDial('cpu',pctRound,cpuCard.circ);document.getElementById('dial-sub-cpu').textContent=(res.cpus.length-1)+' Cores';var calcPct=function(key){return totalDiff>0?((stat[key]-prev[key])/totalDiff)*100:0;};advStats={Idle:calcPct('idle'),User:calcPct('user'),Nice:calcPct('nice'),System:calcPct('sys'),'I/O Wait':calcPct('iowait'),IRQ:calcPct('irq'),'Soft IRQ':calcPct('softirq')};var cpuStats=document.getElementById('stats-cpu');cpuStats.innerHTML='';var meta=res.cpu_meta||{};var addMeta=function(label,val){cpuStats.appendChild(E('div',{class:'hw-stat-row',style:'margin-bottom: 2px;'},[E('span',{class:'hw-stat-label'},label),E('span',{class:'hw-stat-value'},val)]));};addMeta('Physical Cores',meta.cores||(res.cpus.length-1));if(meta.threads&&meta.threads!==meta.cores){addMeta('Logical Threads',meta.threads);}
 var curFreq='';if(res.freqs&&res.freqs.length>0){var validFreqs=res.freqs.filter(function(f){return f!==null;});if(validFreqs.length>0){var maxC=Math.max.apply(null,validFreqs);if(maxC>1000000)curFreq=(maxC/1000000).toFixed(2)+' GHz';else if(maxC>1000)curFreq=(maxC/1000).toFixed(0)+' MHz';else curFreq=maxC+' MHz';}}
 var maxFreqStr='';if(meta.max_freq&&meta.max_freq>0){if(meta.max_freq>1000000)maxFreqStr=(meta.max_freq/1000000).toFixed(2)+' GHz';else maxFreqStr=(meta.max_freq/1000).toFixed(0)+' MHz';}
@@ -203,6 +216,87 @@ extNode.appendChild(E('div',{class:'hw-progress-item',style:'margin-bottom: 25px
 dskNode.appendChild(E('div',{class:'hw-progress-item',style:'margin-bottom: 15px;'},bars));}});if(totalSpace>0){var usedPct=totalSpace>0?(totalUsed/totalSpace)*100:0;updateDial('dsk',usedPct,dskCard.circ);document.getElementById('dial-sub-dsk').textContent=(totalUsed/1024).toFixed(0)+' MB';var dskMeta=document.getElementById('dial-meta-dsk');if(!dskMeta){dskMeta=E('div',{id:'dial-meta-dsk',style:'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'});var dContainer=document.getElementById('dial-txt-dsk').parentNode.parentNode;dContainer.appendChild(dskMeta);}
 var fmtSize=function(kb){if(kb>1048576)return(kb/1048576).toFixed(2)+' GB';return(kb/1024).toFixed(0)+' MB';};dskMeta.innerHTML='';dskMeta.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Physical Total'),E('span',{class:'hw-stat-value'},fmtSize(totalPhys>0?totalPhys:totalSpace))]));dskMeta.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Usable Total'),E('span',{class:'hw-stat-value'},fmtSize(totalSpace))]));dskMeta.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Usable Free'),E('span',{class:'hw-stat-value'},fmtSize(totalSpace-totalUsed))]));if(res.mtd_count>0){dskMeta.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'MTD Partitions'),E('span',{class:'hw-stat-value'},res.mtd_count)]));}
 var extCardNode=document.getElementById('hw-ext-card');var extMetaNode=document.getElementById('hw-ext-meta');if(extCardNode&&extMetaNode){if(extCount>0){extCardNode.style.display='flex';extMetaNode.innerHTML='';extMetaNode.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Physical Total'),E('span',{class:'hw-stat-value'},fmtSize(extPhys>0?extPhys:extSpace))]));extMetaNode.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Usable Total'),E('span',{class:'hw-stat-value'},fmtSize(extSpace))]));extMetaNode.appendChild(E('div',{class:'hw-stat-row'},[E('span',{class:'hw-stat-label'},'Usable Free'),E('span',{class:'hw-stat-value'},fmtSize(extSpace-extUsed))]));}else{extCardNode.style.display='none';}}}}
+
+if (res.block_devs && Array.isArray(res.block_devs)) {
+	var extNodeList = document.getElementById('hw-ext-list');
+	var dskMetaNode = document.getElementById('stats-dsk');
+	if (dskMetaNode) { dskMetaNode.innerHTML = ''; }
+	var extDrives = [];
+	res.block_devs.forEach(function(bdev, idx) {
+		var sz = bdev.size ? (parseInt(bdev.size) / (1024*1024*1024)).toFixed(2) + ' GB' : 'Unknown';
+		var isInternal = false;
+		if (bdev.dev.indexOf('mmcblk') === 0 || bdev.dev === 'mtdblock0' || (bdev.removable !== '1' && bdev.type !== 'USB')) {
+			isInternal = true;
+		}
+		if (isInternal) {
+			if (dskMetaNode) {
+				var speedTxt = 'Read: ' + (parseInt(bdev.read)/(1024*1024)).toFixed(1) + ' MB / Write: ' + (parseInt(bdev.write)/(1024*1024)).toFixed(1) + ' MB';
+				dskMetaNode.appendChild(E('div', { class: 'hw-stat-row', style: 'margin-bottom: 5px; flex-direction: column; align-items: flex-start;' }, [
+					E('div', { style: 'font-weight: bold; width: 100%; display: flex; justify-content: space-between;' }, [
+						E('span', {}, bdev.dev),
+						E('span', { style: 'color: #00bcd4;' }, bdev.type + ' (' + sz + ')')
+					]),
+					E('div', { style: 'width: 100%; display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 4px;' }, [
+						E('span', {}, bdev.model),
+						E('span', {}, 'Format: ' + (bdev.fs || 'None'))
+					]),
+					E('div', { style: 'width: 100%; text-align: right; font-size: 0.8em; opacity: 0.6; margin-top: 2px;' }, speedTxt)
+				]));
+			}
+		} else {
+			extDrives.push(bdev);
+		}
+	});
+	var extCardNode = document.getElementById('hw-ext-card');
+	if (extCardNode && extNodeList) {
+		if (extDrives.length === 0) {
+			extCardNode.style.display = 'none';
+		} else {
+			extCardNode.style.display = 'flex';
+			extNodeList.innerHTML = '';
+			var cols = [];
+			var colCount = Math.min(extDrives.length, 3);
+			for (var i = 0; i < colCount; i++) {
+				cols.push(E('div', { class: 'hw-thermals-col hw-thermals-col-mid' }));
+			}
+			if (cols.length > 0) {
+				cols[0].className = 'hw-thermals-col hw-thermals-col-left';
+				cols[cols.length-1].className = 'hw-thermals-col hw-thermals-col-right';
+			}
+			extDrives.forEach(function(bdev, i) {
+				var colIdx = i % colCount;
+				var sz = bdev.size ? (parseInt(bdev.size) / (1024*1024*1024)).toFixed(2) + ' GB' : 'Unknown';
+				var speedTxt = 'R: ' + (parseInt(bdev.read)/(1024*1024)).toFixed(1) + 'MB / W: ' + (parseInt(bdev.write)/(1024*1024)).toFixed(1) + 'MB';
+				var box = E('div', { class: 'hw-progress-item', style: 'background: rgba(128,128,128,0.05); border: 1px solid var(--border-color, rgba(128,128,128,0.1)); border-radius: 8px; padding: 12px; margin-bottom: 12px;' }, [
+					E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;' }, [
+						E('span', { style: 'font-weight: bold; font-size: 1.1em;' }, bdev.dev.toUpperCase()),
+						E('span', { style: 'color: #ffea00; font-weight: bold;' }, sz)
+					]),
+					E('div', { style: 'display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em;' }, [
+						E('span', { style: 'opacity: 0.8;' }, 'Model:'),
+						E('span', {}, bdev.model)
+					]),
+					E('div', { style: 'display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em;' }, [
+						E('span', { style: 'opacity: 0.8;' }, 'Format:'),
+						E('span', { style: 'color: #00e676;' }, bdev.fs || 'Unmounted')
+					]),
+					E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.9em;' }, [
+						E('span', { style: 'opacity: 0.8;' }, 'Type:'),
+						E('span', {}, bdev.type)
+					]),
+					E('div', { style: 'text-align: right; font-size: 0.8em; opacity: 0.6; margin-top: 8px;' }, speedTxt)
+				]);
+				cols[colIdx].appendChild(box);
+			});
+			for (var i = 0; i < cols.length; i++) {
+				extNodeList.appendChild(cols[i]);
+				if (i < cols.length - 1) {
+					extNodeList.appendChild(E('div', { class: 'hw-thermals-divider' }));
+				}
+			}
+		}
+	}
+}
 if(res.thermals){if(res.model){var title=res.model;if(title.length>30)title=title.substring(0,30);var tEl=document.getElementById('title-cpu');if(tEl&&tEl.textContent!==title)tEl.textContent=title;}
 var cpuNode=document.getElementById('hw-thermals-cpu');var wifiNode=document.getElementById('hw-thermals-wifi');var miscNode=document.getElementById('hw-thermals-misc');if(cpuNode)cpuNode.innerHTML='';if(wifiNode)wifiNode.innerHTML='';if(miscNode)miscNode.innerHTML='';var sortedThermals=res.thermals.sort(function(a,b){return a.type.localeCompare(b.type);});var seenSensors={};sortedThermals.forEach(function(t){var tempC=t.temp;if(tempC>1000)tempC=tempC/1000;var name=t.type.replace(/_/g,'-').toUpperCase();if(seenSensors[name])return;seenSensors[name]=true;if(name.length>20)name=name.substring(0,20);var color='#ffea00';var bgCol='rgba(255,234,0,0.1)';if(tempC>=80){color='#ff1744';bgCol='rgba(255,23,68,0.1)';}
 else if(tempC<=60){color='#00bcd4';bgCol='rgba(0,188,212,0.1)';}
