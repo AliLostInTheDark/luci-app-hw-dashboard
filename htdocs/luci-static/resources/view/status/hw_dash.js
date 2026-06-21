@@ -81,6 +81,11 @@ return view.extend({
 		var cpuMetaNode = E('div', { id: 'hw-cpu-meta', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' });
 		cpuCard.node.appendChild(cpuMetaNode);
 
+		var extCard = E('div', { id: 'hw-ext-card', class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+			E('h3', {}, 'External Storage'),
+			E('div', { id: 'hw-ext-list', class: 'hw-thermals-container' })
+		]);
+
 		var advCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
 			E('h3', {}, 'CPU Detailed Load'),
 			E('div', { id: 'hw-adv', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' }),
@@ -113,6 +118,7 @@ return view.extend({
 		container.appendChild(cpuCard.node);
 		container.appendChild(ramCard.node);
 		container.appendChild(dskCard.node);
+		container.appendChild(extCard);
 		container.appendChild(advCard);
 		container.appendChild(thermCard);
 
@@ -457,8 +463,8 @@ return view.extend({
 							]) : null
 						]));
 
-						totalSpace += parseInt(fs.size);
-						totalUsed += parseInt(fs.used);
+						totalSpace += parseInt(fs.total || 0);
+						totalUsed += parseInt(fs.used || 0);
 					});
 
 					if (totalSpace > 0) {
