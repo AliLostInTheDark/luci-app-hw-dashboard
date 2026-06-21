@@ -162,8 +162,8 @@ case "$1" in
 							;;
 						sd*)
 							parent=${dev%%[0-9]*}
-							local rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
-							local rem=$(cat "/sys/class/block/$parent/removable" 2>/dev/null)
+							rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
+							rem=$(cat "/sys/class/block/$parent/removable" 2>/dev/null)
 							if [ "$rem" = "1" ]; then dtype="USB"
 							elif [ "$rot" = "1" ]; then dtype="HDD"
 							elif [ "$rot" = "0" ]; then dtype="SSD"
@@ -488,7 +488,7 @@ EOF
 							;;
 						sd*)
 							parent=${devname%%[0-9]*}
-							local rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
+							rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
 							if [ "$removable" = "1" ]; then dtype="USB"
 							elif [ "$rot" = "1" ]; then dtype="HDD"
 							elif [ "$rot" = "0" ]; then dtype="SSD"
@@ -505,22 +505,35 @@ EOF
 					# Get IO stats
 					read_bytes=0
 					write_bytes=0
+					read_ios=0
+					write_ios=0
 					if [ -f "$dev/stat" ]; then
 						stat_data=$(cat "$dev/stat" 2>/dev/null)
-						# stat fields: 3=sectors read, 7=sectors written
+						# stat fields: 3=sectors read, 7=sectors written, 1=read ios, 5=write ios
 						read_sect=$(echo "$stat_data" | awk '{print $3}')
 						write_sect=$(echo "$stat_data" | awk '{print $7}')
+						r_ios=$(echo "$stat_data" | awk '{print $1}')
+						w_ios=$(echo "$stat_data" | awk '{print $5}')
 						[ -n "$read_sect" ] && read_bytes=$((read_sect * 512))
 						[ -n "$write_sect" ] && write_bytes=$((write_sect * 512))
+						[ -n "$r_ios" ] && read_ios=$r_ios
+						[ -n "$w_ios" ] && write_ios=$w_ios
 					fi
 					
 					# Find mount info
 					mount_point=""
 					fs_type="Unknown"
-					mount_info=$(df -T | grep -w "/dev/$devname")
-					if [ -n "$mount_info" ]; then
-						fs_type=$(echo "$mount_info" | awk '{print $2}')
-						mount_point=$(echo "$mount_info" | awk '{print $7}')
+					binfo=$(block info "/dev/$devname" 2>/dev/null)
+					if [ -n "$binfo" ]; then
+						fs_type=$(echo "$binfo" | grep -o 'TYPE="[^"]*"' | cut -d'"' -f2)
+						mount_point=$(echo "$binfo" | grep -o 'MOUNT="[^"]*"' | cut -d'"' -f2)
+					fi
+					if [ -z "$fs_type" ] || [ "$fs_type" = "Unknown" ]; then
+						mount_info=$(df -T | grep -w "/dev/$devname" | head -n 1)
+						if [ -n "$mount_info" ]; then
+							fs_type=$(echo "$mount_info" | awk '{print $2}')
+							mount_point=$(echo "$mount_info" | awk '{print $7}')
+						fi
 					fi
 					
 					# Escape model name
@@ -528,7 +541,7 @@ EOF
 					[ -z "$model" ] && model="Storage Device"
 					
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
-					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
+					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
 					FIRST_BDEV=0
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
@@ -607,7 +620,7 @@ EOF
 				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB}"
+				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
 				;;
 		esac
 		;;
