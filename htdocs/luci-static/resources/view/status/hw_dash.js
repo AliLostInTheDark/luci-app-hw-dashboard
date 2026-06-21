@@ -21,180 +21,7 @@ return view.extend({
 		var container = E('div', { id: 'hw-dashboard', class: 'hw-dashboard' });
 
 
-		var style = E('style', {}, `
-			.hw-dashboard {
-				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-				gap: 20px;
-				font-family: system-ui, -apple-system, sans-serif;
-				width: 100%;
-				max-width: 100%;
-				overflow: hidden;
-			}
-			.hw-dashboard * {
-				box-sizing: border-box;
-			}
-			.hw-thermals-container {
-				display: flex; flex-direction: row; width: 100%; height: 100%;
-			}
-			.hw-thermals-col { flex: 1; }
-			.hw-thermals-col-left { padding-right: 15px; }
-			.hw-thermals-col-mid { padding: 0 15px; }
-			.hw-thermals-col-right { padding-left: 15px; }
-			.hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; }
-			.hw-thermals-divider {
-				width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px;
-			}
-			@media (max-width: 768px) {
-				.hw-thermals-container { flex-direction: column; }
-				.hw-thermals-col { padding: 0 !important; }
-				.hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; }
-			}
-			.hw-meta-grid {
-				margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto;
-			}
-			@media (max-width: 480px) {
-				.hw-meta-grid { width: 100%; font-size: 0.75em; }
-				.hw-dial { transform: scale(0.9); }
-				.hw-card { padding: 15px; }
-			}
-			.hw-card {
-				background: var(--background-color-high, rgba(128, 128, 128, 0.05));
-				border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
-				border-radius: 12px;
-				padding: 25px;
-				display: flex;
-				flex-direction: column;
-				align-items: center;
-				color: var(--text-color, inherit);
-				box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-				height: 100%;
-				max-width: 100%;
-				overflow: hidden;
-			}
-			.hw-card.wide {
-				grid-column: 1 / -1;
-				align-items: stretch;
-			}
-			.hw-card h3 {
-				margin: 0 0 20px 0;
-				font-size: 1.1em;
-				color: var(--text-color, inherit);
-				opacity: 0.8;
-				text-transform: uppercase;
-				letter-spacing: 1px;
-				text-align: center;
-			}
-			.hw-dial {
-				position: relative;
-				width: 160px;
-				height: 160px;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				margin: 0 auto;
-			}
-			.hw-dial svg {
-				position: absolute;
-				top: 0;
-				left: 0;
-				width: 100%;
-				height: 100%;
-				transform: rotate(-90deg);
-			}
-			.hw-dial-bg {
-				fill: none;
-				stroke: rgba(128, 128, 128, 0.2);
-				stroke-width: 10;
-			}
-			.hw-dial-progress {
-				fill: none;
-				stroke-width: 10;
-				stroke-linecap: round;
-				transition: stroke-dasharray 0.5s ease;
-			}
-			.hw-dial-text {
-				font-size: 2.2em;
-				font-weight: 600;
-				z-index: 1;
-			}
-			.hw-dial-subtext {
-				position: absolute;
-				bottom: 25px;
-				font-size: 0.9em;
-				opacity: 0.7;
-				z-index: 1;
-			}
-			.hw-stats-list {
-				width: 100%;
-				margin-top: 30px;
-				display: flex;
-				flex-direction: column;
-				gap: 12px;
-			}
-			.hw-stats-grid {
-				display: grid;
-				grid-template-columns: 1fr 1fr;
-				gap: 12px 30px;
-				width: 100%;
-			}
-			.hw-stat-row {
-				display: flex;
-				justify-content: space-between;
-				align-items: center;
-				width: 100%;
-				margin-bottom: 8px;
-			}
-			.hw-stat-label { 
-				opacity: 0.8; 
-				font-size: 0.95em; 
-				white-space: nowrap; 
-				overflow: hidden; 
-				text-overflow: ellipsis; 
-				min-width: 0; 
-				flex-shrink: 1; 
-				margin-right: 10px; 
-			}
-			.hw-stat-value { 
-				font-weight: bold; 
-				font-size: 0.95em; 
-				white-space: nowrap; 
-				flex-shrink: 0; 
-			}
-			.hw-progress-item {
-				display: flex;
-				flex-direction: column;
-				margin-bottom: 15px;
-				width: 100%;
-			}
-			.hw-progress-header {
-				display: flex;
-				justify-content: space-between;
-				align-items: center;
-				margin-bottom: 6px;
-				width: 100%;
-				min-width: 0;
-			}
-			.hw-bar-bg {
-				width: 100%;
-				height: 6px;
-				background: var(--border-color, rgba(128, 128, 128, 0.2));
-				border-radius: 3px;
-				overflow: hidden;
-				margin-top: 6px;
-			}
-			.hw-bar-fill {
-				height: 100%;
-				transition: width 0.5s ease;
-			}
-			.hw-temp-badge {
-				padding: 4px 10px;
-				border-radius: 6px;
-				font-weight: 600;
-				font-size: 0.9em;
-				white-space: nowrap;
-			}
-		`);
+		var style = E('style', {}, '\ .hw-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; align-items: center; color: var(--text-color, inherit); box-shadow: 0 4px 10px rgba(0,0,0,0.1); height: 100%; max-width: 100%; overflow: hidden; } .hw-card.wide { grid-column: 1 / -1; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; margin-top: 30px; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } ');
 
 		var getDynColor = function(pct, invert) {
 			if (invert === true) {
@@ -430,10 +257,10 @@ return view.extend({
 							var coreRow = E('div', { class: 'hw-progress-item' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, coreName),
-									E('span', { class: 'hw-stat-value', style: `color: ${colorCore};` }, freqStr + pct.toFixed(2) + '%')
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorCore + ';' }, freqStr + pct.toFixed(2) + '%')
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: `width: ${pct}%; background: ${colorCore};` })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + pct + '%; background: ' + colorCore + ';' })
 								])
 							]);
 							coresNode.appendChild(coreRow);
@@ -453,10 +280,10 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, label),
-									E('span', { class: 'hw-stat-value', style: `color: ${colorAdv};` }, val.toFixed(1) + '%')
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorAdv + ';' }, val.toFixed(1) + '%')
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: `width: ${val}%; background: ${colorAdv};` })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + val + '%; background: ' + colorAdv + ';' })
 								])
 							]));
 						};
@@ -468,7 +295,7 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 5px;' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, label),
-									E('span', { class: 'hw-stat-value', style: (color ? `color: ${color}; font-size: 0.9em;` : 'font-size: 0.9em;') }, val)
+									E('span', { class: 'hw-stat-value', style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;') }, val)
 								])
 							]));
 						};
@@ -494,10 +321,10 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 10px;' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, 'Active Connections'),
-									E('span', { class: 'hw-stat-value', style: `color: ${colorConn};` }, connCount + ' / ' + connMax)
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorConn + ';' }, connCount + ' / ' + connMax)
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: `width: ${connPct}%; background: ${colorConn};` })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + connPct + '%; background: ' + colorConn + ';' })
 								])
 							]));
 						}
@@ -547,7 +374,7 @@ return view.extend({
 								E('span', { class: 'hw-stat-value' }, valStr)
 							]),
 							E('div', { class: 'hw-bar-bg' }, [
-								E('div', { class: 'hw-bar-fill', style: `width: ${pct}%; background: ${colorMem};` })
+								E('div', { class: 'hw-bar-fill', style: 'width: ' + pct + '%; background: ' + colorMem + ';' })
 							])
 						]);
 					};
@@ -583,20 +410,8 @@ return view.extend({
 					var totalPhys = res.storage_total_phys ? parseInt(res.storage_total_phys / 1024) : 0;
 
 					res.df.forEach(function(fs) {
-										var prev = self.prevDisk[k];
-										intRead += (stat.r - prev.r) * 512;
-										intWrite += (stat.w - prev.w) * 512;
-										intR_io += (stat.r_io - prev.r_io);
-										intW_io += (stat.w_io - prev.w_io);
-									}
-									self.prevDisk[k] = stat;
-								}
-							}
-							readSpeed = intRead;
-							writeSpeed = intWrite;
-							rIops = intR_io;
-							wIops = intW_io;
-						} else if (res.diskstats && res.diskstats[fs.dev]) {
+						var readSpeed = 0, writeSpeed = 0, rIops = 0, wIops = 0;
+						if (res.diskstats && res.diskstats[fs.dev]) {
 							var stat = res.diskstats[fs.dev];
 							if (self.prevDisk[fs.dev]) {
 								var prev = self.prevDisk[fs.dev];
@@ -624,7 +439,27 @@ return view.extend({
 						
 						var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
 
-						if (dskNode) {
+						dskStats.appendChild(E('div', { class: 'hw-progress-item' }, [
+							E('div', { class: 'hw-progress-header' }, [
+								E('span', { class: 'hw-stat-label' }, labelStr + ' ' + typeStr),
+								E('span', { class: 'hw-stat-value', style: 'color: ' + colorDsk + ';' }, usedPctStr)
+							]),
+							E('div', { class: 'hw-bar-bg' }, [
+								E('div', { class: 'hw-bar-fill', style: 'width: ' + pctNum + '%; background: ' + colorDsk + ';' })
+							]),
+							E('div', { class: 'hw-progress-header', style: 'margin-top: 4px; font-size: 0.85em; opacity: 0.7;' }, [
+								E('span', {}, speedStr),
+								E('span', {}, iopsStr)
+							]),
+							inodesInfo ? E('div', { class: 'hw-progress-header', style: 'margin-top: 4px; font-size: 0.85em; opacity: 0.7;' }, [
+								E('span', {}, 'Inodes: ' + inodesInfo.used + ' / ' + inodesInfo.total),
+								E('span', {}, inodesInfo.ipct + '%')
+							]) : null
+						]));
+
+						totalSpace += parseInt(fs.size);
+						totalUsed += parseInt(fs.used);
+					});
 
 					if (totalSpace > 0) {
 						var usedPct = totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0;
@@ -668,8 +503,6 @@ return view.extend({
 								E('span', { class: 'hw-stat-label' }, 'Block Devices'),
 								E('span', { class: 'hw-stat-value' }, res.block_count)
 							]));
-						}
-					}
 						}
 					}
 				}
@@ -755,7 +588,7 @@ return view.extend({
 									
 									extBars.push(
 										E('div', { class: 'hw-bar-bg', style: 'margin: 8px 0;' }, [
-											E('div', { class: 'hw-bar-fill', style: `width: ${pctNum}%; background: ${colorDsk};` })
+											E('div', { class: 'hw-bar-fill', style: 'width: ' + pctNum + '%; background: ' + colorDsk + ';' })
 										]),
 										E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;' }, [
 											E('span', {}, 'Space Used'),
@@ -838,7 +671,7 @@ return view.extend({
 						var tempDisplay = tempC.toFixed(1) + ' °C';
 						if (tempC >= 90) tempDisplay += ' ⚠️';
 
-						var badgeAttrs = { class: 'hw-temp-badge', style: `color: ${color}; background: ${bgCol}; cursor: ${hoverText ? 'help' : 'default'};` };
+						var badgeAttrs = { class: 'hw-temp-badge', style: 'color: ' + color + '; background: ' + bgCol + '; cursor: ' + (hoverText ? 'help' : 'default') + ';' };
 						if (hoverText) badgeAttrs['data-tooltip'] = hoverText;
 
 						var row = E('div', { class: 'hw-stat-row' }, [
