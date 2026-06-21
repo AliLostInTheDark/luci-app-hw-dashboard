@@ -240,36 +240,6 @@ $(df -k 2>/dev/null | tail -n +2)
 EOF
 				DF_JSON="$DF_JSON]"
 
-				BLOCK_DEVS="["
-				FIRST_BLK=1
-				while read -r line; do
-					[ -z "$line" ] && continue
-					bdev=$(echo "$line" | awk -F: '{print $1}')
-					bdevname=${bdev#/dev/}
-					buuid=$(echo "$line" | grep -o 'UUID="[^"]*"' | cut -d'"' -f2)
-					bfstype=$(echo "$line" | grep -o 'TYPE="[^"]*"' | cut -d'"' -f2)
-					bmount=$(echo "$line" | grep -o 'MOUNT="[^"]*"' | cut -d'"' -f2)
-					blabel=$(echo "$line" | grep -o 'LABEL="[^"]*"' | cut -d'"' -f2)
-					
-					bmeta="Virtual:0:"
-					[ -n "$bdevname" ] && bmeta=$(get_disk_meta "$bdevname")
-					bhw_type=${bmeta%%:*}
-					btmp_meta=${bmeta#*:}
-					bhw_size=${btmp_meta%%:*}
-					bhw_model=${btmp_meta#*:}
-					
-					case "$bhw_type" in
-						Virtual|NAND*|NOR*|Flash*) continue ;;
-					esac
-
-					if [ $FIRST_BLK -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
-					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$bdevname\",\"uuid\":\"$buuid\",\"fstype\":\"$bfstype\",\"mount\":\"$bmount\",\"label\":\"$blabel\",\"hw_type\":\"$bhw_type\",\"hw_size\":$bhw_size,\"hw_model\":\"$bhw_model\"}"
-					FIRST_BLK=0
-				done <<EOF
-$(block info 2>/dev/null)
-EOF
-				BLOCK_DEVS="$BLOCK_DEVS]"
-
 				DF_INODES="{"
 				FIRST_INODE=1
 				while read -r fs inodes iused ifree ipct mountpoint; do
@@ -529,20 +499,24 @@ EOF
 						
 						channel=$(echo "$info" | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
 						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
-						
-						hwmode=$(echo "$info" | awk -F'Mode: ' '/Mode:/ {print $2}' | awk '{print $1}')
-						band="2.4GHz"
-						if echo "$info" | grep -q "5 GHz"; then band="5GHz"; fi
-						if echo "$info" | grep -q "6 GHz"; then band="6GHz"; fi
-						
+
+						freq=$(echo "$info" | awk -F'[(/]' '/Channel:/ {print $2}' | sed 's/[^0-9.]*//g')
+						if [ -n "$freq" ]; then
+							if echo "$freq" | grep -q "^2\."; then band="2.4 GHz"
+							elif echo "$freq" | grep -q "^5\."; then band="5 GHz"
+							elif echo "$freq" | grep -q "^6\."; then band="6 GHz"
+							else band="$freq GHz"
+							fi
+						else
+							band="Unknown"
+						fi
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\",\"hwmode\":\"$hwmode\",\"band\":\"$band\"}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\"}"
 						FIRST_WIFI=0
 					done
 				fi
 				WIFI_RADIOS="$WIFI_RADIOS]"
-
-
 				
 
 				MEM_SLAB=$(grep '^Slab:' /proc/meminfo | awk '{print $2}')
@@ -558,7 +532,7 @@ EOF
 				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"block_devs\":$BLOCK_DEVS, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB}"
+				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB}"
 				;;
 		esac
 		;;

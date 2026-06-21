@@ -21,7 +21,7 @@ return view.extend({
 		var container = E('div', { id: 'hw-dashboard', class: 'hw-dashboard' });
 
 
-		var style = E('style', {}, ' .hw-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; align-items: center; color: var(--text-color, inherit); box-shadow: 0 4px 10px rgba(0,0,0,0.1); height: 100%; max-width: 100%; overflow: hidden; } .hw-card.wide { grid-column: 1 / -1; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; margin-top: 30px; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } ');
+		var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } ');
 
 		var getDynColor = function(pct, invert) {
 			if (invert === true) {
@@ -81,15 +81,24 @@ return view.extend({
 		var cpuMetaNode = E('div', { id: 'hw-cpu-meta', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' });
 		cpuCard.node.appendChild(cpuMetaNode);
 
-		var advCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
+		var advCard = E('div', { class: 'hw-card' }, [
 			E('h3', {}, 'CPU Detailed Load'),
-			E('div', { id: 'hw-adv', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' }),
-			E('div', { style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;' }),
-			E('h3', { style: 'margin-top: 0;' }, 'Hardware Links'),
-			E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })
+			E('div', { id: 'hw-adv', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })
 		]);
 
-		var thermCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start;' }, [
+		var extCard = E('div', { id: 'hw-ext-card', class: 'hw-card', style: 'display: none;' }, [
+			E('h3', {}, 'EXTERNAL STORAGE'),
+			E('div', { id: 'hw-ext-list', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; width: 100%;' }),
+			E('div', { id: 'hw-ext-meta', style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;' })
+		]);
+
+		dskCard.node.appendChild(E('div', { id: 'dial-meta-dsk', style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;' }));
+		
+		dskCard.node.appendChild(E('div', { style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;' }));
+		dskCard.node.appendChild(E('h4', { style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;' }, 'Ethernet Link Status'));
+		dskCard.node.appendChild(E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' }));
+
+		var thermCard = E('div', { class: 'hw-card wide' }, [
 			E('h3', {}, 'Thermal Sensors'),
 			E('div', { class: 'hw-thermals-container' }, [
 				E('div', { class: 'hw-thermals-col hw-thermals-col-left' }, [
@@ -113,20 +122,9 @@ return view.extend({
 		container.appendChild(cpuCard.node);
 		container.appendChild(ramCard.node);
 		container.appendChild(dskCard.node);
+		container.appendChild(extCard);
 		container.appendChild(advCard);
 		container.appendChild(thermCard);
-		var usbCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
-			E('h3', {}, 'USB Devices'),
-			E('div', { id: 'hw-usb-devs', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })
-		]);
-		container.appendChild(usbCard);
-
-		var wifiCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
-			E('h3', {}, 'Wi-Fi PHY Status'),
-			E('div', { id: 'hw-wifi-radios', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })
-		]);
-		container.appendChild(wifiCard);
-
 
 		var self = this;
 
@@ -269,10 +267,10 @@ return view.extend({
 							var coreRow = E('div', { class: 'hw-progress-item' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, coreName),
-									E('span', { class: 'hw-stat-value', style: 'color: ${colorCore};' }, freqStr + pct.toFixed(2) + '%')
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorCore + ';' }, freqStr + pct.toFixed(2) + '%')
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: 'width: ${pct}%; background: ${colorCore};' })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + pct + '%; background: ' + colorCore + ';' })
 								])
 							]);
 							coresNode.appendChild(coreRow);
@@ -292,10 +290,10 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, label),
-									E('span', { class: 'hw-stat-value', style: 'color: ${colorAdv};' }, val.toFixed(1) + '%')
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorAdv + ';' }, val.toFixed(1) + '%')
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: 'width: ${val}%; background: ${colorAdv};' })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + val + '%; background: ' + colorAdv + ';' })
 								])
 							]));
 						};
@@ -307,7 +305,7 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 5px;' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, label),
-									E('span', { class: 'hw-stat-value', style: (color ? 'color: ${color}; font-size: 0.9em;' : 'font-size: 0.9em;') }, val)
+									E('span', { class: 'hw-stat-value', style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;') }, val)
 								])
 							]));
 						};
@@ -333,10 +331,10 @@ return view.extend({
 							advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 10px;' }, [
 								E('div', { class: 'hw-progress-header' }, [
 									E('span', { class: 'hw-stat-label' }, 'Active Connections'),
-									E('span', { class: 'hw-stat-value', style: 'color: ${colorConn};' }, connCount + ' / ' + connMax)
+									E('span', { class: 'hw-stat-value', style: 'color: ' + colorConn + ';' }, connCount + ' / ' + connMax)
 								]),
 								E('div', { class: 'hw-bar-bg' }, [
-									E('div', { class: 'hw-bar-fill', style: 'width: ${connPct}%; background: ${colorConn};' })
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + connPct + '%; background: ' + colorConn + ';' })
 								])
 							]));
 						}
@@ -386,7 +384,7 @@ return view.extend({
 								E('span', { class: 'hw-stat-value' }, valStr)
 							]),
 							E('div', { class: 'hw-bar-bg' }, [
-								E('div', { class: 'hw-bar-fill', style: 'width: ${pct}%; background: ${colorMem};' })
+								E('div', { class: 'hw-bar-fill', style: 'width: ' + pct + '%; background: ' + colorMem + ';' })
 							])
 						]);
 					};
@@ -415,13 +413,49 @@ return view.extend({
 
 
 				if (res.df && Array.isArray(res.df)) {
-					var dskStats = document.getElementById('stats-dsk');
-					dskStats.innerHTML = '';
 					var totalSpace = 0;
 					var totalUsed = 0;
-					var totalPhys = res.storage_total_phys ? parseInt(res.storage_total_phys / 1024) : 0;
+					var totalPhys = 0;
+
+					var extSpace = 0;
+					var extUsed = 0;
+					var extPhys = 0;
+					var extCount = 0;
+
+					var dskNode = document.getElementById('stats-dsk');
+					var extNode = document.getElementById('hw-ext-list');
+					if (dskNode) dskNode.innerHTML = '';
+					if (extNode) extNode.innerHTML = '';
 
 					res.df.forEach(function(fs) {
+						var isExt = (fs.hw_type === 'USB');
+
+						if (fs.total > 0) {
+							if (isExt) {
+								extSpace += fs.total;
+								extUsed += fs.used;
+							} else {
+								totalSpace += fs.total;
+								totalUsed += fs.used;
+							}
+						}
+						if (fs.psize > 0) {
+							if (isExt) extPhys += fs.psize;
+							else totalPhys += fs.psize;
+						}
+						if (isExt) extCount++;
+						
+						var readSpeed = 0;
+						var writeSpeed = 0;
+						var rIops = 0;
+						var wIops = 0;
+						
+						if (fs.mount === '/') {
+							var intRead = 0, intWrite = 0, intR_io = 0, intW_io = 0;
+							for (var k in res.diskstats) {
+								if (!k.match(/^(loop|ram|sda|sdb|sdc)/)) {
+									var stat = res.diskstats[k];
+									if (self.prevDisk[k]) {
 										var prev = self.prevDisk[k];
 										intRead += (stat.r - prev.r) * 512;
 										intWrite += (stat.w - prev.w) * 512;
@@ -448,14 +482,14 @@ return view.extend({
 						}
 
 						var formatSpeed = function(bytes) {
-							if (bytes < 1024) return bytes + ' B/s';
-							if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB/s';
-							return (bytes / 1048576).toFixed(1) + ' MB/s';
+							if (bytes < 1024) return bytes + 'B/s';
+							if (bytes < 1048576) return (bytes / 1024).toFixed(0) + 'K/s';
+							return (bytes / 1048576).toFixed(1) + 'M/s';
 						};
 
-						var speedStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'EC: ' + res.ubi_max_ec + ' | Bad: ' + res.ubi_bad_peb : 'R: ' + formatSpeed(readSpeed) + ' | W: ' + formatSpeed(writeSpeed);
+						var speedStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'EC:' + res.ubi_max_ec + ' Bad:' + res.ubi_bad_peb : 'R:' + formatSpeed(readSpeed) + ' W:' + formatSpeed(writeSpeed);
 						var iopsStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'UBI Wear: ' + (res.ubi_max_ec / 3000 * 100).toFixed(1) + '% (' + res.ubi_max_ec + ' cycles)' : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
-						var labelStr = fs.mount === '/' ? 'Root FS' : fs.mount;
+						var labelStr = fs.mount === '/' ? 'Root FS' : fs.mount.replace(/^\/mnt\//, '');
 						var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
 						var usedPctStr = fs.pct;
 						var pctNum = parseInt(usedPctStr) || 0;
@@ -463,7 +497,44 @@ return view.extend({
 						
 						var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
 
-						if (dskNode) {
+						var bars = [
+							E('div', { class: 'hw-progress-header' }, [
+								E('span', { style: 'display: flex; opacity: 0.8; font-size: 0.95em; flex-shrink: 1; min-width: 0; margin-right: 5px;' }, [ 
+									E('span', { style: 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' }, labelStr),
+									E('span', { style: 'opacity: 0.6; margin-left: 5px; flex-shrink: 0;' }, typeStr)
+								]),
+								E('span', { class: 'hw-stat-value', style: 'color: ' + colorDsk + '; flex-shrink: 0;' }, speedStr)
+							]),
+							E('div', { class: 'hw-bar-bg' }, [
+								E('div', { class: 'hw-bar-fill', style: 'width: ' + pctNum + '%; background: ' + colorDsk + ';' })
+							]),
+							E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.9em; opacity: 0.8;' }, [
+								E('span', {}, iopsStr),
+								E('span', { class: 'hw-stat-value' }, usedPctStr + ' (' + (fs.total / 1024).toFixed(0) + ' MB)')
+							])
+						];
+
+						if (inodesInfo && inodesInfo.ipct !== '-') {
+							var ipctNum = parseInt(inodesInfo.ipct) || 0;
+							var icolor = getDynColor(ipctNum);
+							bars.push(
+								E('div', { class: 'hw-progress-header', style: 'margin-top: 6px;' }, [
+									E('span', { class: 'hw-stat-label', style: 'font-size: 0.8em; opacity: 0.7;' }, 'Inodes Used'),
+									E('span', { class: 'hw-stat-value', style: 'font-size: 0.8em; color: ' + icolor + ';' }, inodesInfo.ipct)
+								]),
+								E('div', { class: 'hw-bar-bg', style: 'height: 4px;' }, [
+									E('div', { class: 'hw-bar-fill', style: 'width: ' + ipctNum + '%; background: ' + icolor + ';' })
+								])
+							);
+						}
+
+						var rowCont = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 15px;' }, bars);
+						if (isExt && extNode) {
+							extNode.appendChild(rowCont);
+						} else if (dskNode) {
+							dskNode.appendChild(rowCont);
+						}
+					});
 
 					if (totalSpace > 0) {
 						var usedPct = totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0;
@@ -508,115 +579,28 @@ return view.extend({
 								E('span', { class: 'hw-stat-value' }, res.block_count)
 							]));
 						}
-					}
-						}
-					}
-				}
 
-				if (res.block_devs && Array.isArray(res.block_devs)) {
-					var extCardNode = document.getElementById('hw-ext-card');
-					var extNodeList = document.getElementById('hw-ext-list');
-					
-					if (extCardNode && extNodeList) {
-						extNodeList.innerHTML = '';
-						if (res.block_devs.length === 0) {
-							extCardNode.style.display = 'none';
-						} else {
-							extCardNode.style.display = 'flex';
-							extCardNode.style.flexDirection = 'column';
-							
-							extNodeList.style.display = 'flex';
-							extNodeList.style.flexWrap = 'wrap';
-							extNodeList.style.flexDirection = 'row';
-							extNodeList.style.alignItems = 'stretch';
-							extNodeList.style.gap = '0';
-							
-							res.block_devs.forEach(function(bdev, idx) {
-								var isMounted = !!bdev.mount;
-								var labelStr = bdev.label ? bdev.dev + ' (' + bdev.label + ')' : bdev.dev;
-								var typeStr = '[' + bdev.hw_type + (bdev.hw_model ? ' - ' + bdev.hw_model : '') + ']';
-								var fsStr = bdev.fstype ? bdev.fstype.toUpperCase() : 'RAW / UNFORMATTED';
-								var mountStr = isMounted ? bdev.mount : 'Not Mounted';
-								
-								var sizeStr = '';
-								if (bdev.hw_size) {
-									var kb = bdev.hw_size;
-									if (kb > 1048576) sizeStr = (kb / 1048576).toFixed(2) + ' GB';
-									else sizeStr = (kb / 1024).toFixed(0) + ' MB';
-								}
-								
-								var matchDf = null;
-								if (isMounted && res.df) {
-									matchDf = res.df.find(function(f) { return f.mount === bdev.mount; });
-								}
-								
-								var extBars = [
-									E('div', { class: 'hw-progress-header', style: 'margin-bottom: 12px; display: flex; flex-direction: column;' }, [
-										E('span', { style: 'font-weight: bold; font-size: 1.15em;' }, labelStr.toUpperCase()),
-										E('span', { style: 'opacity: 0.6; font-size: 0.85em; margin-top: 4px;' }, typeStr)
-									]),
-									E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9em;' }, [
-										E('span', { style: 'opacity: 0.7;' }, 'Format'),
-										E('span', { style: 'font-weight: bold;' }, fsStr)
-									]),
-									E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9em;' }, [
-										E('span', { style: 'opacity: 0.7;' }, 'Capacity'),
-										E('span', { style: 'font-weight: bold;' }, sizeStr)
-									]),
-									E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.9em;' }, [
-										E('span', { style: 'opacity: 0.7;' }, 'Mountpoint'),
-										E('span', { style: 'font-weight: bold; color: ' + (isMounted ? 'var(--rx-color)' : '#ff9800') }, mountStr)
-									])
-								];
-								
-								if (matchDf) {
-									var pctNum = parseInt(matchDf.pct) || 0;
-									var colorDsk = getDynColor(pctNum);
-									
-									var readSpeed = 0, writeSpeed = 0, rIops = 0, wIops = 0;
-									if (res.diskstats && res.diskstats[matchDf.dev]) {
-										var stat = res.diskstats[matchDf.dev];
-										if (self.prevDisk[matchDf.dev]) {
-											var prev = self.prevDisk[matchDf.dev];
-											readSpeed = (stat.r - prev.r) * 512;
-											writeSpeed = (stat.w - prev.w) * 512;
-											rIops = (stat.r_io - prev.r_io);
-											wIops = (stat.w_io - prev.w_io);
-										}
-										self.prevDisk[matchDf.dev] = stat;
-									}
-									
-									var formatSpeed = function(bytes) {
-										if (bytes < 1024) return bytes + ' B/s';
-										if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB/s';
-										return (bytes / 1048576).toFixed(1) + ' MB/s';
-									};
-									
-									extBars.push(
-										E('div', { class: 'hw-bar-bg', style: 'margin: 8px 0;' }, [
-											E('div', { class: 'hw-bar-fill', style: 'width: ${pctNum}%; background: ${colorDsk};' })
-										]),
-										E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;' }, [
-											E('span', {}, 'Space Used'),
-											E('span', { class: 'hw-stat-value' }, matchDf.pct)
-										]),
-										E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;' }, [
-											E('span', {}, 'Read: ' + formatSpeed(readSpeed)),
-											E('span', {}, 'Write: ' + formatSpeed(writeSpeed))
-										]),
-										E('div', { style: 'width: 100%; display: flex; justify-content: space-between; font-size: 0.9em; opacity: 0.8;' }, [
-											E('span', {}, 'Read IOPS: ' + rIops),
-											E('span', {}, 'Write IOPS: ' + wIops)
-										])
-									);
-								}
-								
-								if (idx > 0) {
-									extNodeList.appendChild(E('div', { class: 'hw-thermals-divider' }));
-								}
-								
-								extNodeList.appendChild(E('div', { class: 'hw-thermals-col', style: 'flex: 1; min-width: 260px; padding: 15px; background: rgba(128,128,128,0.05); border-radius: 8px; margin: 5px 0;' }, extBars));
-							});
+						var extCardNode = document.getElementById('hw-ext-card');
+						var extMetaNode = document.getElementById('hw-ext-meta');
+						if (extCardNode && extMetaNode) {
+							if (extCount > 0) {
+								extCardNode.style.display = 'flex';
+								extMetaNode.innerHTML = '';
+								extMetaNode.appendChild(E('div', { class: 'hw-stat-row' }, [
+									E('span', { class: 'hw-stat-label' }, 'Physical Total'),
+									E('span', { class: 'hw-stat-value' }, fmtSize(extPhys > 0 ? extPhys : extSpace))
+								]));
+								extMetaNode.appendChild(E('div', { class: 'hw-stat-row' }, [
+									E('span', { class: 'hw-stat-label' }, 'Usable Total'),
+									E('span', { class: 'hw-stat-value' }, fmtSize(extSpace))
+								]));
+								extMetaNode.appendChild(E('div', { class: 'hw-stat-row' }, [
+									E('span', { class: 'hw-stat-label' }, 'Usable Free'),
+									E('span', { class: 'hw-stat-value' }, fmtSize(extSpace - extUsed))
+								]));
+							} else {
+								extCardNode.style.display = 'none';
+							}
 						}
 					}
 				}
@@ -660,10 +644,6 @@ return view.extend({
 						if (crit && crit > 1000) crit = crit / 1000;
 						if (pass && pass > 1000) pass = pass / 1000;
 						
-						var hoverText = '';
-						if (pass) hoverText += 'Passive: ' + pass.toFixed(1) + ' °C';
-						if (crit) hoverText += (hoverText ? '\n' : '') + 'Critical: ' + crit.toFixed(1) + ' °C';
-
 						var lowerName = name.toLowerCase();
 						var targetCol = null;
 						if (lowerName.indexOf('cpu') !== -1 || lowerName.indexOf('soc') !== -1 || lowerName.indexOf('cpu_ss') !== -1 || lowerName.indexOf('top-glue') !== -1) {
@@ -677,13 +657,27 @@ return view.extend({
 						var tempDisplay = tempC.toFixed(1) + ' °C';
 						if (tempC >= 90) tempDisplay += ' ⚠️';
 
-						var badgeAttrs = { class: 'hw-temp-badge', style: 'color: ${color}; background: ${bgCol}; cursor: ${hoverText ? 'help' : 'default'};' };
-						if (hoverText) badgeAttrs['data-tooltip'] = hoverText;
+						var badgeAttrs = { class: 'hw-temp-badge', style: 'color: ' + color + '; background: ' + bgCol + ';' };
 
-						var row = E('div', { class: 'hw-stat-row' }, [
-							E('span', { class: 'hw-stat-label' }, name),
-							E('span', badgeAttrs, tempDisplay)
-						]);
+						var rowContent = [
+							E('div', { class: 'hw-stat-row', style: 'border-bottom: none; padding-bottom: 0;' }, [
+								E('span', { class: 'hw-stat-label' }, name),
+								E('span', badgeAttrs, tempDisplay)
+							])
+						];
+						
+						if (pass || crit) {
+							var tripsDiv = E('div', { style: 'display: flex; justify-content: flex-end; gap: 6px; font-size: 0.75em; padding-top: 6px;' });
+							if (pass) {
+								tripsDiv.appendChild(E('span', { style: 'color: #ffb300; background: rgba(255,179,0,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;' }, 'PASS ' + pass.toFixed(0) + '°'));
+							}
+							if (crit) {
+								tripsDiv.appendChild(E('span', { style: 'color: #ff1744; background: rgba(255,23,68,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;' }, 'CRIT ' + crit.toFixed(0) + '°'));
+							}
+							rowContent.push(tripsDiv);
+						}
+						
+						var row = E('div', { style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));' }, rowContent);
 
 						if (targetCol) targetCol.appendChild(row);
 					});
@@ -729,59 +723,9 @@ return view.extend({
 							});
 						}
 					}
-
-				if (res.usb_devs && Array.isArray(res.usb_devs)) {
-					var usbNode = document.getElementById('hw-usb-devs');
-					if (usbNode) {
-						usbNode.innerHTML = '';
-						if (res.usb_devs.length === 0) {
-							usbNode.appendChild(E('div', { style: 'text-align: center; opacity: 0.5; font-style: italic; padding: 20px 0;' }, 'No USB devices connected'));
-						} else {
-							res.usb_devs.forEach(function(usb) {
-								var speedText = usb.speed + ' Mbps';
-								if (usb.speed === '480') speedText = 'USB 2.0 (480 Mbps)';
-								if (usb.speed === '5000') speedText = 'USB 3.0 (5 Gbps)';
-								if (usb.speed === '10000') speedText = 'USB 3.1 (10 Gbps)';
-								if (usb.speed === '1.5' || usb.speed === '12') speedText = 'USB 1.1 (' + usb.speed + ' Mbps)';
-								
-								usbNode.appendChild(E('div', { class: 'hw-stat-row', style: 'background: rgba(128,128,128,0.05); padding: 10px 15px; border-radius: 6px; margin-bottom: 5px; display: flex; flex-direction: column; align-items: flex-start;' }, [
-									E('div', { style: 'font-weight: bold; display: flex; justify-content: space-between; width: 100%;' }, [
-										E('span', {}, usb.name),
-										E('span', { style: 'color: #00b0ff; font-size: 0.9em; font-weight: normal;' }, speedText)
-									])
-								]));
-							});
-						}
-					}
 				}
 
-				if (res.wifi_radios && Array.isArray(res.wifi_radios)) {
-					var wifiNode = document.getElementById('hw-wifi-radios');
-					if (wifiNode) {
-						wifiNode.innerHTML = '';
-						if (res.wifi_radios.length === 0) {
-							wifiNode.appendChild(E('div', { style: 'text-align: center; opacity: 0.5; font-style: italic; padding: 20px 0;' }, 'No Wi-Fi radios found'));
-						} else {
-							res.wifi_radios.forEach(function(wifi) {
-								wifiNode.appendChild(E('div', { class: 'hw-stat-row', style: 'background: rgba(128,128,128,0.05); padding: 12px 15px; border-radius: 6px; margin-bottom: 5px; display: flex; flex-direction: column; align-items: flex-start;' }, [
-									E('div', { style: 'font-weight: bold; margin-bottom: 8px; display: flex; justify-content: space-between; width: 100%; font-size: 1.1em;' }, [
-										E('span', { style: 'color: #b388ff;' }, wifi.iface.toUpperCase() + ' (' + wifi.band + ')'),
-										E('span', { style: 'color: #00e676; font-size: 0.85em;' }, wifi.bitrate)
-									]),
-									E('div', { style: 'display: flex; justify-content: space-between; width: 100%; opacity: 0.8; font-size: 0.9em;' }, [
-										E('span', {}, 'Tx: ' + wifi.txpower),
-										E('span', {}, 'Noise: ' + wifi.noise),
-										E('span', {}, 'Ch: ' + wifi.channel)
-									])
-								]));
-							});
-						}
-					}
-				}
-
-				}
-
-
+				// USB Devices and Wi-Fi PHY Status logic removed as requested.
 
 			});
 		}, 1);
