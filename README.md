@@ -12,9 +12,7 @@ While this dashboard works on any modern OpenWrt build, it is highly optimized f
 - **JIDU6J11**
 - **JIDU6700**
 
-> [!WARNING]
-> **UART Hardware Weakness:** As detailed in the JIDU6700 flashing guide, there is a known hardware weakness during serial UART flashing. **DO NOT CONNECT VCC** when attaching your USB to TTL adapter. Doing so will permanently damage your board! Furthermore, you must bypass the U-Boot signature verification during initial flashing.
-> 
+> [!WARNING] 
 > **Wireless Chip Temperatures:** Temperature readings for the Wi-Fi chips on the **JioRouter JIDU6700** are currently *non-functional*. This is because the necessary calibration values and chip-specific tunings are entirely missing from the device's *Factory* partition.
 
 ## 🚀 Features
