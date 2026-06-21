@@ -488,6 +488,60 @@ EOF
 					esac
 				done < /proc/net/dev
 
+				USB_DEVS="["
+				FIRST_USB=1
+				for usb in /sys/bus/usb/devices/*; do
+					if [ -f "$usb/speed" ] && [ -f "$usb/idVendor" ]; then
+						product=$(cat "$usb/product" 2>/dev/null || echo "Unknown Device")
+						manufacturer=$(cat "$usb/manufacturer" 2>/dev/null || echo "")
+						speed=$(cat "$usb/speed" 2>/dev/null || echo "Unknown")
+						version=$(cat "$usb/version" 2>/dev/null || echo "")
+						
+						if [ -n "$manufacturer" ]; then
+							name="$manufacturer $product"
+						else
+							name="$product"
+						fi
+						# Escape quotes
+						name=$(echo "$name" | sed 's/"/\\"/g')
+						
+						if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
+						USB_DEVS="$USB_DEVS{\"name\":\"$name\",\"speed\":\"$speed\",\"version\":\"$version\"}"
+						FIRST_USB=0
+					fi
+				done
+				USB_DEVS="$USB_DEVS]"
+
+				WIFI_RADIOS="["
+				FIRST_WIFI=1
+				if command -v iwinfo >/dev/null; then
+					for iface in $(iwinfo | awk '/^[a-zA-Z0-9_-]+/ {print $1}'); do
+						info=$(iwinfo "$iface" info 2>/dev/null)
+						
+						txpower=$(echo "$info" | awk -F'Tx-Power: ' '/Tx-Power:/ {print $2}' | awk '{print $1" "$2}')
+						[ -z "$txpower" ] && txpower="Unknown"
+						
+						noise=$(echo "$info" | awk -F'Noise: ' '/Noise:/ {print $2}' | awk '{print $1" "$2}')
+						[ -z "$noise" ] || [ "$noise" = "unknown" ] && noise="Unknown"
+						
+						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
+						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
+						
+						channel=$(echo "$info" | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
+						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
+						
+						hwmode=$(echo "$info" | awk -F'Mode: ' '/Mode:/ {print $2}' | awk '{print $1}')
+						band="2.4GHz"
+						if echo "$info" | grep -q "5 GHz"; then band="5GHz"; fi
+						if echo "$info" | grep -q "6 GHz"; then band="6GHz"; fi
+						
+						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\",\"hwmode\":\"$hwmode\",\"band\":\"$band\"}"
+						FIRST_WIFI=0
+					done
+				fi
+				WIFI_RADIOS="$WIFI_RADIOS]"
+
 
 				
 

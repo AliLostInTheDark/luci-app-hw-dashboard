@@ -115,6 +115,18 @@ return view.extend({
 		container.appendChild(dskCard.node);
 		container.appendChild(advCard);
 		container.appendChild(thermCard);
+		var usbCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
+			E('h3', {}, 'USB Devices'),
+			E('div', { id: 'hw-usb-devs', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })
+		]);
+		container.appendChild(usbCard);
+
+		var wifiCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start;' }, [
+			E('h3', {}, 'Wi-Fi PHY Status'),
+			E('div', { id: 'hw-wifi-radios', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })
+		]);
+		container.appendChild(wifiCard);
+
 
 		var self = this;
 
@@ -717,6 +729,56 @@ return view.extend({
 							});
 						}
 					}
+
+				if (res.usb_devs && Array.isArray(res.usb_devs)) {
+					var usbNode = document.getElementById('hw-usb-devs');
+					if (usbNode) {
+						usbNode.innerHTML = '';
+						if (res.usb_devs.length === 0) {
+							usbNode.appendChild(E('div', { style: 'text-align: center; opacity: 0.5; font-style: italic; padding: 20px 0;' }, 'No USB devices connected'));
+						} else {
+							res.usb_devs.forEach(function(usb) {
+								var speedText = usb.speed + ' Mbps';
+								if (usb.speed === '480') speedText = 'USB 2.0 (480 Mbps)';
+								if (usb.speed === '5000') speedText = 'USB 3.0 (5 Gbps)';
+								if (usb.speed === '10000') speedText = 'USB 3.1 (10 Gbps)';
+								if (usb.speed === '1.5' || usb.speed === '12') speedText = 'USB 1.1 (' + usb.speed + ' Mbps)';
+								
+								usbNode.appendChild(E('div', { class: 'hw-stat-row', style: 'background: rgba(128,128,128,0.05); padding: 10px 15px; border-radius: 6px; margin-bottom: 5px; display: flex; flex-direction: column; align-items: flex-start;' }, [
+									E('div', { style: 'font-weight: bold; display: flex; justify-content: space-between; width: 100%;' }, [
+										E('span', {}, usb.name),
+										E('span', { style: 'color: #00b0ff; font-size: 0.9em; font-weight: normal;' }, speedText)
+									])
+								]));
+							});
+						}
+					}
+				}
+
+				if (res.wifi_radios && Array.isArray(res.wifi_radios)) {
+					var wifiNode = document.getElementById('hw-wifi-radios');
+					if (wifiNode) {
+						wifiNode.innerHTML = '';
+						if (res.wifi_radios.length === 0) {
+							wifiNode.appendChild(E('div', { style: 'text-align: center; opacity: 0.5; font-style: italic; padding: 20px 0;' }, 'No Wi-Fi radios found'));
+						} else {
+							res.wifi_radios.forEach(function(wifi) {
+								wifiNode.appendChild(E('div', { class: 'hw-stat-row', style: 'background: rgba(128,128,128,0.05); padding: 12px 15px; border-radius: 6px; margin-bottom: 5px; display: flex; flex-direction: column; align-items: flex-start;' }, [
+									E('div', { style: 'font-weight: bold; margin-bottom: 8px; display: flex; justify-content: space-between; width: 100%; font-size: 1.1em;' }, [
+										E('span', { style: 'color: #b388ff;' }, wifi.iface.toUpperCase() + ' (' + wifi.band + ')'),
+										E('span', { style: 'color: #00e676; font-size: 0.85em;' }, wifi.bitrate)
+									]),
+									E('div', { style: 'display: flex; justify-content: space-between; width: 100%; opacity: 0.8; font-size: 0.9em;' }, [
+										E('span', {}, 'Tx: ' + wifi.txpower),
+										E('span', {}, 'Noise: ' + wifi.noise),
+										E('span', {}, 'Ch: ' + wifi.channel)
+									])
+								]));
+							});
+						}
+					}
+				}
+
 				}
 
 
