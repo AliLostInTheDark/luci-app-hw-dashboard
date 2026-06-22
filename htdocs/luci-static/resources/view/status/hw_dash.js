@@ -111,7 +111,16 @@ return view.extend({
                 } else {
                     var prev = currentGroup[currentGroup.length - 1];
                     var diff = ch - prev;
-                    if ((band.indexOf('2.4') !== -1 && diff <= 1) || (band.indexOf('2.4') === -1 && diff <= 4)) {
+                    var breakGroup = false;
+                    
+                    if (band.indexOf('2.4') !== -1 && diff > 1) breakGroup = true;
+                    if (band.indexOf('2.4') === -1 && diff > 4) breakGroup = true;
+                    if (prev <= 48 && ch >= 52) breakGroup = true;
+                    if (prev <= 64 && ch >= 100) breakGroup = true;
+                    if (prev <= 144 && ch >= 149) breakGroup = true;
+                    if (prev <= 165 && ch >= 169) breakGroup = true;
+                    
+                    if (!breakGroup) {
                         currentGroup.push(ch);
                     } else {
                         groups.push(currentGroup);
@@ -1376,12 +1385,14 @@ return view.extend({
                             
                             var suppChs = (w.channels && w.channels.length > 0) ? w.channels.split(',') : (bCap ? bCap.enabled : []);
                             
+                            var cleanHw = w.hardware ? w.hardware.replace(/^.*\[/, '').replace(/\]$/, '') : '';
+                            
                             wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
                                     E('span', { style: 'color:#00e676; font-size: 0.9em;' }, 'Ch: ' + w.channel)
                                 ]),
-                                w.hardware && w.hardware !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, w.hardware) : '',
+                                cleanHw && cleanHw !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, cleanHw) : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
                                 w.hwmode ? E('div', { class: 'hw-wifi-detail' }, 'Max Theoretical Bitrate: ' + calcMaxBitrate(w.hwmode, maxCw, maxSp) + ' (' + maxSp + 'x' + maxSp + ' MIMO)') : '',
                                 w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + w.channel) : '',

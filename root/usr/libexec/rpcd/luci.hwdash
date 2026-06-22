@@ -648,7 +648,7 @@ EOF
 						[ -z "$phyname" ] && phyname=$(iw dev "$iface" info 2>/dev/null | grep wiphy | awk '{print "phy"$2}')
 						[ -z "$phyname" ] && phyname="Unknown"
 
-						channel=$(iwinfo "$iface" info 2>/dev/null | grep "Channel:" | awk '{print $2}')
+						channel=$(iwinfo "$iface" info 2>/dev/null | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
 						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
 
 						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
