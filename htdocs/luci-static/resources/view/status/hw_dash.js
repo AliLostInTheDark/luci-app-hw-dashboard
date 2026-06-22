@@ -305,7 +305,7 @@ return view.extend({
                                 }, 'Load Average'), E('span', {
                                     class: 'hw-stat-value'
                                 }, (res.cpu_meta.load_1 || '0') + ', ' + (res.cpu_meta.load_5 || '0') + ', ' + (res.cpu_meta.load_15 || '0'))]));
-                                if (res.cpu_meta.governor) {
+                                if (res.cpu_meta.governor && res.cpu_meta.governor.trim() !== '' && res.cpu_meta.governor !== 'null') {
                                     metaNode.appendChild(E('div', {
                                         class: 'hw-stat-row'
                                     }, [E('span', {
@@ -1206,13 +1206,34 @@ return view.extend({
                                 var speeds = validUsbControllers.map(function(u){ return parseInt(u.speed) || 0; });
                                 var maxSpeed = Math.max.apply(null, speeds);
                                 var minSpeed = Math.min.apply(null, speeds);
-                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
+                                var hwPortStr = '';
+                                if (res.model && (res.model.indexOf('JIDU6J01') > -1 || /JIDU6[0-9]01/.test(res.model))) {
+                                    hwPortStr = 'USB 2.0 (Physical Port)';
+                                } else if (res.model && (res.model.indexOf('JIDU6J11') > -1 || /JIDU6[0-9]11/.test(res.model))) {
+                                    hwPortStr = 'USB 3.0 (Physical Port)';
+                                } else if (maxSpeed >= 10000) {
+                                    hwPortStr = 'USB 3.1 / 3.2 Capable (Physical Port)';
+                                } else if (maxSpeed >= 5000) {
+                                    hwPortStr = 'USB 3.0 Capable (Physical Port)';
+                                } else if (maxSpeed >= 480) {
+                                    hwPortStr = 'USB 2.0 Capable (Physical Port)';
+                                } else if (maxSpeed > 0) {
+                                    hwPortStr = 'USB 1.1 Capable (Physical Port)';
+                                }
+                                var usbHostRows = [
                                     E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, 'USB Host Controllers'),
                                     E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
                                         E('span', {}, 'Bus Speeds:'),
                                         E('span', { style: 'color:#00e676;' }, 'Max: ' + maxSpeed + ' Mbps | Min: ' + minSpeed + ' Mbps')
                                     ])
-                                ]));
+                                ];
+                                if (hwPortStr) {
+                                    usbHostRows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 4px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 4px;' }, [
+                                        E('span', {}, 'Hardware Port:'),
+                                        E('span', { style: 'color:#ffea00;' }, hwPortStr)
+                                    ]));
+                                }
+                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, usbHostRows));
                             }
                             validUsbDevices.forEach(function(u) {
                                 var isSlow = u.speed === '480' || u.speed === '12' || u.speed === '1.5';
@@ -1267,7 +1288,7 @@ return view.extend({
             }).catch(function(err) {
                 console.error(err);
             });
-        });
+        }, 3);
 
         return container;
     },

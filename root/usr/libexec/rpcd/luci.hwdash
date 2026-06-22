@@ -86,7 +86,7 @@ case "$1" in
 				while [ -d "/sys/devices/system/cpu/cpu$i" ]; do
 					c="/sys/devices/system/cpu/cpu$i"
 					if [ -f "$c/cpufreq/scaling_cur_freq" ]; then
-						FREQ=$(cat "$c/cpufreq/scaling_cur_freq")
+						read_file FREQ "$c/cpufreq/scaling_cur_freq" "null"
 					else
 						FREQ="null"
 					fi
@@ -98,29 +98,31 @@ case "$1" in
 				CPU_FREQS="$CPU_FREQS]"
 
 
-				MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-				MEM_FREE=$(grep MemFree /proc/meminfo | awk '{print $2}')
-				MEM_AVAIL=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-				MEM_BUFF=$(grep Buffers /proc/meminfo | awk '{print $2}')
-				MEM_CACH=$(grep ^Cached /proc/meminfo | awk '{print $2}')
-				SWAP_TOTAL=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
-				SWAP_FREE=$(grep SwapFree /proc/meminfo | awk '{print $2}')
-
-				[ -z "$MEM_TOTAL" ] && MEM_TOTAL=0
-				[ -z "$MEM_FREE" ] && MEM_FREE=0
-				[ -z "$MEM_AVAIL" ] && MEM_AVAIL=0
-				[ -z "$MEM_BUFF" ] && MEM_BUFF=0
-				[ -z "$MEM_CACH" ] && MEM_CACH=0
-				[ -z "$SWAP_TOTAL" ] && SWAP_TOTAL=0
-				[ -z "$SWAP_FREE" ] && SWAP_FREE=0
+				MEM_TOTAL=0; MEM_FREE=0; MEM_AVAIL=0; MEM_BUFF=0; MEM_CACH=0; SWAP_TOTAL=0; SWAP_FREE=0; MEM_SLAB=0; MEM_PAGETABLES=0
+				while read -r key val _; do
+					case "$key" in
+						MemTotal:) MEM_TOTAL=$val ;;
+						MemFree:) MEM_FREE=$val ;;
+						MemAvailable:) MEM_AVAIL=$val ;;
+						Buffers:) MEM_BUFF=$val ;;
+						Cached:) MEM_CACH=$val ;;
+						SwapTotal:) SWAP_TOTAL=$val ;;
+						SwapFree:) SWAP_FREE=$val ;;
+						Slab:) MEM_SLAB=$val ;;
+						PageTables:) MEM_PAGETABLES=$val ;;
+					esac
+				done < /proc/meminfo
 
 				ZRAM_TOTAL=0
 				ZRAM_USED=0
 				ZRAM_ORIG=0
 				if [ -f /sys/block/zram0/disksize ]; then
-					ZRAM_TOTAL=$(( $(cat /sys/block/zram0/disksize 2>/dev/null || echo 0) / 1024 ))
-					ZRAM_USED=$(( $(cat /sys/block/zram0/compr_data_size 2>/dev/null || echo 0) / 1024 ))
-					ZRAM_ORIG=$(( $(cat /sys/block/zram0/orig_data_size 2>/dev/null || echo 0) / 1024 ))
+					read_file zsize /sys/block/zram0/disksize 0
+					read_file zused /sys/block/zram0/compr_data_size 0
+					read_file zorig /sys/block/zram0/orig_data_size 0
+					ZRAM_TOTAL=$(( zsize / 1024 ))
+					ZRAM_USED=$(( zused / 1024 ))
+					ZRAM_ORIG=$(( zorig / 1024 ))
 				fi
 
 				get_disk_meta() {
@@ -331,8 +333,8 @@ EOF
 				SEEN_TYPES=" "
 				for t in /sys/class/thermal/thermal_zone*; do
 					if [ -f "$t/type" ] && [ -f "$t/temp" ]; then
-						TYPE=$(cat "$t/type")
-						TEMP=$(cat "$t/temp")
+						read_file TYPE "$t/type" "Unknown"
+						read_file TEMP "$t/temp" "0"
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
 						for trip in "$t"/trip_point_*_type; do
@@ -413,25 +415,18 @@ EOF
 				MAX_FREQ_KHZ=$(cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq 2>/dev/null | sort -nr | head -n 1)
 				[ -z "$MAX_FREQ_KHZ" ] && MAX_FREQ_KHZ=0
 				
-				LOAD_AVG=$(cat /proc/loadavg 2>/dev/null)
-				LOAD_1=$(echo "$LOAD_AVG" | awk '{print $1}')
-				LOAD_5=$(echo "$LOAD_AVG" | awk '{print $2}')
-				LOAD_15=$(echo "$LOAD_AVG" | awk '{print $3}')
-				TASKS=$(echo "$LOAD_AVG" | awk '{print $4}')
+				read -r LOAD_1 LOAD_5 LOAD_15 TASKS _ < /proc/loadavg
 				[ -z "$TASKS" ] && TASKS="0/0"
 
 
-				UPTIME=$(cut -d. -f1 /proc/uptime)
+				read -r UPTIME _ < /proc/uptime 2>/dev/null; UPTIME=${UPTIME%%.*}
 				
 
-				CPU_GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
-				[ -z "$CPU_GOV" ] && CPU_GOV="unknown"
+				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
 
 
-				CONN_COUNT=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-				CONN_MAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
-				[ -z "$CONN_COUNT" ] && CONN_COUNT=0
-				[ -z "$CONN_MAX" ] && CONN_MAX=0
+				read_file CONN_COUNT /proc/sys/net/netfilter/nf_conntrack_count 0
+				read_file CONN_MAX /proc/sys/net/netfilter/nf_conntrack_max 0
 				CTXT=$(awk '/^ctxt/ {print $2}' /proc/stat 2>/dev/null)
 				[ -z "$CTXT" ] && CTXT=0
 				INTR=$(awk '/^intr/ {print $2}' /proc/stat 2>/dev/null)
@@ -469,10 +464,10 @@ EOF
 					case "$line" in
 						*:) ;;
 						*)
-							rx=$(echo "$line" | awk -F: '{print $2}' | awk '{print $1}')
-							tx=$(echo "$line" | awk -F: '{print $2}' | awk '{print $9}')
-							RX_TOTAL=$((RX_TOTAL + rx))
-							TX_TOTAL=$((TX_TOTAL + tx))
+							rest="${line#*:}"
+							set -- $rest
+							RX_TOTAL=$((RX_TOTAL + ${1:-0}))
+							TX_TOTAL=$((TX_TOTAL + ${9:-0}))
 							;;
 					esac
 				done < /proc/net/dev
@@ -655,13 +650,11 @@ EOF
 				WIFI_RADIOS="$WIFI_RADIOS]"
 				
 
-				MEM_SLAB=$(grep '^Slab:' /proc/meminfo | awk '{print $2}')
-				[ -z "$MEM_SLAB" ] && MEM_SLAB=0
-				MEM_PAGETABLES=$(grep '^PageTables:' /proc/meminfo | awk '{print $2}')
-				[ -z "$MEM_PAGETABLES" ] && MEM_PAGETABLES=0
 
-				CPU_TICKS=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8+$9+$10+$11}' /proc/stat 2>/dev/null)
-				[ -z "$CPU_TICKS" ] && CPU_TICKS=0
+				CPU_TICKS=0
+				while read -r n u ni s i iw ir sir st _; do
+					if [ "$n" = "cpu" ]; then CPU_TICKS=$((u+ni+s+i+iw+ir+sir+st)); break; fi
+				done < /proc/stat
 
 				UBI_MAX_EC=0
 				UBI_BAD_PEB=0

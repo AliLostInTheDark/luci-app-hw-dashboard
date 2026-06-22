@@ -1,17 +1,18 @@
 include $(TOPDIR)/rules.mk
 
+PKG_NAME:=luci-app-hw-dashboard
 LUCI_TITLE:=Hardware Dashboard
 LUCI_DEPENDS:=+luci-base
 LUCI_PKGARCH:=all
 PKG_VERSION:=1.0
-PKG_RELEASE:=2
+PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature
 
-define Package/luci-app-hardware-dashboard/postinst
+define Package/luci-app-hw-dashboard/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
 	rm -f /tmp/luci-indexcache.*
