@@ -20,6 +20,10 @@ case "$1" in
 	call)
 		case "$2" in
 			info)
+				if [ ! -f /tmp/hwdash_wifi_cap_cache.json ] && command -v iw >/dev/null; then
+					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache.json 2>/dev/null
+				fi
+
 				BOARD_DETECT=$(cat /tmp/sysinfo/model 2>/dev/null)
 				[ -z "$BOARD_DETECT" ] && BOARD_DETECT=$(ubus call system board | jsonfilter -e '@.model' 2>/dev/null)
 
@@ -636,8 +640,20 @@ EOF
 							band="Unknown"
 						fi
 
+						phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
+						[ -z "$phyname" ] && phyname="Unknown"
+
+						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
+						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
+
+						phycap="{}"
+						if [ -f /tmp/hwdash_wifi_cap_cache.json ] && [ "$phyname" != "Unknown" ]; then
+							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache.json -e "@.$phyname" 2>/dev/null)
+							[ -n "$phycap_str" ] && phycap="$phycap_str"
+						fi
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\"}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
 						FIRST_WIFI=0
 					done
 				fi

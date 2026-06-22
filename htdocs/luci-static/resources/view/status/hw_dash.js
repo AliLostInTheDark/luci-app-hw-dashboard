@@ -99,6 +99,49 @@ return view.extend({
                 circ: circumference
             };
         };
+        var groupChannels = function(band, channels) {
+            if (!channels || channels.length === 0) return '';
+            var groups = [];
+            var currentGroup = [];
+            for (var i = 0; i < channels.length; i++) {
+                var ch = channels[i];
+                if (currentGroup.length === 0) {
+                    currentGroup.push(ch);
+                } else {
+                    var prev = currentGroup[currentGroup.length - 1];
+                    var diff = ch - prev;
+                    if ((band.indexOf('2.4') !== -1 && diff <= 1) || (band.indexOf('2.4') === -1 && diff <= 4)) {
+                        currentGroup.push(ch);
+                    } else {
+                        groups.push(currentGroup);
+                        currentGroup = [ch];
+                    }
+                }
+            }
+            if (currentGroup.length > 0) groups.push(currentGroup);
+            
+            var strGroups = groups.map(function(g) {
+                if (g.length === 1) return g[0].toString();
+                var start = g[0];
+                var end = g[g.length - 1];
+                var label = '';
+                if (band.indexOf('5') !== -1) {
+                    if (start >= 36 && end <= 48) label = 'UNII-1';
+                    else if (start >= 52 && end <= 64) label = 'UNII-2A';
+                    else if (start >= 100 && end <= 144) label = 'UNII-2C';
+                    else if (start >= 149 && end <= 165) label = 'UNII-3';
+                    else if (start >= 169 && end <= 177) label = 'UNII-4';
+                } else if (band.indexOf('6') !== -1) {
+                    if (start >= 1 && end <= 93) label = 'UNII-5';
+                    else if (start >= 97 && end <= 113) label = 'UNII-6';
+                    else if (start >= 117 && end <= 185) label = 'UNII-7';
+                    else if (start >= 189 && end <= 233) label = 'UNII-8';
+                }
+                return (label ? label + ' (' + start + '-' + end + ')' : start + '-' + end);
+            });
+            return strGroups.join(', ');
+        };
+
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
         var dskCard = createDial('dsk', 'STORAGE');
@@ -1265,8 +1308,13 @@ return view.extend({
                                 ]),
                                 w.hardware && w.hardware !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, w.hardware) : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
-                                w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Channel: ' + w.channel) : '',
-                                w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : ''
+                                w.bitrate && w.bitrate !== 'Unknown' && w.bitrate !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Current Bitrate: ' + w.bitrate + (w.phycap && w.phycap.max_spatial ? ' (' + w.phycap.max_spatial + 'x' + w.phycap.max_spatial + ' MIMO)' : '')) : '',
+                                w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + w.channel) : '',
+                                w.phycap && w.phycap.max_cw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + w.phycap.max_cw) : '',
+                                w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
+                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled && w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled)) : '',
+                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled && w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled.join(', ')) : '',
+                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions && w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions.join(', ')) : ''
                             ]));
                         });
                     }
