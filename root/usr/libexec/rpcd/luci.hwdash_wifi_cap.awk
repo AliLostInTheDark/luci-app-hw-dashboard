@@ -10,10 +10,10 @@ BEGIN {
     max_spatial = 1
     band = ""
 }
-/Band 1:/ { band="2.4GHz"; bands[band]=1 }
-/Band 2:/ { band="5GHz"; bands[band]=1 }
-/Band 3:/ { band="6GHz"; bands[band]=1 }
-/Band 4:/ { band="60GHz"; bands[band]=1 }
+/Band 1:/ || /Band 2\.4/ { band="2.4GHz"; bands[band]=1 }
+/Band 2:/ || /Band 5/ { band="5GHz"; bands[band]=1 }
+/Band 3:/ || /Band 6/ { band="6GHz"; bands[band]=1 }
+/Band 4:/ || /Band 60/ { band="60GHz"; bands[band]=1 }
 /Frequencies:/ { in_freq=1; next }
 /^[ \t]*\*/ && in_freq {
     match($0, /\[([0-9]+)\]/, arr)

@@ -142,6 +142,36 @@ return view.extend({
             return strGroups.join(', ');
         };
 
+        var calcMaxBitrate = function(hwmode, max_cw, max_spatial) {
+            if (!hwmode || !max_cw || !max_spatial) return null;
+            var mode = hwmode.toLowerCase();
+            var cw = parseInt(max_cw.replace(/[^0-9]/g, '')) || 20;
+            var streams = parseInt(max_spatial) || 1;
+            
+            var ratePerStream = 54;
+            if (mode.indexOf('be') !== -1) {
+                if (cw >= 320) ratePerStream = 2882;
+                else if (cw >= 160) ratePerStream = 1441;
+                else if (cw >= 80) ratePerStream = 688;
+                else if (cw >= 40) ratePerStream = 344;
+                else ratePerStream = 137;
+            } else if (mode.indexOf('ax') !== -1) {
+                if (cw >= 160) ratePerStream = 1201;
+                else if (cw >= 80) ratePerStream = 600;
+                else if (cw >= 40) ratePerStream = 287;
+                else ratePerStream = 143;
+            } else if (mode.indexOf('ac') !== -1) {
+                if (cw >= 160) ratePerStream = 867;
+                else if (cw >= 80) ratePerStream = 433;
+                else if (cw >= 40) ratePerStream = 200;
+                else ratePerStream = 86;
+            } else if (mode.indexOf('n') !== -1) {
+                if (cw >= 40) ratePerStream = 150;
+                else ratePerStream = 72;
+            }
+            return (ratePerStream * streams) + ' Mbps';
+        };
+
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
         var dskCard = createDial('dsk', 'STORAGE');
@@ -1308,7 +1338,7 @@ return view.extend({
                                 ]),
                                 w.hardware && w.hardware !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, w.hardware) : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
-                                w.bitrate && w.bitrate !== 'Unknown' && w.bitrate !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Current Bitrate: ' + w.bitrate + (w.phycap && w.phycap.max_spatial ? ' (' + w.phycap.max_spatial + 'x' + w.phycap.max_spatial + ' MIMO)' : '')) : '',
+                                w.phycap && w.phycap.max_spatial && w.hwmode ? E('div', { class: 'hw-wifi-detail' }, 'Max Theoretical Bitrate: ' + calcMaxBitrate(w.hwmode, w.phycap.max_cw, w.phycap.max_spatial) + ' (' + w.phycap.max_spatial + 'x' + w.phycap.max_spatial + ' MIMO)') : '',
                                 w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + w.channel) : '',
                                 w.phycap && w.phycap.max_cw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + w.phycap.max_cw) : '',
                                 w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
