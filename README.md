@@ -36,4 +36,8 @@ git clone https://github.com/AliLostInTheDark/luci-app-hw-dashboard.git package/
 Run `make menuconfig`, navigate to **LuCI -> Applications**, select `luci-app-hardware-dashboard`, and compile your firmware!
 
 ## Screenshots
-*(Coming soon)*
+<img width="1311" height="987" alt="CPU-Memory-Storage" src="https://github.com/user-attachments/assets/356c9a00-58f5-4e4b-a8c6-6dcd9fa3a6e4" />
+<img width="1320" height="879" alt="CPU_Detailed-External_USB-ETH_TOP" src="https://github.com/user-attachments/assets/8ddb6d8e-4244-4138-8b34-79cb96656b70" />
+<img width="1308" height="610" alt="PCIe_USB-WiFi" src="https://github.com/user-attachments/assets/44811d0f-0ab4-45e4-99a6-4c20c4813378" />
+<img width="1312" height="809" alt="Thermal_Sensors" src="https://github.com/user-attachments/assets/d1f41f3e-9ce8-457f-8ef8-f5fbdfac7874" />
+
