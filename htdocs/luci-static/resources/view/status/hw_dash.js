@@ -391,9 +391,7 @@ return view.extend({
                                 style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;')
                             }, val)])]));
                         };
-                        if (res.cpu_meta && res.cpu_meta.governor && res.cpu_meta.governor.toLowerCase() !== 'unknown') {
-                            addAdvRowText('CPU Governor', res.cpu_meta.governor, null);
-                        }
+
                         if (res.cpu_meta && res.cpu_meta.tasks) {
                             addAdvRowText('System Tasks', res.cpu_meta.tasks, null);
                             var ctxt = res.cpu_meta.ctxt || 0;
