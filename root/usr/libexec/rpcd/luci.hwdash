@@ -20,8 +20,8 @@ case "$1" in
 	call)
 		case "$2" in
 			info)
-				if [ ! -f /tmp/hwdash_wifi_cap_cache.json ] && command -v iw >/dev/null; then
-					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache.json 2>/dev/null
+				if [ ! -f /tmp/hwdash_wifi_cap_cache_v2.json ] && command -v iw >/dev/null; then
+					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache_v2.json 2>/dev/null
 				fi
 
 				BOARD_DETECT=$(cat /tmp/sysinfo/model 2>/dev/null)
@@ -647,8 +647,8 @@ EOF
 						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
 
 						phycap="{}"
-						if [ -f /tmp/hwdash_wifi_cap_cache.json ] && [ "$phyname" != "Unknown" ]; then
-							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache.json -e "@.$phyname" 2>/dev/null)
+						if [ -f /tmp/hwdash_wifi_cap_cache_v2.json ] && [ "$phyname" != "Unknown" ]; then
+							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache_v2.json -e "@.$phyname" 2>/dev/null)
 							[ -n "$phycap_str" ] && phycap="$phycap_str"
 						fi
 
