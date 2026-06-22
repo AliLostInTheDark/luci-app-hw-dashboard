@@ -613,15 +613,14 @@ EOF
 				if command -v iwinfo >/dev/null; then
 					for iface in $(iwinfo | awk '/^[a-zA-Z0-9_-]+/ {print $1}'); do
 						info=$(iwinfo "$iface" info 2>/dev/null)
-						
 						txpower=$(echo "$info" | awk -F'Tx-Power: ' '/Tx-Power:/ {print $2}' | awk '{print $1" "$2}')
 						[ -z "$txpower" ] && txpower="Unknown"
 						
-						noise=$(echo "$info" | awk -F'Noise: ' '/Noise:/ {print $2}' | awk '{print $1" "$2}')
-						[ -z "$noise" ] || [ "$noise" = "unknown" ] && noise="Unknown"
+						hwmode=$(echo "$info" | awk -F'HW Mode\\(s\\): ' '/HW Mode\(s\):/ {print $2}')
+						[ -z "$hwmode" ] && hwmode="Unknown"
 						
-						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
-						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
+						hardware=$(echo "$info" | awk -F'Hardware: ' '/Hardware:/ {print $2}' | sed 's/.*\[\(.*\)\].*/\1/')
+						[ -z "$hardware" ] && hardware="Unknown"
 						
 						channel=$(echo "$info" | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
 						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
@@ -637,14 +636,8 @@ EOF
 							band="Unknown"
 						fi
 
-						clients="Unknown"
-						assoc=$(iwinfo "$iface" assoclist 2>/dev/null)
-						if [ -n "$assoc" ]; then
-							clients=$(echo "$assoc" | grep -c "SNR")
-						fi
-
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"noise\":\"$noise\",\"bitrate\":\"$bitrate\",\"channel\":\"$channel\",\"clients\":\"$clients\"}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\"}"
 						FIRST_WIFI=0
 					done
 				fi

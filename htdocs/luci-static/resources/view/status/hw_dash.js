@@ -1263,11 +1263,10 @@ return view.extend({
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
                                     E('span', { style: 'color:#00e676; font-size: 0.9em;' }, 'Ch: ' + w.channel)
                                 ]),
-                                w.ssid && w.ssid !== 'unknown' ? E('div', { class: 'hw-wifi-ssid' }, w.ssid) : '',
+                                w.hardware && w.hardware !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, w.hardware) : '',
+                                w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
                                 w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Channel: ' + w.channel) : '',
-                                w.bitrate && w.bitrate !== 'unknown' && w.bitrate !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Bitrate: ' + w.bitrate) : '',
-                                w.signal && w.signal !== 'unknown' && w.signal !== 'Unknown' && w.signal !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Signal: ' + w.signal + ' dBm (Noise: ' + (w.noise || 'N/A') + ' dBm)') : '',
-                                w.clients !== 'Unknown' && w.clients !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Clients: ' + w.clients) : ''
+                                w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : ''
                             ]));
                         });
                     }
