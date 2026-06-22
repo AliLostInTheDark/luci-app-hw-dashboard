@@ -150,7 +150,7 @@ return view.extend({
         
         
         var thermCard = E('div', {
-            class: 'hw-card wide'
+            class: 'hw-card wide', style: 'display: none;'
         }, [E('h3', {}, 'Thermal Sensors'), E('div', {
             class: 'hw-thermals-container'
         }, [E('div', {
@@ -1026,7 +1026,8 @@ return view.extend({
                         }
                     }
                 }
-                if (res.thermals) {
+                if (res.thermals && res.thermals.length > 0) {
+                    thermCard.style.display = 'flex';
                     if (res.model) {
                         var title = res.model;
                         if (title.length > 30) title = title.substring(0, 30);
@@ -1126,6 +1127,8 @@ return view.extend({
                         if (miscColNode) miscColNode.style.display = 'block';
                         if (miscDivNode) miscDivNode.style.display = 'block';
                     }
+                } else {
+                    thermCard.style.display = 'none';
                 }
                                 if (res.eth_links && res.eth_links.length > 0) {
                     ethCard.style.display = 'flex';
@@ -1165,14 +1168,27 @@ return view.extend({
                     ethCard.style.display = 'none';
                 }
 
-                if ((res.pcie_devs && res.pcie_devs.length > 0) || (res.usb_devs && res.usb_devs.length > 0)) {
+                var validPcie = [];
+                if (res.pcie_devs) {
+                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
+                }
+                var validUsbControllers = [];
+                var validUsbDevices = [];
+                var hasUsb = false;
+                if (res.usb_devs) {
+                    validUsbControllers = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')>-1 || n.indexOf('linux')>-1 || n.indexOf('root hub')>-1; });
+                    validUsbDevices = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('linux')===-1 && n.indexOf('root hub')===-1; });
+                    if (validUsbControllers.length > 0 || validUsbDevices.length > 0) hasUsb = true;
+                }
+
+                if (validPcie.length > 0 || hasUsb) {
                     pcieUsbCard.style.display = 'flex';
                     var puNode = document.getElementById('hw-pcie-usb');
                     if (puNode) {
                         puNode.innerHTML = '';
-                        if (res.pcie_devs && res.pcie_devs.length > 0) {
+                        if (validPcie.length > 0) {
                             puNode.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'PCI-e Bus'));
-                            res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; }).forEach(function(p) {
+                            validPcie.forEach(function(p) {
                                 var speedStr = p.speed + ' ' + p.width;
                                 if (p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
@@ -1184,12 +1200,10 @@ return view.extend({
                                 ]));
                             });
                         }
-                        if (res.usb_devs && res.usb_devs.length > 0) {
-                            puNode.appendChild(E('h4', { style: 'margin: 8px 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'USB Bus'));
-                            var controllers = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')>-1 || n.indexOf('linux')>-1 || n.indexOf('root hub')>-1; });
-                            var devices = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('linux')===-1 && n.indexOf('root hub')===-1; });
-                            if (controllers.length > 0) {
-                                var speeds = controllers.map(function(u){ return parseInt(u.speed) || 0; });
+                        if (hasUsb) {
+                            puNode.appendChild(E('h4', { style: 'margin: ' + (validPcie.length > 0 ? '8px' : '0') + ' 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'USB Bus'));
+                            if (validUsbControllers.length > 0) {
+                                var speeds = validUsbControllers.map(function(u){ return parseInt(u.speed) || 0; });
                                 var maxSpeed = Math.max.apply(null, speeds);
                                 var minSpeed = Math.min.apply(null, speeds);
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
@@ -1200,7 +1214,7 @@ return view.extend({
                                     ])
                                 ]));
                             }
-                            devices.forEach(function(u) {
+                            validUsbDevices.forEach(function(u) {
                                 var isSlow = u.speed === '480' || u.speed === '12' || u.speed === '1.5';
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                     E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name),
