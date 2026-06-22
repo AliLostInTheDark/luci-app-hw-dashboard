@@ -1,6 +1,6 @@
 # LuCI Hardware Dashboard (Highly Optimized for JioRouter Devices)
 
-A beautiful, responsive, and dynamic hardware dashboard for OpenWrt LuCI, built completely from scratch using Vanilla CSS Flexbox. It replaces standard tables with stunning visual gauges, progress bars, and real-time updating columns.
+A beautiful, responsive, and fully dynamic hardware dashboard for OpenWrt LuCI, built completely from scratch using Vanilla CSS Flexbox. It replaces standard tables with stunning visual gauges, progress bars, and real-time updating columns.
 
 This hardware dashboard has been meticulously crafted and **highly optimized for JioRouter Devices**. It seamlessly adapts to both desktop and mobile views, delivering a premium "Glassmorphism" aesthetic without the overhead of heavy frameworks.
 
@@ -17,11 +17,13 @@ While this dashboard works on any modern OpenWrt build, it is highly optimized f
 
 ## Features
 
-- **Real-Time Polling Backend:** A lightweight RPCD C/shell backend (`luci.hwdash`) securely accesses device info using low-level `/sys` and `/proc` hooks.
-- **Dynamic External Storage Detection:** Instantly detects inserted USB storage devices—even unmounted ones or exFAT formatted drives—displaying them in separated columns with format and IOPS details.
-- **Thermal Sensors Grid:** Dynamically scales thermal outputs into responsive columns (CPU, Wi-Fi, Miscellaneous), adapting automatically to screen width and number of sensors.
-- **Micro-Animations:** Fluid CSS transitions on hover events and value updates.
-- **Custom RAM & Disk Dials:** Pure HTML/CSS SVG circular dials for an elegant visual representation of storage and memory usage.
+- **Real-Time CPU & Memory Tracking:** Instantly view active processor load across all cores, alongside highly detailed memory and swap utilization metrics via beautiful SVG dials.
+- **Dynamic Hardware Discovery:** The dashboard actively senses your hardware capabilities, intelligently rendering or hiding cards (like Thermal Sensors, PCI-e, and USB Busses) so you never see empty sections.
+- **PCI-e & USB Topology Maps:** Automatically maps connected PCI-e devices and USB hosts, comparing their current negotiated speeds against the maximum supported controller speeds.
+- **Ethernet Switch State:** Live, color-coded visual topology of your router's physical WAN and LAN ports, displaying current connection states, negotiated link speeds, and live RX/TX error rates.
+- **Wi-Fi PHY & Spectrum Analyzer:** Actively queries the Wi-Fi physical layer (PHY) to display active noise floors, TX power, client connection counts, and live bitrates across all wireless bands.
+- **Advanced Storage Metrics:** Instantly detects all internal and external (USB) storage partitions—even unmounted drives—reporting their exact format types and real-time Read/Write I/O speeds.
+- **Thermal Sensors Grid:** Dynamically scales thermal outputs into responsive columns (CPU, Wi-Fi, Miscellaneous) and intelligently flags temperatures approaching critical thresholds.
 
 ## Installation
 
