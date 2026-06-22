@@ -104,7 +104,8 @@ return view.extend({
             var groups = [];
             var currentGroup = [];
             for (var i = 0; i < channels.length; i++) {
-                var ch = channels[i];
+                var ch = parseInt(channels[i]);
+                if (isNaN(ch)) continue;
                 if (currentGroup.length === 0) {
                     currentGroup.push(ch);
                 } else {
@@ -142,10 +143,33 @@ return view.extend({
             return strGroups.join(', ');
         };
 
+        var guessMaxSpatial = function(hw, band) {
+            var s = (hw || '').toLowerCase();
+            if (s.indexOf('qca9984') !== -1 || s.indexOf('qca9884') !== -1) return 4;
+            if (s.indexOf('ipq95') !== -1 || s.indexOf('ipq807') !== -1) return 4;
+            if (s.indexOf('mt7986') !== -1) return 4;
+            if (s.indexOf('mt7981') !== -1) return 2;
+            if (s.indexOf('ax3000') !== -1 || s.indexOf('ax1800') !== -1) return 2;
+            if (s.indexOf('ax6000') !== -1) return 4;
+            return 2;
+        };
+
+        var guessMaxCw = function(hwmode, band) {
+            var m = (hwmode || '').toLowerCase();
+            if (band.indexOf('5') !== -1 || band.indexOf('6') !== -1) {
+                if (m.indexOf('be') !== -1) return 320;
+                if (m.indexOf('ax') !== -1 || m.indexOf('ac') !== -1) return 160;
+            }
+            if (band.indexOf('2.4') !== -1) {
+                if (m.indexOf('ax') !== -1 || m.indexOf('n') !== -1) return 40;
+            }
+            return 20;
+        };
+
         var calcMaxBitrate = function(hwmode, max_cw, max_spatial) {
             if (!hwmode || !max_cw || !max_spatial) return null;
             var mode = hwmode.toLowerCase();
-            var cw = parseInt(max_cw.replace(/[^0-9]/g, '')) || 20;
+            var cw = typeof max_cw === 'string' ? parseInt(max_cw.replace(/[^0-9]/g, '')) || 20 : max_cw;
             var streams = parseInt(max_spatial) || 1;
             
             var ratePerStream = 54;
@@ -1325,12 +1349,33 @@ return view.extend({
                     pcieUsbCard.style.display = 'none';
                 }
 
+                function guessMaxSpatial(hw, band) {
+                    var lHw = hw.toLowerCase();
+                    if (lHw.indexOf('ax') > -1 || lHw.indexOf('6') > -1) return 4;
+                    if (lHw.indexOf('ac') > -1) return 3;
+                    return 2;
+                }
+                function guessMaxCw(hwmode, band) {
+                    var lMode = hwmode.toLowerCase();
+                    if (lMode.indexOf('ax') > -1) return 160;
+                    if (lMode.indexOf('ac') > -1) return 80;
+                    return 40;
+                }
+
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
                     wifiCard.style.display = 'flex';
                     var wfNode = document.getElementById('hw-wifi-radios');
                     if (wfNode) {
                         wfNode.innerHTML = '';
                         res.wifi_radios.forEach(function(w) {
+                            var bKey = w.band.replace(' GHz', 'GHz');
+                            var bCap = (w.phycap && w.phycap.bands && w.phycap.bands[bKey]) ? w.phycap.bands[bKey] : null;
+                            
+                            var maxSp = (w.phycap && w.phycap.max_spatial && w.phycap.max_spatial > 1) ? w.phycap.max_spatial : guessMaxSpatial(w.hardware, w.band);
+                            var maxCw = (w.phycap && w.phycap.max_cw && parseInt(w.phycap.max_cw) > 20) ? w.phycap.max_cw : (guessMaxCw(w.hwmode, w.band) + ' MHz');
+                            
+                            var suppChs = (w.channels && w.channels.length > 0) ? w.channels.split(',') : (bCap ? bCap.enabled : []);
+                            
                             wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
@@ -1338,13 +1383,13 @@ return view.extend({
                                 ]),
                                 w.hardware && w.hardware !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, w.hardware) : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
-                                w.phycap && w.phycap.max_spatial && w.hwmode ? E('div', { class: 'hw-wifi-detail' }, 'Max Theoretical Bitrate: ' + calcMaxBitrate(w.hwmode, w.phycap.max_cw, w.phycap.max_spatial) + ' (' + w.phycap.max_spatial + 'x' + w.phycap.max_spatial + ' MIMO)') : '',
+                                w.hwmode ? E('div', { class: 'hw-wifi-detail' }, 'Max Theoretical Bitrate: ' + calcMaxBitrate(w.hwmode, maxCw, maxSp) + ' (' + maxSp + 'x' + maxSp + ' MIMO)') : '',
                                 w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + w.channel) : '',
-                                w.phycap && w.phycap.max_cw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + w.phycap.max_cw) : '',
+                                maxCw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + maxCw) : '',
                                 w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
-                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled && w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, w.phycap.bands[w.band.replace(' GHz', 'GHz')].enabled)) : '',
-                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled && w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + w.phycap.bands[w.band.replace(' GHz', 'GHz')].disabled.join(', ')) : '',
-                                w.phycap && w.phycap.bands && w.phycap.bands[w.band.replace(' GHz', 'GHz')] && w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions && w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + w.phycap.bands[w.band.replace(' GHz', 'GHz')].exceptions.join(', ')) : ''
+                                suppChs && suppChs.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, suppChs)) : '',
+                                bCap && bCap.disabled && bCap.disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')) : '',
+                                bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
                         });
                     }

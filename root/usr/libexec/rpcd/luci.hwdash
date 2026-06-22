@@ -652,8 +652,14 @@ EOF
 							[ -n "$phycap_str" ] && phycap="$phycap_str"
 						fi
 
+						freqlist=$(iwinfo "$iface" freqlist 2>/dev/null)
+						enabled_ch=""
+						if [ -n "$freqlist" ]; then
+							enabled_ch=$(echo "$freqlist" | awk '/Channel/ { match($0, /Channel ([0-9]+)/, arr); if (arr[1] != "") printf "%s,", arr[1] }' | sed 's/,$//')
+						fi
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
 						FIRST_WIFI=0
 					done
 				fi
