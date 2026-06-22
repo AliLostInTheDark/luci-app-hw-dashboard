@@ -391,6 +391,9 @@ return view.extend({
                                 style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;')
                             }, val)])]));
                         };
+                        if (res.cpu_meta && res.cpu_meta.governor && res.cpu_meta.governor.toLowerCase() !== 'unknown') {
+                            addAdvRowText('CPU Governor', res.cpu_meta.governor, null);
+                        }
                         if (res.cpu_meta && res.cpu_meta.tasks) {
                             addAdvRowText('System Tasks', res.cpu_meta.tasks, null);
                             var ctxt = res.cpu_meta.ctxt || 0;
@@ -1170,14 +1173,14 @@ return view.extend({
 
                 var validPcie = [];
                 if (res.pcie_devs) {
-                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
+                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed !== 'Unknown' && n !== 'unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
                 var validUsbControllers = [];
                 var validUsbDevices = [];
                 var hasUsb = false;
                 if (res.usb_devs) {
-                    validUsbControllers = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')>-1 || n.indexOf('linux')>-1 || n.indexOf('root hub')>-1; });
-                    validUsbDevices = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n.indexOf('controller')===-1 && n.indexOf('linux')===-1 && n.indexOf('root hub')===-1; });
+                    validUsbControllers = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n !== 'unknown' && n.indexOf('unknown device')===-1 && (n.indexOf('controller')>-1 || n.indexOf('linux')>-1 || n.indexOf('root hub')>-1); });
+                    validUsbDevices = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n !== 'unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('linux')===-1 && n.indexOf('root hub')===-1; });
                     if (validUsbControllers.length > 0 || validUsbDevices.length > 0) hasUsb = true;
                 }
 
@@ -1262,22 +1265,11 @@ return view.extend({
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
                                     E('span', { style: 'color:#00e676; font-size: 0.9em;' }, 'Ch: ' + w.channel)
                                 ]),
-                                w.clients !== 'Unknown' ? E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 4px;' }, [
-                                    E('span', { style: 'opacity:0.8;' }, 'Connected Clients:'),
-                                    E('span', { style: 'font-weight: bold;' }, w.clients)
-                                ]) : '',
-                                w.noise !== 'Unknown' ? E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 4px; opacity:0.8;' }, [
-                                    E('span', {}, 'Noise Floor:'),
-                                    E('span', {}, w.noise)
-                                ]) : '',
-                                w.txpower !== 'Unknown' ? E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 4px; opacity:0.8;' }, [
-                                    E('span', {}, 'TX Power:'),
-                                    E('span', {}, w.txpower)
-                                ]) : '',
-                                w.bitrate !== 'Unknown' ? E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity:0.8;' }, [
-                                    E('span', {}, 'Bitrate:'),
-                                    E('span', {}, w.bitrate)
-                                ]) : ''
+                                w.ssid && w.ssid !== 'unknown' ? E('div', { class: 'hw-wifi-ssid' }, w.ssid) : '',
+                                w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Channel: ' + w.channel) : '',
+                                w.bitrate && w.bitrate !== 'unknown' && w.bitrate !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Bitrate: ' + w.bitrate) : '',
+                                w.signal && w.signal !== 'unknown' && w.signal !== 'Unknown' && w.signal !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Signal: ' + w.signal + ' dBm (Noise: ' + (w.noise || 'N/A') + ' dBm)') : '',
+                                w.clients !== 'Unknown' && w.clients !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Clients: ' + w.clients) : ''
                             ]));
                         });
                     }
