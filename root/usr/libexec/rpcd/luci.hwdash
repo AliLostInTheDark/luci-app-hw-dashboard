@@ -425,8 +425,10 @@ EOF
 				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
 
 
-				read_file CONN_COUNT /proc/sys/net/netfilter/nf_conntrack_count 0
-				read_file CONN_MAX /proc/sys/net/netfilter/nf_conntrack_max 0
+				CONN_COUNT=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
+				CONN_MAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
+				[ -z "$CONN_COUNT" ] && CONN_COUNT=0
+				[ -z "$CONN_MAX" ] && CONN_MAX=0
 				CTXT=$(awk '/^ctxt/ {print $2}' /proc/stat 2>/dev/null)
 				[ -z "$CTXT" ] && CTXT=0
 				INTR=$(awk '/^intr/ {print $2}' /proc/stat 2>/dev/null)
