@@ -640,8 +640,16 @@ EOF
 							band="Unknown"
 						fi
 
-						phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
+						hardware=$(iwinfo "$iface" info 2>/dev/null | grep "Hardware:" | awk -F': ' '{print $2}')
+						[ -z "$hardware" ] && hardware="Unknown"
+
+						phyname=$(iwinfo "$iface" info 2>/dev/null | grep "Phy name:" | awk '{print $3}')
+						[ -z "$phyname" ] && phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
+						[ -z "$phyname" ] && phyname=$(iw dev "$iface" info 2>/dev/null | grep wiphy | awk '{print "phy"$2}')
 						[ -z "$phyname" ] && phyname="Unknown"
+
+						channel=$(iwinfo "$iface" info 2>/dev/null | grep "Channel:" | awk '{print $2}')
+						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
 
 						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
 						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
@@ -655,7 +663,7 @@ EOF
 						freqlist=$(iwinfo "$iface" freqlist 2>/dev/null)
 						enabled_ch=""
 						if [ -n "$freqlist" ]; then
-							enabled_ch=$(echo "$freqlist" | awk '/Channel/ { match($0, /Channel ([0-9]+)/, arr); if (arr[1] != "") printf "%s,", arr[1] }' | sed 's/,$//')
+							enabled_ch=$(echo "$freqlist" | grep -oE "Channel [0-9]+" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
 						fi
 
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
