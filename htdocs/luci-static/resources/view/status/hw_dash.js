@@ -152,29 +152,6 @@ return view.extend({
             return strGroups.join(', ');
         };
 
-        var guessMaxSpatial = function(hw, band) {
-            var s = (hw || '').toLowerCase();
-            if (s.indexOf('qca9984') !== -1 || s.indexOf('qca9884') !== -1) return 4;
-            if (s.indexOf('ipq95') !== -1 || s.indexOf('ipq807') !== -1) return 4;
-            if (s.indexOf('mt7986') !== -1) return 4;
-            if (s.indexOf('mt7981') !== -1) return 2;
-            if (s.indexOf('ax3000') !== -1 || s.indexOf('ax1800') !== -1) return 2;
-            if (s.indexOf('ax6000') !== -1) return 4;
-            return 2;
-        };
-
-        var guessMaxCw = function(hwmode, band) {
-            var m = (hwmode || '').toLowerCase();
-            if (band.indexOf('5') !== -1 || band.indexOf('6') !== -1) {
-                if (m.indexOf('be') !== -1) return 320;
-                if (m.indexOf('ax') !== -1 || m.indexOf('ac') !== -1) return 160;
-            }
-            if (band.indexOf('2.4') !== -1) {
-                if (m.indexOf('ax') !== -1 || m.indexOf('n') !== -1) return 40;
-            }
-            return 20;
-        };
-
         var calcMaxBitrate = function(hwmode, max_cw, max_spatial) {
             if (!hwmode || !max_cw || !max_spatial) return null;
             var mode = hwmode.toLowerCase();
@@ -611,30 +588,16 @@ return view.extend({
                     var totalSpace = 0;
                     var totalUsed = 0;
                     var totalPhys = 0;
-                    var extSpace = 0;
-                    var extUsed = 0;
-                    var extPhys = 0;
-                    var extCount = 0;
                     var dskNode = document.getElementById('stats-dsk');
-                    var extNode = document.getElementById('hw-ext-list');
                     if (dskNode) dskNode.innerHTML = '';
-                    if (extNode) extNode.innerHTML = '';
                     res.df.forEach(function(fs) {
                         var isExt = (fs.hw_type === 'USB');
-                        if (fs.total > 0) {
-                            if (isExt) {
-                                extSpace += fs.total;
-                                extUsed += fs.used;
-                            } else {
-                                totalSpace += fs.total;
-                                totalUsed += fs.used;
-                            }
+                        if (fs.total > 0 && !isExt) {
+                            totalSpace += fs.total;
+                            totalUsed += fs.used;
                         }
-                        if (fs.psize > 0) {
-                            if (isExt) extPhys += fs.psize;
-                            else totalPhys += fs.psize;
-                        }
-                        if (isExt) extCount++;
+                        if (fs.psize > 0 && !isExt) totalPhys += fs.psize;
+                        if (isExt) return;
                         var readSpeed = 0;
                         var writeSpeed = 0;
                         var rIops = 0;
@@ -683,42 +646,7 @@ return view.extend({
                         var labelStr = fs.mount === '/' ? 'Root FS' : fs.mount.replace(/^\/mnt\//, '');
                         var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
                         var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
-                        if (isExt && extNode) {
-                            var extBars = [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                style: 'font-weight: bold; font-size: 1.05em;'
-                            }, labelStr), E('span', {
-                                style: 'opacity: 0.6; font-size: 0.9em; margin-left: 8px;'
-                            }, typeStr)]), E('div', {
-                                class: 'hw-bar-bg',
-                                style: 'margin: 8px 0;'
-                            }, [E('div', {
-                                class: 'hw-bar-fill',
-                                style: 'width: ' + pctNum + '%; background: ' + colorDsk + ';'
-                            })]), E('div', {
-                                style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;'
-                            }, [E('span', {}, 'Space Used'), E('span', {
-                                class: 'hw-stat-value'
-                            }, usedPctStr)]), E('div', {
-                                style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;'
-                            }, [E('span', {}, 'Read: ' + formatSpeed(readSpeed)), E('span', {}, 'Write: ' + formatSpeed(writeSpeed))]), E('div', {
-                                style: 'width: 100%; display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8;'
-                            }, [E('span', {}, 'Read IOPS: ' + rIops), E('span', {}, 'Write IOPS: ' + wIops)])];
-                            if (inodesInfo && inodesInfo.ipct !== '-') {
-                                var ipctNum = parseInt(inodesInfo.ipct) || 0;
-                                var icolor = getDynColor(ipctNum);
-                                extBars.push(E('div', {
-                                    style: 'width: 100%; display: flex; justify-content: space-between; margin-top: 4px; font-size: 0.85em; opacity: 0.7;'
-                                }, [E('span', {}, 'Inodes Used'), E('span', {
-                                    style: 'color: ' + icolor + ';'
-                                }, inodesInfo.ipct)]));
-                            }
-                            extNode.appendChild(E('div', {
-                                class: 'hw-progress-item',
-                                style: 'margin-bottom: 25px; background: rgba(128,128,128,0.05); padding: 12px; border-radius: 6px;'
-                            }, extBars));
-                        } else if (dskNode) {
+                        if (dskNode) {
                             var speedStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'EC: ' + res.ubi_max_ec + ' | Bad: ' + res.ubi_bad_peb : 'R: ' + formatSpeed(readSpeed) + ' | W: ' + formatSpeed(writeSpeed);
                             var iopsStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'UBI Wear: ' + (res.ubi_max_ec / 3000 * 100).toFixed(1) + '% (' + res.ubi_max_ec + ' cycles)' : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
                             var bars = [E('div', {
@@ -817,36 +745,7 @@ return view.extend({
                             }, res.mtd_count)]));
                         }
                         var extCardNode = document.getElementById('hw-ext-card');
-                        var extMetaNode = document.getElementById('hw-ext-meta');
-                        if (extCardNode && extMetaNode) {
-                            if (extCount > 0) {
-                                extCardNode.style.display = 'flex';
-                                extMetaNode.innerHTML = '';
-                                extMetaNode.appendChild(E('div', {
-                                    class: 'hw-stat-row'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, 'Physical Total'), E('span', {
-                                    class: 'hw-stat-value'
-                                }, fmtSize(extPhys > 0 ? extPhys : extSpace))]));
-                                extMetaNode.appendChild(E('div', {
-                                    class: 'hw-stat-row'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, 'Usable Total'), E('span', {
-                                    class: 'hw-stat-value'
-                                }, fmtSize(extSpace))]));
-                                extMetaNode.appendChild(E('div', {
-                                    class: 'hw-stat-row'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, 'Usable Free'), E('span', {
-                                    class: 'hw-stat-value'
-                                }, fmtSize(extSpace - extUsed))]));
-                            } else {
-                                extCardNode.style.display = 'none';
-                            }
-                        }
+                        if (extCardNode) extCardNode.style.display = 'none';
                     }
                 }
 
@@ -1077,7 +976,7 @@ return view.extend({
                                                     }, [
                                                         E('span', {}, 'Format:'),
                                                         E('span', {
-                                                            style: 'color: #00e676;'
+                                                            style: 'color: #00bcd4;'
                                                         }, formatStr)
                                                     ]),
                                                     E('div', {
@@ -1245,7 +1144,7 @@ return view.extend({
                         res.eth_links.forEach(function(l) {
                             var st = l.speed;
                             var col = '#9e9e9e';
-                            if (st.indexOf('10000') >= 0 || st.indexOf('2500') >= 0 || st.indexOf('1000') >= 0) col = '#00e676';
+                            if (st.indexOf('10000') >= 0 || st.indexOf('2500') >= 0 || st.indexOf('1000') >= 0) col = '#00bcd4';
                             else if (st.indexOf('100') >= 0 || st.indexOf('10') >= 0) col = '#ffea00';
                             
                             var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
@@ -1277,16 +1176,11 @@ return view.extend({
 
                 var validPcie = [];
                 if (res.pcie_devs) {
-                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed !== 'Unknown' && n !== 'unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
+                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
-                var validUsbControllers = [];
-                var validUsbDevices = [];
-                var hasUsb = false;
-                if (res.usb_devs) {
-                    validUsbControllers = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n !== 'unknown' && n.indexOf('unknown device')===-1 && (n.indexOf('controller')>-1 || n.indexOf('linux')>-1 || n.indexOf('root hub')>-1); });
-                    validUsbDevices = res.usb_devs.filter(function(u){ var n = u.name.toLowerCase(); return n !== 'unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('linux')===-1 && n.indexOf('root hub')===-1; });
-                    if (validUsbControllers.length > 0 || validUsbDevices.length > 0) hasUsb = true;
-                }
+                var usbPorts = (res.usb_ports || []).filter(function(u){ return parseInt(u.speed) > 0; });
+                var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
+                var hasUsb = usbPorts.length > 0 || usbDevs.length > 0;
 
                 if (validPcie.length > 0 || hasUsb) {
                     pcieUsbCard.style.display = 'flex';
@@ -1297,7 +1191,7 @@ return view.extend({
                             puNode.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'PCI-e Bus'));
                             validPcie.forEach(function(p) {
                                 var speedStr = p.speed + ' ' + p.width;
-                                if (p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
+                                if (p.max_speed && p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                     E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name),
                                     E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
@@ -1309,48 +1203,36 @@ return view.extend({
                         }
                         if (hasUsb) {
                             puNode.appendChild(E('h4', { style: 'margin: ' + (validPcie.length > 0 ? '8px' : '0') + ' 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'USB Bus'));
-                            if (validUsbControllers.length > 0) {
-                                var speeds = validUsbControllers.map(function(u){ return parseInt(u.speed) || 0; });
-                                var maxSpeed = Math.max.apply(null, speeds);
-                                var minSpeed = Math.min.apply(null, speeds);
-                                var hwPortStr = '';
-                                if (res.model && (res.model.indexOf('JIDU6J01') > -1 || /JIDU6[0-9]01/.test(res.model))) {
-                                    hwPortStr = 'USB 2.0 (Physical Port)';
-                                } else if (res.model && (res.model.indexOf('JIDU6J11') > -1 || /JIDU6[0-9]11/.test(res.model))) {
-                                    hwPortStr = 'USB 3.0 (Physical Port)';
-                                } else if (maxSpeed >= 10000) {
-                                    hwPortStr = 'USB 3.1 / 3.2 Capable (Physical Port)';
-                                } else if (maxSpeed >= 5000) {
-                                    hwPortStr = 'USB 3.0 Capable (Physical Port)';
-                                } else if (maxSpeed >= 480) {
-                                    hwPortStr = 'USB 2.0 Capable (Physical Port)';
-                                } else if (maxSpeed > 0) {
-                                    hwPortStr = 'USB 1.1 Capable (Physical Port)';
-                                }
-                                var usbHostRows = [
-                                    E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, 'USB Host Controllers'),
-                                    E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
-                                        E('span', {}, 'Bus Speeds:'),
-                                        E('span', { style: 'color:#00e676;' }, 'Max: ' + maxSpeed + ' Mbps | Min: ' + minSpeed + ' Mbps')
-                                    ])
-                                ];
-                                if (hwPortStr) {
-                                    usbHostRows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 4px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 4px;' }, [
-                                        E('span', {}, 'Hardware Port:'),
-                                        E('span', { style: 'color:#ffea00;' }, hwPortStr)
-                                    ]));
-                                }
-                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, usbHostRows));
+                            var hwPortStr = '';
+                            var boardId = res.board || '';
+                            if (/JIDU6[J0-9]01/.test(boardId)) {
+                                hwPortStr = 'USB 2.0 (1 Physical Port)';
+                            } else if (/JIDU6[J0-9]11/.test(boardId)) {
+                                hwPortStr = 'USB 3.0 (1 Physical Port)';
+                            } else if (usbPorts.length > 0) {
+                                var maxBusSpd = Math.max.apply(null, usbPorts.map(function(u){ return parseInt(u.speed) || 0; }));
+                                if (maxBusSpd >= 10000) hwPortStr = 'USB 3.1/3.2 Capable';
+                                else if (maxBusSpd >= 5000) hwPortStr = 'USB 3.0 Capable';
+                                else if (maxBusSpd >= 480) hwPortStr = 'USB 2.0 Capable';
+                                else hwPortStr = 'USB 1.x';
                             }
-                            validUsbDevices.forEach(function(u) {
-                                var isSlow = u.speed === '480' || u.speed === '12' || u.speed === '1.5';
+                            if (hwPortStr) {
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                    E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name),
-                                    E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
-                                        E('span', {}, 'Speed & Version:'),
-                                        E('span', { style: isSlow ? 'color:#ffea00;' : 'color:#00e676;' }, u.speed + ' Mbps (' + u.version.trim() + ')')
+                                    E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [
+                                        E('span', {}, 'Physical Port:'),
+                                        E('span', { style: 'color:#00bcd4; font-weight: bold;' }, hwPortStr)
                                     ])
                                 ]));
+                            }
+                            usbDevs.forEach(function(u) {
+                                var spd = parseInt(u.speed) || 0;
+                                var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
+                                var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
+                                var rows = [E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name)];
+                                if (spdLabel) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), E('span', { style: 'color:' + col + ';' }, spdLabel)]));
+                                var ver = u.version ? u.version.trim() : '';
+                                if (ver) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), E('span', {}, ver)]));
+                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, rows));
                             });
                         }
                     }
@@ -1358,51 +1240,64 @@ return view.extend({
                     pcieUsbCard.style.display = 'none';
                 }
 
-                function guessMaxSpatial(hw, band) {
-                    var lHw = hw.toLowerCase();
-                    if (lHw.indexOf('ax') > -1 || lHw.indexOf('6') > -1) return 4;
-                    if (lHw.indexOf('ac') > -1) return 3;
-                    return 2;
-                }
-                function guessMaxCw(hwmode, band) {
-                    var lMode = hwmode.toLowerCase();
-                    if (lMode.indexOf('ax') > -1) return 160;
-                    if (lMode.indexOf('ac') > -1) return 80;
-                    return 40;
-                }
-
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
-                    wifiCard.style.display = 'flex';
                     var wfNode = document.getElementById('hw-wifi-radios');
                     if (wfNode) {
                         wfNode.innerHTML = '';
+                        var wifiRendered = 0;
                         res.wifi_radios.forEach(function(w) {
+                            if ((!w.band || w.band === 'Unknown') && (!w.hwmode || w.hwmode === 'Unknown')) return;
                             var bKey = w.band.replace(' GHz', 'GHz');
                             var bCap = (w.phycap && w.phycap.bands && w.phycap.bands[bKey]) ? w.phycap.bands[bKey] : null;
-                            
-                            var maxSp = (w.phycap && w.phycap.max_spatial && w.phycap.max_spatial > 1) ? w.phycap.max_spatial : guessMaxSpatial(w.hardware, w.band);
-                            var maxCw = (w.phycap && w.phycap.max_cw && parseInt(w.phycap.max_cw) > 20) ? w.phycap.max_cw : (guessMaxCw(w.hwmode, w.band) + ' MHz');
-                            
+
+                            // Strictly real data from upstream kernel sources only
+                            var phycapSp = w.phycap ? parseInt(w.phycap.max_spatial) : 0;
+                            var hwMaxSp = phycapSp > 1 ? phycapSp : (parseInt(w.hw_nss) > 1 ? parseInt(w.hw_nss) : 0);
+                            var hwMaxCw = (w.phycap && w.phycap.max_cw && parseInt(w.phycap.max_cw) >= 20) ? w.phycap.max_cw : null;
+                            var hwMaxCwNum = hwMaxCw ? (parseInt(hwMaxCw.replace(/[^0-9]/g, '')) || 0) : 0;
+                            var currCwNum = parseInt(w.curr_width) || 0;
+                            var currCwStr = currCwNum > 0 ? currCwNum + ' MHz' : null;
+                            var cfgNss = parseInt(w.cfg_nss) || 0;
+
+                            // Chip HW Max: only from iw list phycap — no guessing
+                            var chipMaxBr = (hwMaxSp > 0 && hwMaxCw && w.hwmode) ? calcMaxBitrate(w.hwmode, hwMaxCw, hwMaxSp) : null;
+
+                            // Config Max: only shown when software config differs from hw max
+                            var cfgMaxBr = null;
+                            var cfgMaxLabel = null;
+                            if (chipMaxBr) {
+                                var cfgSp = cfgNss > 0 ? cfgNss : hwMaxSp;
+                                var cfgCw = currCwStr || hwMaxCw;
+                                var cfgCwNum = currCwNum > 0 ? currCwNum : hwMaxCwNum;
+                                if (cfgSp !== hwMaxSp || cfgCwNum !== hwMaxCwNum) {
+                                    cfgMaxBr = calcMaxBitrate(w.hwmode, cfgCw, cfgSp);
+                                    cfgMaxLabel = cfgSp + 'x' + cfgSp + ' MIMO @ ' + cfgCw;
+                                }
+                            }
+
                             var suppChs = (w.channels && w.channels.length > 0) ? w.channels.split(',') : (bCap ? bCap.enabled : []);
-                            
                             var cleanHw = w.hardware ? w.hardware.replace(/^.*\[/, '').replace(/\]$/, '') : '';
-                            
+                            var chStr = (w.channel && w.channel !== 'Unknown' && w.channel !== 'unknown' && w.channel !== '0') ? w.channel : null;
+
+                            wifiRendered++;
                             wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
-                                    E('span', { style: 'color:#00e676; font-size: 0.9em;' }, 'Ch: ' + w.channel)
+                                    chStr ? E('span', { style: 'color:#00bcd4; font-size: 0.9em;' }, 'Ch: ' + chStr) : E('span', {}, '')
                                 ]),
                                 cleanHw && cleanHw !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, cleanHw) : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
-                                w.hwmode ? E('div', { class: 'hw-wifi-detail' }, 'Max Theoretical Bitrate: ' + calcMaxBitrate(w.hwmode, maxCw, maxSp) + ' (' + maxSp + 'x' + maxSp + ' MIMO)') : '',
-                                w.channel && w.channel !== 'unknown' && w.channel !== '0' ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + w.channel) : '',
-                                maxCw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + maxCw) : '',
+                                chipMaxBr ? E('div', { class: 'hw-wifi-detail' }, 'Chip HW Max: ' + chipMaxBr + ' (' + hwMaxSp + 'x' + hwMaxSp + ' MIMO @ ' + hwMaxCw + ')') : '',
+                                cfgMaxBr ? E('div', { class: 'hw-wifi-detail', style: 'color: #00bcd4;' }, 'Config Max: ' + cfgMaxBr + ' (' + cfgMaxLabel + ')') : '',
+                                chStr ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + chStr) : '',
+                                hwMaxCw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + hwMaxCw) : '',
                                 w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
                                 suppChs && suppChs.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, suppChs)) : '',
                                 bCap && bCap.disabled && bCap.disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')) : '',
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
                         });
+                        wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
                     }
                 } else {
                     wifiCard.style.display = 'none';

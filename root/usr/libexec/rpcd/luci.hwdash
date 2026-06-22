@@ -1,14 +1,16 @@
 #!/bin/sh
 
+json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
 read_file() {
 	local __var=$1
 	local __file=$2
 	local __default=$3
 	if [ -f "$__file" ]; then
 		read -r "$__var" 2>/dev/null < "$__file"
-		[ -z "$(eval echo "\$$__var")" ] && eval "$__var="\$__default""
+		[ -z "$(eval echo "\$$__var")" ] && eval "$__var=\"\$__default\""
 	else
-		eval "$__var="\$__default""
+		eval "$__var=\"\$__default\""
 	fi
 }
 
@@ -20,8 +22,8 @@ case "$1" in
 	call)
 		case "$2" in
 			info)
-				if [ ! -f /tmp/hwdash_wifi_cap_cache_v2.json ] && command -v iw >/dev/null; then
-					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache_v2.json 2>/dev/null
+				if [ ! -f /tmp/hwdash_wifi_cap_cache_v4.json ] && command -v iw >/dev/null; then
+					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache_v4.json 2>/dev/null
 				fi
 
 				BOARD_DETECT=$(cat /tmp/sysinfo/model 2>/dev/null)
@@ -223,9 +225,10 @@ case "$1" in
 					esac
 
 					devname=${fs##*/}
+					realdev=""
 					if [ "$mountpoint" = "/" ]; then
 						devname="root"
-						ubiblk=$(ls -la /sys/class/block/ 2>/dev/null | awk -F/ '{print $NF}' | grep "^ubiblock" | head -1)
+						ubiblk=$(ls /sys/class/block/ 2>/dev/null | grep "^ubiblock" | head -1)
 						if [ -n "$ubiblk" ]; then
 							realdev="$ubiblk"
 						else
@@ -289,7 +292,7 @@ EOF
 					esac
 					block_count=$((block_count + 1))
 					case "$bname" in
-						*p[0-9]*|[a-z]*[0-9]) continue ;;
+						*p[0-9]*|[shv]d[a-z][0-9]*) continue ;;
 					esac
 					if [ -f "$dev/size" ]; then
 						sz=$(cat "$dev/size" 2>/dev/null)
@@ -353,7 +356,7 @@ EOF
 						done
 						SEEN_TYPES="${SEEN_TYPES}${TYPE} "
 						if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
-						THERMALS="$THERMALS{\"type\":\"$TYPE\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
+						THERMALS="$THERMALS{\"type\":\"$(json_str "$TYPE")\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
 						FIRST=0
 					fi
 				done
@@ -406,7 +409,7 @@ EOF
 						fi
 						
 						if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
-						THERMALS="$THERMALS{\"type\":\"$TYPE\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
+						THERMALS="$THERMALS{\"type\":\"$(json_str "$TYPE")\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
 						FIRST=0
 					done
 				done
@@ -559,8 +562,7 @@ EOF
 						fi
 					fi
 					
-					# Escape model name
-					model=$(echo "$model" | sed 's/"/\\"/g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+					model=$(echo "$model" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^[[:space:]]*//; s/[[:space:]]*$//')
 					[ -z "$model" ] && model="Storage Device"
 					
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
@@ -569,27 +571,42 @@ EOF
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
 
+				USB_PORTS="["
+				FIRST_USB=1
+				for usb in /sys/bus/usb/devices/usb*; do
+					[ -f "$usb/speed" ] || continue
+					read_file speed "$usb/speed" "0"
+					read_file product "$usb/product" "USB Host Controller"
+					if [ $FIRST_USB -eq 0 ]; then USB_PORTS="$USB_PORTS,"; fi
+					USB_PORTS="$USB_PORTS{\"speed\":\"$speed\",\"product\":\"$(json_str "$product")\"}"
+					FIRST_USB=0
+				done
+				USB_PORTS="$USB_PORTS]"
+
 				USB_DEVS="["
 				FIRST_USB=1
 				for usb in /sys/bus/usb/devices/*; do
-					if [ -f "$usb/speed" ] && [ -f "$usb/idVendor" ]; then
-						read_file product "$usb/product" "Unknown Device"
-						read_file manufacturer "$usb/manufacturer" ""
-						read_file speed "$usb/speed" "Unknown"
-						read_file version "$usb/version" "Unknown"
-						
-						if [ -n "$manufacturer" ]; then
-							name="$manufacturer $product"
-						else
-							name="$product"
-						fi
-						# Escape quotes
-						name=$(echo "$name" | sed 's/"/\\"/g')
-						
-						if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
-						USB_DEVS="$USB_DEVS{\"name\":\"$name\",\"speed\":\"$speed\",\"version\":\"$version\"}"
-						FIRST_USB=0
+					devname=${usb##*/}
+					case "$devname" in
+						usb*|*:*) continue ;;
+						*-*) ;;
+						*) continue ;;
+					esac
+					[ -f "$usb/idVendor" ] || continue
+					[ -f "$usb/speed" ] || continue
+					read_file product "$usb/product" ""
+					read_file manufacturer "$usb/manufacturer" ""
+					read_file speed "$usb/speed" "Unknown"
+					read_file version "$usb/version" ""
+					[ -z "$product" ] && [ -z "$manufacturer" ] && continue
+					if [ -n "$manufacturer" ]; then
+						dev_name="$manufacturer $product"
+					else
+						dev_name="$product"
 					fi
+					if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
+					USB_DEVS="$USB_DEVS{\"name\":\"$(json_str "$dev_name")\",\"speed\":\"$speed\",\"version\":\"$(json_str "$version")\"}"
+					FIRST_USB=0
 				done
 				USB_DEVS="$USB_DEVS]"
 
@@ -619,15 +636,18 @@ EOF
 						info=$(iwinfo "$iface" info 2>/dev/null)
 						txpower=$(echo "$info" | awk -F'Tx-Power: ' '/Tx-Power:/ {print $2}' | awk '{print $1" "$2}')
 						[ -z "$txpower" ] && txpower="Unknown"
-						
+
 						hwmode=$(echo "$info" | awk -F'HW Mode\\(s\\): ' '/HW Mode\(s\):/ {print $2}')
 						[ -z "$hwmode" ] && hwmode="Unknown"
-						
-						hardware=$(echo "$info" | awk -F'Hardware: ' '/Hardware:/ {print $2}' | sed 's/.*\[\(.*\)\].*/\1/')
+
+						hardware=$(echo "$info" | grep "Hardware:" | awk -F': ' '{print $2}')
 						[ -z "$hardware" ] && hardware="Unknown"
-						
+
 						channel=$(echo "$info" | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
-						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
+						{ [ -z "$channel" ] || [ "$channel" = "unknown" ]; } && channel="Unknown"
+
+						curr_width=$(echo "$info" | awk -F'Width: ' '/Width:/ {print $2}' | awk '{print $1}')
+						[ -z "$curr_width" ] && curr_width="0"
 
 						freq=$(echo "$info" | awk -F'[(/]' '/Channel:/ {print $2}' | sed 's/[^0-9.]*//g')
 						if [ -n "$freq" ]; then
@@ -640,24 +660,39 @@ EOF
 							band="Unknown"
 						fi
 
-						hardware=$(iwinfo "$iface" info 2>/dev/null | grep "Hardware:" | awk -F': ' '{print $2}')
-						[ -z "$hardware" ] && hardware="Unknown"
-
-						phyname=$(iwinfo "$iface" info 2>/dev/null | grep "Phy name:" | awk '{print $3}')
+						phyname=$(echo "$info" | grep "Phy name:" | awk '{print $3}')
 						[ -z "$phyname" ] && phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
 						[ -z "$phyname" ] && phyname=$(iw dev "$iface" info 2>/dev/null | grep wiphy | awk '{print "phy"$2}')
 						[ -z "$phyname" ] && phyname="Unknown"
 
-						channel=$(iwinfo "$iface" info 2>/dev/null | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
-						[ -z "$channel" ] || [ "$channel" = "unknown" ] && channel="Unknown"
-
 						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
-						[ -z "$bitrate" ] || [ "$bitrate" = "unknown" ] && bitrate="Unknown"
+						{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
 						phycap="{}"
-						if [ -f /tmp/hwdash_wifi_cap_cache_v2.json ] && [ "$phyname" != "Unknown" ]; then
-							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache_v2.json -e "@.$phyname" 2>/dev/null)
+						if [ -f /tmp/hwdash_wifi_cap_cache_v4.json ] && [ "$phyname" != "Unknown" ]; then
+							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache_v4.json -e "@.$phyname" 2>/dev/null)
 							[ -n "$phycap_str" ] && phycap="$phycap_str"
+						fi
+
+						cfg_nss="0"
+						if [ "$phyname" != "Unknown" ]; then
+							uci_radio=$(uci show wireless 2>/dev/null | grep "\.phy='${phyname}'" | cut -d'.' -f2 | head -1)
+							if [ -n "$uci_radio" ]; then
+								n=$(uci get "wireless.${uci_radio}.nss" 2>/dev/null)
+								[ -n "$n" ] && cfg_nss="$n"
+							fi
+						fi
+
+						hw_nss=0
+						if [ "$phyname" != "Unknown" ] && command -v iw >/dev/null; then
+							hw_nss=$(iw phy "$phyname" info 2>/dev/null | awk '
+								/MCS rate indexes supported:/ {
+									split($NF, a, "-"); n = int(a[2] / 8) + 1; if (n > m) m = n
+								}
+								/[0-9]+ streams: MCS/ { n = $1 + 0; if (n > m) m = n }
+								END { print m + 0 }
+							')
+							[ -z "$hw_nss" ] && hw_nss=0
 						fi
 
 						freqlist=$(iwinfo "$iface" freqlist 2>/dev/null)
@@ -667,7 +702,7 @@ EOF
 						fi
 
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"curr_width\":\"$curr_width\",\"cfg_nss\":\"$cfg_nss\",\"hw_nss\":$hw_nss,\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
 						FIRST_WIFI=0
 					done
 				fi
@@ -685,7 +720,7 @@ EOF
 				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-				echo "{\"model\":\"$CPU_MODEL\", \"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
+				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
 				;;
 		esac
 		;;

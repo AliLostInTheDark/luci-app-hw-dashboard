@@ -3,7 +3,7 @@ BEGIN {
     first_phy = 1
 }
 /^Wiphy/ {
-    if (!first_phy) { print_phy() }
+    if (phy != "") { print_phy() }
     phy = $2
     delete enabled; delete disabled; delete exceptions; delete bands
     max_cw = "20 MHz"
@@ -16,22 +16,22 @@ BEGIN {
 /Band 4:/ || /Band 60/ { band="60GHz" }
 /Frequencies:/ { in_freq=1; next }
 /^[ \t]*\*?/ && in_freq {
-    match($0, /\[([0-9]+)\]/, arr)
-    ch = arr[1]
-    
-    match($0, /([0-9]+) MHz/, f_arr)
-    freq = f_arr[1] + 0
-    
+    ch = ""
+    if (match($0, /\[[0-9]+\]/)) ch = substr($0, RSTART+1, RLENGTH-2)
+
+    freq = 0
+    if (match($0, /[0-9]+ MHz/)) freq = substr($0, RSTART, RLENGTH-4) + 0
+
     if (ch != "" && freq > 0) {
         if (freq >= 2400 && freq < 2500) temp_band = "2.4GHz"
         else if (freq >= 5000 && freq < 5900) temp_band = "5GHz"
         else if (freq >= 5900 && freq < 7200) temp_band = "6GHz"
         else if (freq >= 58000 && freq < 65000) temp_band = "60GHz"
         else temp_band = band
-        
+
         if (temp_band == "") temp_band = "Unknown"
         bands[temp_band] = 1
-        
+
         if ($0 ~ /disabled/) {
             disabled[temp_band] = disabled[temp_band] (disabled[temp_band]==""?"":",") ch
         } else {
@@ -50,17 +50,22 @@ BEGIN {
 /EHT PHY Capabilities/ { in_eht=1 }
 in_eht && /Supported Channel Width:.*320/ { max_cw = "320 MHz" }
 
+/MCS rate indexes supported:/ {
+    # e.g. "HT TX/RX MCS rate indexes supported: 0-31" -> 4 streams
+    if (match($NF, /[0-9]+$/)) {
+        n = int(substr($NF, RSTART, RLENGTH) / 8) + 1
+        if (n > max_spatial) max_spatial = n
+    }
+}
+/[0-9]+ streams: MCS/ {
+    # VHT/HE "N streams: MCS ..." lines (tab-indented in iw output)
+    n = $1 + 0
+    if (n > max_spatial) max_spatial = n
+}
 /RX spatial streams: [0-9]+/ {
-    match($0, /RX spatial streams: ([0-9]+)/, arr)
-    if (arr[1]+0 > max_spatial) max_spatial = arr[1]+0
-}
-/^[ \t]*([0-9]+) streams: MCS/ {
-    match($0, /([0-9]+) streams:/, arr)
-    if (arr[1]+0 > max_spatial) max_spatial = arr[1]+0
-}
-/spatial streams\)/ {
-    match($0, /([0-9]+) spatial streams\)/, arr)
-    if (arr[1]+0 > max_spatial) max_spatial = arr[1]+0
+    sub(/.*RX spatial streams: /, "")
+    n = $0 + 0
+    if (n > max_spatial) max_spatial = n
 }
 
 function print_phy() {
