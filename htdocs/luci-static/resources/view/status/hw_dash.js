@@ -102,13 +102,17 @@ return view.extend({
             };
         };
         // IEEE 802.11 U-NII sub-band tables, per Wikipedia "List of WLAN channels".
+        // Ranges span every standardised 20 MHz channel in each sub-band (including
+        // the rarely-enabled edge channels: 68 in U-NII-2A, 96 in U-NII-2C, 181 in
+        // U-NII-4) so any radio's channel list is labelled. Anything outside these
+        // is still shown verbatim by the fallback below.
         // Each row: [name, firstChannel, lastChannel, frequencyRange, requiresDFS]
         var UNII_5GHZ = [
             ['U-NII-1',  36,  48,  '5150-5250 MHz', false],
-            ['U-NII-2A', 52,  64,  '5250-5350 MHz', true ],
-            ['U-NII-2C', 100, 144, '5470-5725 MHz', true ],
+            ['U-NII-2A', 52,  68,  '5250-5350 MHz', true ],
+            ['U-NII-2C', 96,  144, '5470-5725 MHz', true ],
             ['U-NII-3',  149, 165, '5725-5850 MHz', false],
-            ['U-NII-4',  169, 177, '5850-5925 MHz', false]
+            ['U-NII-4',  169, 181, '5850-5925 MHz', false]
         ];
         var UNII_6GHZ = [
             ['U-NII-5',  1,   93,  '5925-6425 MHz', false],
