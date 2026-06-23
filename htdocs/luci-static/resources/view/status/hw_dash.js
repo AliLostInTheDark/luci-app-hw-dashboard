@@ -368,10 +368,19 @@ return view.extend({
                                     class: 'hw-stat-value'
                                 }, val)]));
                             };
-                            addMeta('Physical Cores', meta.cores || (res.cpus.length - 1));
-                            if (meta.threads && meta.threads !== meta.cores) {
-                                addMeta('Logical Threads', meta.threads);
+                            var _cores = meta.cores || (res.cpus.length - 1);
+                            var _threads = meta.threads || _cores;
+                            addMeta('Cores / Threads', _cores + 'C / ' + _threads + 'T');
+                            var _si = res.sys_info || {};
+                            var _fmtC = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
+                            var _cacheParts = [];
+                            if (_si.l1d > 0 || _si.l1i > 0) {
+                                var _l1 = (_si.l1d || 0) + (_si.l1i || 0);
+                                _cacheParts.push(_fmtC(_l1) + ' L1');
                             }
+                            if (_si.l2 > 0) _cacheParts.push(_fmtC(_si.l2) + ' L2');
+                            if (_si.l3 > 0) _cacheParts.push(_fmtC(_si.l3) + ' L3');
+                            if (_cacheParts.length > 0) addMeta('Cache', _cacheParts.join(' + '));
                             var curFreq = '';
                             if (res.freqs && res.freqs.length > 0) {
                                 var validFreqs = res.freqs.filter(function(f) {
