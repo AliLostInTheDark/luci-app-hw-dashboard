@@ -12,7 +12,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.0-r20.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.0.0.apk
 ```
 
 The package post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -84,7 +84,7 @@ Static system identity collected once and persisted:
 
 ### Internal Storage
 
-The card renders the rootfs filesystem as a progress bar showing used vs. usable space, with read/write I/O speed for disk-backed filesystems and percentage utilization for NAND/flash. Additional mounted filesystems appear as separate bars.
+The card leads with the rootfs filesystem as a progress bar showing used vs. usable space, with read/write I/O speed for disk-backed filesystems and percentage utilization for NAND/flash. Additional mounted filesystems appear as separate bars.
 
 Below the filesystem bars, a summary section shows hardware-accurate storage sizes. The content is dynamic based on the detected underlying storage type:
 
@@ -162,6 +162,7 @@ The dashboard is deliberately conservative about process spawning. Shell forks a
 | File | Content | TTL |
 |------|---------|-----|
 | `hwdash_wifi_radios_v1.json` | Live WiFi radio state (channel, clients, bitrate, noise) | 20 seconds |
+| `hwdash_storage_inv_v1.sh` | MTD partition table + UBI device tree (layout fixed at flash time; wear/ECC move slowly) | 30 seconds |
 
 On package upgrade or reinstall, all caches are cleared by the postinst script so that updated parsing logic always runs against fresh data.
 
@@ -172,6 +173,8 @@ The backend is a single POSIX shell script registered as an `rpcd` call object a
 
 Data collection covers: CPU statistics from `/proc/stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones from `/sys/class/thermal/` and `hwmon`, ethernet link state from `ethtool`, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw`, eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/`, and F2FS statistics from `/sys/fs/f2fs/`.
 
+The script is written to minimize process spawning on embedded hardware: `/proc/stat` is parsed in a single pass for all CPU-tick, context-switch and interrupt counters; per-device `/sys` stat files are read with shell builtins rather than `cat`/`awk` pipelines; and the slow-changing storage inventory is served from cache (see Caching Architecture above) so the per-poll fork count stays low.
+
 The AWK-based WiFi capability parser (`luci.hwdash_wifi_cap.awk`) handles the structured output of `iw list` to extract per-PHY band support, channel lists, NSS capabilities, and hardware mode.
 
 
@@ -181,7 +184,7 @@ The frontend is a single LuCI JavaScript view (`hw_dash.js`) that polls `/ubus/c
 
 Dynamic color scaling (`getDynColor`) maps utilization percentages to a green → amber → red gradient without hardcoded thresholds that would be wrong for different metric types. The inversion flag is used for metrics like Free memory and CPU Idle where high values are good.
 
-The layout uses CSS flexbox throughout. The wide cards (Internal Storage, CPU advanced panel, Thermals) use a flex-row layout that collapses to a flex-column on viewports below 768px. No media query breakpoints are hardcoded into JavaScript.
+The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advanced panel, Thermals, and the UBI/MTD detail row) use a flex-row layout that collapses to a flex-column on viewports below 768px. No media query breakpoints are hardcoded into JavaScript.
 
 
 ## Screenshots
