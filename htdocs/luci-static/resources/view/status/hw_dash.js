@@ -374,13 +374,13 @@ return view.extend({
                             var _si = res.sys_info || {};
                             var _fmtC = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
                             var _cacheParts = [];
-                            if (_si.l1d > 0 || _si.l1i > 0) {
-                                var _l1 = (_si.l1d || 0) + (_si.l1i || 0);
-                                _cacheParts.push(_fmtC(_l1) + ' L1');
-                            }
-                            if (_si.l2 > 0) _cacheParts.push(_fmtC(_si.l2) + ' L2');
-                            if (_si.l3 > 0) _cacheParts.push(_fmtC(_si.l3) + ' L3');
-                            if (_cacheParts.length > 0) addMeta('Cache', _cacheParts.join(' + '));
+                            if (_si.l0 > 0) _cacheParts.push('L0 ' + _fmtC(_si.l0));
+                            var _l1 = (_si.l1d || 0) + (_si.l1i || 0);
+                            if (_l1 > 0) _cacheParts.push('L1 ' + _fmtC(_l1));
+                            if (_si.l2 > 0) _cacheParts.push('L2 ' + _fmtC(_si.l2));
+                            if (_si.l3 > 0) _cacheParts.push('L3 ' + _fmtC(_si.l3));
+                            if (_si.l4 > 0) _cacheParts.push('L4 ' + _fmtC(_si.l4));
+                            addMeta('Cache', _cacheParts.length > 0 ? _cacheParts.join(' + ') : '0 MB');
                             var curFreq = '';
                             if (res.freqs && res.freqs.length > 0) {
                                 var validFreqs = res.freqs.filter(function(f) {
@@ -1572,6 +1572,7 @@ return view.extend({
                     if (si.kver) addSi('Kernel', si.kver);
                     if (si.arch) addSi('Architecture', si.arch);
                     var fmtCache = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
+                    if (si.l0 > 0) addSi('L0 Cache', fmtCache(si.l0));
                     if (si.l1d > 0 || si.l1i > 0) {
                         var cArr = [];
                         if (si.l1d > 0) cArr.push('L1d '+fmtCache(si.l1d));
@@ -1580,6 +1581,7 @@ return view.extend({
                     }
                     if (si.l2 > 0) addSi('L2 Cache', fmtCache(si.l2));
                     if (si.l3 > 0) addSi('L3 Cache', fmtCache(si.l3));
+                    if (si.l4 > 0) addSi('L4 Cache', fmtCache(si.l4));
                     sysInfoGrid.appendChild(siGrid);
                     // CPU Security vulnerability chips
                     if (si.vulns && typeof si.vulns === 'object' && Object.keys(si.vulns).length > 0) {

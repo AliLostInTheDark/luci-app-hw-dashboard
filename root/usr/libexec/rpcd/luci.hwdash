@@ -896,7 +896,7 @@ EOF
 					SYS_ARCH=$(uname -m 2>/dev/null || echo "")
 					DISTRIB_ID=""; DISTRIB_RELEASE=""; DISTRIB_REVISION=""
 					[ -f /etc/openwrt_release ] && . /etc/openwrt_release
-					L1D_SIZE=0; L1I_SIZE=0; L2_SIZE=0; L3_SIZE=0
+					L0_SIZE=0; L1D_SIZE=0; L1I_SIZE=0; L2_SIZE=0; L3_SIZE=0; L4_SIZE=0
 					for _idir in /sys/devices/system/cpu/cpu0/cache/index*/; do
 						[ -f "$_idir/level" ] || continue
 						_lvl=$(cat "$_idir/level" 2>/dev/null)
@@ -904,10 +904,12 @@ EOF
 						_csz=$(cat "$_idir/size" 2>/dev/null | sed 's/[^0-9]//g')
 						[ -z "$_csz" ] && _csz=0
 						case "$_lvl-$_ct" in
+							0-*) [ $L0_SIZE -eq 0 ] && L0_SIZE=$((_csz*1024)) ;;
 							1-Data) L1D_SIZE=$((_csz*1024)) ;;
 							1-Instruction) L1I_SIZE=$((_csz*1024)) ;;
 							2-*) [ $L2_SIZE -eq 0 ] && L2_SIZE=$((_csz*1024)) ;;
 							3-*) [ $L3_SIZE -eq 0 ] && L3_SIZE=$((_csz*1024)) ;;
+							4-*) [ $L4_SIZE -eq 0 ] && L4_SIZE=$((_csz*1024)) ;;
 						esac
 					done
 					VULNS="{"
@@ -921,7 +923,7 @@ EOF
 						_FV=0
 					done
 					VULNS="$VULNS}"
-					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"vulns\":$VULNS"
+					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS"
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi
 				SYS_HOSTNAME=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
