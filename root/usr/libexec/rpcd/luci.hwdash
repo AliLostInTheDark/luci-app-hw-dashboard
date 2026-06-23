@@ -836,6 +836,7 @@ EOF
 				FF=1
 				for f2p in /sys/fs/f2fs/*; do
 					[ -d "$f2p" ] || continue
+					[ -f "$f2p/lifetime_write_kbytes" ] || continue
 					f2dev=${f2p##*/}
 					read_file f2_lw "$f2p/lifetime_write_kbytes" 0
 					read_file f2_util "$f2p/utilization" 0

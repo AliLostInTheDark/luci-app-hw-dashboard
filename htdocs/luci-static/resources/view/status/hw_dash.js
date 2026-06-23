@@ -185,6 +185,26 @@ return view.extend({
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
         var dskCard = createDial('dsk', 'Internal Storage');
+        dskCard.node.className = 'hw-card wide';
+        dskCard.node.style.justifyContent = 'flex-start';
+        dskCard.node.style.alignItems = 'stretch';
+        var _dskT = dskCard.node.children[0];
+        var _dskD = dskCard.node.children[1];
+        var _dskS = dskCard.node.children[2];
+        dskCard.node.innerHTML = '';
+        dskCard.node.appendChild(_dskT);
+        var _dskLayout = E('div', {class: 'hw-thermals-container', style: 'align-items: flex-start;'});
+        var _dskColL = E('div', {class: 'hw-thermals-col hw-thermals-col-left', style: 'flex: 0 0 auto; width: 230px; display: flex; flex-direction: column; align-items: center;'});
+        var _dskColDiv = E('div', {id: 'hw-dsk-col-divider', class: 'hw-thermals-divider', style: 'display: none;'});
+        var _dskColR = E('div', {class: 'hw-thermals-col hw-thermals-col-right', style: 'flex: 1 1 0; min-width: 0;'});
+        _dskColL.appendChild(_dskD);
+        _dskColL.appendChild(_dskS);
+        _dskColL.appendChild(E('div', {id: 'dial-meta-dsk', style: 'width: 100%; margin-top: 15px; display: flex; flex-direction: column; gap: 6px;'}));
+        _dskColR.appendChild(E('div', {id: 'hw-int-storage-extra', style: 'width: 100%;'}));
+        _dskLayout.appendChild(_dskColL);
+        _dskLayout.appendChild(_dskColDiv);
+        _dskLayout.appendChild(_dskColR);
+        dskCard.node.appendChild(_dskLayout);
         var coresNode = E('div', {
             id: 'hw-cores',
             class: 'hw-stats-list',
@@ -225,14 +245,6 @@ return view.extend({
             id: 'hw-ext-meta',
             style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'
         })]);
-        dskCard.node.appendChild(E('div', {
-            id: 'dial-meta-dsk',
-            style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'
-        }));
-        dskCard.node.appendChild(E('div', {
-            id: 'hw-int-storage-extra',
-            style: 'width: 100%;'
-        }));
         
         
         
@@ -290,8 +302,8 @@ return view.extend({
         container.appendChild(style);
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
-        container.appendChild(dskCard.node);
         container.appendChild(advCard);
+        container.appendChild(dskCard.node);
         container.appendChild(extCard);
         var myExtWrapper = E('div', {
             id: 'my-ext-wrapper',
@@ -805,22 +817,40 @@ return view.extend({
                         res.ubi_devs.forEach(function(u) {
                             var ratedEc = 3000;
                             var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
-                            var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB blocks' : '';
-                            var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb : ''));
-                            box.appendChild(makeBar2('Wear (Max EC / ' + ratedEc + ' MLC rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
+                            var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB' : '';
+                            var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb + ' erase blocks' : ''));
+                            box.appendChild(makeBar2('Wear Level (Max EC / ' + ratedEc + ' rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
+                            if (u.eb_size > 0 && u.total_ebs > 0) {
+                                var allocEbs = u.total_ebs - u.avail_ebs - u.bad_pebs;
+                                var allocBytes = allocEbs * u.eb_size;
+                                var totalUbiBytes = u.total_ebs * u.eb_size;
+                                var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
+                                box.appendChild(makeBar2('Allocated Capacity', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), getDynColor(capPct)));
+                            }
+                            var badClr = u.bad_pebs > 0 ? '#ffb300' : null;
+                            box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, badClr));
                             if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
-                            box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  |  Avail: ' + u.avail_ebs + '  |  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
                             if (u.page_size > 0) {
-                                box.appendChild(makeRow('NAND Geometry', 'Page: ' + fmtBytesS(u.page_size) + ' | Block: ' + fmtBytesS(u.block_size) + ' | OOB: ' + u.oob_size + ' B', null));
+                                var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
+                                box.appendChild(E('div', {style: 'margin-bottom: 8px;'}, [
+                                    E('div', {style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;'}, 'NAND Geometry'),
+                                    E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, [
+                                        geoChip('Page ' + fmtBytesS(u.page_size)),
+                                        geoChip('Block ' + fmtBytesS(u.block_size)),
+                                        geoChip('OOB ' + u.oob_size + ' B')
+                                    ])
+                                ]));
                             }
                             if (u.volumes && u.volumes.length > 0) {
                                 var vd = E('div', {style: 'margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.2));'});
                                 vd.appendChild(E('div', {style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;'}, 'Volumes'));
                                 u.volumes.forEach(function(vol) {
-                                    var vsz = vol.data_bytes > 0 ? ' | ' + fmtBytesS(vol.data_bytes) : '';
+                                    var reservedBytes = (vol.reserved_ebs || 0) * (vol.eb_size || u.eb_size);
+                                    var vsz = vol.data_bytes > 0 ? fmtBytesS(vol.data_bytes) : '0 B';
+                                    if (reservedBytes > 0 && reservedBytes !== vol.data_bytes) vsz += ' / ' + fmtBytesS(reservedBytes);
                                     vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
                                         E('span', {style: 'color:#00bcd4;'}, vol.name),
-                                        E('span', {style: 'opacity: 0.7;'}, vol.type + vsz)
+                                        E('span', {style: 'opacity: 0.7;'}, vol.type + ' | ' + vsz)
                                     ]));
                                 });
                                 box.appendChild(vd);
@@ -889,6 +919,11 @@ return view.extend({
                             extraNode.appendChild(f2Box);
                         });
                     }
+                })();
+                (function() {
+                    var extraNode = document.getElementById('hw-int-storage-extra');
+                    var colDiv = document.getElementById('hw-dsk-col-divider');
+                    if (colDiv && extraNode) colDiv.style.display = extraNode.children.length > 0 ? '' : 'none';
                 })();
 
                 if (res.block_devs && Array.isArray(res.block_devs)) {
