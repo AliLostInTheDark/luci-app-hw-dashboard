@@ -101,25 +101,33 @@ return view.extend({
                 circ: circumference
             };
         };
-        // IEEE 802.11 U-NII sub-band tables, per Wikipedia "List of WLAN channels".
-        // Ranges span every standardised 20 MHz channel in each sub-band (including
-        // the rarely-enabled edge channels: 68 in U-NII-2A, 96 in U-NII-2C, 181 in
-        // U-NII-4) so any radio's channel list is labelled. Anything outside these
-        // is still shown verbatim by the fallback below.
-        // Each row: [name, firstChannel, lastChannel, frequencyRange, requiresDFS]
+        // IEEE 802.11 U-NII sub-band classification, per Wikipedia "List of WLAN
+        // channels". Ranges span every standardised 20 MHz channel (incl. the rare
+        // edge channels: 68 in U-NII-2A, 96 in U-NII-2C, 181 in U-NII-4) purely to
+        // group channels into the right band. The channel numbers AND the frequency
+        // span shown come from the radio's actually-enabled channels (regulatory-
+        // domain filtered in the backend), never the theoretical band edges — so the
+        // display reflects this specific router's capability, not the standard.
+        // Each row: [name, firstChannel, lastChannel, requiresDFS]
         var UNII_5GHZ = [
-            ['U-NII-1',  36,  48,  '5150-5250 MHz', false],
-            ['U-NII-2A', 52,  68,  '5250-5350 MHz', true ],
-            ['U-NII-2C', 96,  144, '5470-5725 MHz', true ],
-            ['U-NII-3',  149, 165, '5725-5850 MHz', false],
-            ['U-NII-4',  169, 181, '5850-5925 MHz', false]
+            ['U-NII-1',  36,  48,  false],
+            ['U-NII-2A', 52,  68,  true ],
+            ['U-NII-2C', 96,  144, true ],
+            ['U-NII-3',  149, 165, false],
+            ['U-NII-4',  169, 181, false]
         ];
         var UNII_6GHZ = [
-            ['U-NII-5',  1,   93,  '5925-6425 MHz', false],
-            ['U-NII-6',  97,  113, '6425-6525 MHz', false],
-            ['U-NII-7',  117, 185, '6525-6875 MHz', false],
-            ['U-NII-8',  189, 233, '6875-7125 MHz', false]
+            ['U-NII-5',  1,   93,  false],
+            ['U-NII-6',  97,  113, false],
+            ['U-NII-7',  117, 185, false],
+            ['U-NII-8',  189, 233, false]
         ];
+        // Center frequency (MHz) of a 20 MHz channel within its band.
+        var chanFreq = function(band, ch) {
+            if (band.indexOf('2.4') !== -1) return ch === 14 ? 2484 : 2412 + (ch - 1) * 5;
+            if (band.indexOf('6') !== -1) return 5950 + ch * 5;
+            return 5000 + ch * 5; // 5 GHz
+        };
         var groupChannels = function(band, channels) {
             if (!channels || channels.length === 0) return '';
             var chs = [];
@@ -130,20 +138,24 @@ return view.extend({
             if (chs.length === 0) return '';
             chs.sort(function(a, b) { return a - b; });
             chs = chs.filter(function(c, i) { return i === 0 || c !== chs[i - 1]; });
-            var rng = function(lo, hi) { return lo === hi ? '' + lo : lo + '-' + hi; };
-            // 2.4 GHz is a single contiguous band; show the span and its frequencies.
+            // Format an enabled span as "lo-hi (freqLo-freqHi MHz)" from the real
+            // frequencies of the lowest and highest channel that is actually on.
+            var fmt = function(lo, hi, dfs) {
+                var fl = chanFreq(band, lo), fh = chanFreq(band, hi);
+                var chTxt = lo === hi ? '' + lo : lo + '-' + hi;
+                var frTxt = fl === fh ? fl + ' MHz' : fl + '-' + fh + ' MHz';
+                return chTxt + ' (' + frTxt + (dfs ? ', DFS' : '') + ')';
+            };
+            // 2.4 GHz is a single contiguous band.
             if (band.indexOf('2.4') !== -1) {
-                var f24 = function(c) { return c === 14 ? 2484 : 2412 + (c - 1) * 5; };
-                var lo = chs[0], hi = chs[chs.length - 1];
-                return rng(lo, hi) + ' (' + f24(lo) + '-' + f24(hi) + ' MHz)';
+                return fmt(chs[0], chs[chs.length - 1], false);
             }
             var table = band.indexOf('6') !== -1 ? UNII_6GHZ : UNII_5GHZ;
             var out = [];
             table.forEach(function(b) {
                 var inBand = chs.filter(function(c) { return c >= b[1] && c <= b[2]; });
                 if (inBand.length === 0) return;
-                out.push(b[0] + ' ' + rng(inBand[0], inBand[inBand.length - 1]) +
-                    ' (' + b[3] + (b[4] ? ', DFS' : '') + ')');
+                out.push(b[0] + ' ' + fmt(inBand[0], inBand[inBand.length - 1], b[3]));
             });
             // Any channel outside the known sub-bands is listed verbatim.
             var unknown = chs.filter(function(c) {

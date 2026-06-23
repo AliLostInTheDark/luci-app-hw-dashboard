@@ -766,7 +766,10 @@ EOF
 						freqlist=$(iwinfo "$iface" freqlist 2>/dev/null)
 						enabled_ch=""
 						if [ -n "$freqlist" ]; then
-							enabled_ch=$(echo "$freqlist" | grep -oE "Channel [0-9]+" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+							# Only channels actually usable in the current regulatory
+							# domain — drop the ones iwinfo marks "[restricted]" so the
+							# UI reflects this router, not the full hardware/standard set.
+							enabled_ch=$(echo "$freqlist" | grep -vi 'restricted' | grep -oE "Channel [0-9]+" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
 						fi
 
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
