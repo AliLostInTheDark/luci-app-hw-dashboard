@@ -5,7 +5,7 @@ LUCI_TITLE:=Hardware Dashboard
 LUCI_DEPENDS:=+luci-base
 LUCI_PKGARCH:=all
 PKG_VERSION:=1.0
-PKG_RELEASE:=16
+PKG_RELEASE:=17
 PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -18,6 +18,7 @@ define Package/luci-app-hw-dashboard/postinst
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 	rm -f /tmp/hwdash_*
+	rm -rf /etc/hwdash
 	/etc/init.d/rpcd restart 2>/dev/null
 	exit 0
 }

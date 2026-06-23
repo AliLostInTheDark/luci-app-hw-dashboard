@@ -36,8 +36,10 @@ case "$1" in
 	call)
 		case "$2" in
 			info)
-				if [ ! -f /tmp/hwdash_wifi_cap_cache_v4.json ] && command -v iw >/dev/null; then
-					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > /tmp/hwdash_wifi_cap_cache_v4.json 2>/dev/null
+				HWDASH_PERSIST_DIR=/etc/hwdash
+				if [ ! -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && command -v iw >/dev/null; then
+					mkdir -p "$HWDASH_PERSIST_DIR"
+					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" 2>/dev/null
 				fi
 
 				BOARD_DETECT=$(cat /tmp/sysinfo/model 2>/dev/null)
@@ -698,8 +700,8 @@ EOF
 						{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
 						phycap="{}"
-						if [ -f /tmp/hwdash_wifi_cap_cache_v4.json ] && [ "$phyname" != "Unknown" ]; then
-							phycap_str=$(jsonfilter -i /tmp/hwdash_wifi_cap_cache_v4.json -e "@.$phyname" 2>/dev/null)
+						if [ -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && [ "$phyname" != "Unknown" ]; then
+							phycap_str=$(jsonfilter -i "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" -e "@.$phyname" 2>/dev/null)
 							[ -n "$phycap_str" ] && phycap="$phycap_str"
 						fi
 
@@ -885,12 +887,13 @@ EOF
 				done
 				F2FS_INFO="$F2FS_INFO]"
 
-				# System info — kernel/arch/distrib, CPU caches and vulnerabilities
-				# never change at runtime, so cache that fragment for 1h. Only
-				# hostname and overlay usage are recomputed live each poll.
-				SYS_STATIC_CACHE=/tmp/hwdash_sys_static_v1.frag
+				# System info — kernel/arch/distrib, CPU caches, soc0 and vulnerabilities
+				# are hardware-static: store persistently in /etc/hwdash/ so they
+				# survive reboots. Only hostname and overlay usage are recomputed live.
+				# postinst clears /etc/hwdash/ on upgrade so stale data never persists.
+				SYS_STATIC_CACHE="$HWDASH_PERSIST_DIR/sys_static_v2.frag"
 				SYS_STATIC_FRAG=""
-				_cache_age_ok "$SYS_STATIC_CACHE" 3600 && SYS_STATIC_FRAG=$(cat "$SYS_STATIC_CACHE" 2>/dev/null)
+				[ -f "$SYS_STATIC_CACHE" ] && SYS_STATIC_FRAG=$(cat "$SYS_STATIC_CACHE" 2>/dev/null)
 				if [ -z "$SYS_STATIC_FRAG" ]; then
 					SYS_KVER=$(uname -r 2>/dev/null || echo "")
 					SYS_ARCH=$(uname -m 2>/dev/null || echo "")
@@ -963,6 +966,7 @@ EOF
 					SOC0_SERIAL=$(cat /sys/devices/soc0/serial_number 2>/dev/null | tr -d '\n\r')
 					SOC0_ID=$(cat /sys/devices/soc0/soc_id 2>/dev/null | tr -d '\n\r')
 					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS,\"soc_family\":\"$(json_str "$SOC0_FAMILY")\",\"soc_machine\":\"$(json_str "$SOC0_MACHINE")\",\"soc_revision\":\"$(json_str "$SOC0_REVISION")\",\"soc_serial\":\"$(json_str "$SOC0_SERIAL")\",\"soc_id\":\"$(json_str "$SOC0_ID")\""
+					mkdir -p "$HWDASH_PERSIST_DIR" 2>/dev/null
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi
 				SYS_HOSTNAME=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
