@@ -839,7 +839,9 @@ return view.extend({
                                     var allocBytes = allocEbs * u.eb_size;
                                     var totalUbiBytes = u.total_ebs * u.eb_size;
                                     var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
-                                    box.appendChild(makeBar2('Allocated Capacity', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), getDynColor(capPct)));
+                                    // UBI normally reserves all PEBs upfront; only warn on extreme over-allocation
+                                    var capColor = capPct >= 98 ? '#ff5252' : capPct >= 88 ? '#ffb300' : '#00bcd4';
+                                    box.appendChild(makeBar2('PEB Utilization', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), capColor));
                                 }
                                 box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
                                 if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
