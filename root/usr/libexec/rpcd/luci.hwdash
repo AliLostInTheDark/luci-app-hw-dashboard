@@ -261,8 +261,12 @@ case "$1" in
 					fi
 
 					if [ -b "$fs" ] || [ -c "$fs" ]; then
-						maj=$(ls -ln "$fs" 2>/dev/null | awk '{print $5}' | tr -d ',')
-						min=$(ls -ln "$fs" 2>/dev/null | awk '{print $6}')
+						# ls -ln prints "major," and "minor" in fields 5 and 6 for a
+						# device node; read once instead of two ls|awk pipelines.
+						read -r _ _ _ _ maj min _ <<EOF
+$(ls -ln "$fs" 2>/dev/null)
+EOF
+						maj=${maj%,}
 						if [ -n "$maj" ] && [ -n "$min" ]; then
 							realdev=$(awk -v maj="$maj" -v min="$min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
 						fi
@@ -339,10 +343,13 @@ EOF
 					fi
 				done
 
+				mtd_phys=0
 				if [ "$max_mtd" -gt 0 ]; then
 					if [ "$sum_mtd" -ge "$((max_mtd * 19 / 10))" ] && [ "$sum_mtd" -le "$((max_mtd * 21 / 10))" ]; then
+						mtd_phys=$max_mtd
 						total_phys=$((total_phys + max_mtd))
 					else
+						mtd_phys=$sum_mtd
 						total_phys=$((total_phys + sum_mtd))
 					fi
 				fi
@@ -459,9 +466,14 @@ EOF
 				CONN_MAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
 				[ -z "$CONN_COUNT" ] && CONN_COUNT=0
 				[ -z "$CONN_MAX" ] && CONN_MAX=0
-				CTXT=$(awk '/^ctxt/ {print $2}' /proc/stat 2>/dev/null)
+				# One pass over /proc/stat for aggregate CPU ticks, context switches
+				# and interrupts — previously three separate awk/while reads of the
+				# same file.
+				read CPU_TICKS CTXT INTR <<EOF
+$(awk '/^cpu /{t=$2+$3+$4+$5+$6+$7+$8+$9} /^ctxt /{c=$2} /^intr /{i=$2} END{print t" "c" "i}' /proc/stat 2>/dev/null)
+EOF
+				[ -z "$CPU_TICKS" ] && CPU_TICKS=0
 				[ -z "$CTXT" ] && CTXT=0
-				INTR=$(awk '/^intr/ {print $2}' /proc/stat 2>/dev/null)
 				[ -z "$INTR" ] && INTR=0
 
 
@@ -557,16 +569,14 @@ EOF
 					read_ios=0
 					write_ios=0
 					if [ -f "$dev/stat" ]; then
-						stat_data=$(cat "$dev/stat" 2>/dev/null)
-						# stat fields: 3=sectors read, 7=sectors written, 1=read ios, 5=write ios
-						read_sect=$(echo "$stat_data" | awk '{print $3}')
-						write_sect=$(echo "$stat_data" | awk '{print $7}')
-						r_ios=$(echo "$stat_data" | awk '{print $1}')
-						w_ios=$(echo "$stat_data" | awk '{print $5}')
-						[ -n "$read_sect" ] && read_bytes=$((read_sect * 512))
-						[ -n "$write_sect" ] && write_bytes=$((write_sect * 512))
-						[ -n "$r_ios" ] && read_ios=$r_ios
-						[ -n "$w_ios" ] && write_ios=$w_ios
+						# /sys/block/X/stat fields: 1=read ios, 3=sectors read,
+						# 5=write ios, 7=sectors written. One builtin read instead
+						# of cat + four echo|awk pipelines.
+						read _rio _ _rsec _ _wio _ _wsec _ < "$dev/stat" 2>/dev/null
+						read_ios=${_rio:-0}
+						write_ios=${_wio:-0}
+						read_bytes=$(( ${_rsec:-0} * 512 ))
+						write_bytes=$(( ${_wsec:-0} * 512 ))
 					fi
 					
 					# Find mount info
@@ -743,11 +753,19 @@ EOF
 
 
 
-				CPU_TICKS=0
-				while read -r n u ni s i iw ir sir st _; do
-					if [ "$n" = "cpu" ]; then CPU_TICKS=$((u+ni+s+i+iw+ir+sir+st)); break; fi
-				done < /proc/stat
-
+				# UBI device tree + MTD partition table are hardware inventory:
+				# the layout is fixed at flash time and wear/ECC counters move on
+				# minute-plus timescales. Enumerating them every poll was the
+				# largest remaining fork cluster (~one cat per MTD partition for
+				# the type, plus json_str). Cache the assembled JSON for 30s, the
+				# same volatile pattern used for the WiFi block. postinst clears
+				# /tmp/hwdash_* on upgrade so the schema can never go stale.
+				STORAGE_INV_CACHE=/tmp/hwdash_storage_inv_v1.sh
+				UBI_DEVS=""; MTD_PARTS=""; UBI_MAX_EC=0; UBI_BAD_PEB=0
+				if _cache_age_ok "$STORAGE_INV_CACHE" 30; then
+					. "$STORAGE_INV_CACHE" 2>/dev/null
+				fi
+				if [ -z "$MTD_PARTS" ]; then
 				# Legacy UBI compat
 				UBI_MAX_EC=0
 				UBI_BAD_PEB=0
@@ -817,6 +835,13 @@ EOF
 					done < /proc/mtd
 				fi
 				MTD_PARTS="$MTD_PARTS]"
+				{
+					printf "UBI_MAX_EC=%s\n" "${UBI_MAX_EC:-0}"
+					printf "UBI_BAD_PEB=%s\n" "${UBI_BAD_PEB:-0}"
+					printf "UBI_DEVS='%s'\n" "$UBI_DEVS"
+					printf "MTD_PARTS='%s'\n" "$MTD_PARTS"
+				} > "$STORAGE_INV_CACHE.$$" 2>/dev/null && mv "$STORAGE_INV_CACHE.$$" "$STORAGE_INV_CACHE" 2>/dev/null
+				fi
 
 				# eMMC / SD health
 				EMMC_INFO="null"
@@ -994,7 +1019,7 @@ EOF
 					[ -z "$NAND_CHIPID" ] && NAND_CHIPID="Not Available"
 				fi
 
-				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"nand_chip_id\":\"$(json_str "$NAND_CHIPID")\", \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"nand_chip_id\":\"$(json_str "$NAND_CHIPID")\", \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

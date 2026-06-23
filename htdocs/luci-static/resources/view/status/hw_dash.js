@@ -45,7 +45,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } @media (max-width: 600px) { #hw-dsk-ov-row { flex-direction: column !important; align-items: center !important; } #hw-dsk-ov-vrule { display: none !important; } #hw-dsk-stats-area { width: 100% !important; padding-top: 10px !important; } } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -184,31 +184,14 @@ return view.extend({
 
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
-        var dskCard = createDial('dsk', 'Internal Storage');
-        dskCard.node.className = 'hw-card wide';
-        dskCard.node.style.justifyContent = 'flex-start';
-        dskCard.node.style.alignItems = 'stretch';
-        var _dskT = dskCard.node.children[0];
-        var _dskD = dskCard.node.children[1];
-        var _dskS = dskCard.node.children[2];
-        dskCard.node.innerHTML = '';
-        dskCard.node.appendChild(_dskT);
-        // Header row: dial | vertical rule | fs bars + meta stats
-        // On mobile (≤600px) the #hw-dsk-ov-row media query stacks them vertically
-        var _dskOvRow = E('div', {id: 'hw-dsk-ov-row', style: 'display: flex; align-items: flex-start; width: 100%;'});
-        var _dskDialArea = E('div', {style: 'flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;'});
-        _dskDialArea.appendChild(_dskD);
-        var _dskVRule = E('div', {id: 'hw-dsk-ov-vrule', style: 'width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); align-self: stretch; margin: 8px 20px;'});
-        var _dskStatsArea = E('div', {id: 'hw-dsk-stats-area', style: 'flex: 1 1 0; min-width: 0; padding-top: 5px;'});
-        _dskStatsArea.appendChild(_dskS);
-        _dskStatsArea.appendChild(E('div', {id: 'dial-meta-dsk', style: 'margin-top: 12px; display: flex; flex-direction: column; gap: 5px;'}));
-        _dskOvRow.appendChild(_dskDialArea);
-        _dskOvRow.appendChild(_dskVRule);
-        _dskOvRow.appendChild(_dskStatsArea);
-        dskCard.node.appendChild(_dskOvRow);
-        // Horizontal rule shown only when detail sections exist
-        dskCard.node.appendChild(E('div', {id: 'hw-dsk-horiz-divider', style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0; display: none;'}));
-        dskCard.node.appendChild(E('div', {id: 'hw-int-storage-extra', style: 'width: 100%;'}));
+        var _dskNode = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'});
+        _dskNode.appendChild(E('h3', {}, 'Internal Storage'));
+        _dskNode.appendChild(E('div', {id: 'stats-dsk', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;'}));
+        _dskNode.appendChild(E('div', {style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'}));
+        _dskNode.appendChild(E('div', {id: 'dial-meta-dsk', style: 'display: flex; flex-direction: column; gap: 5px;'}));
+        _dskNode.appendChild(E('div', {id: 'hw-dsk-horiz-divider', style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0; display: none;'}));
+        _dskNode.appendChild(E('div', {id: 'hw-int-storage-extra', style: 'width: 100%;'}));
+        var dskCard = {node: _dskNode};
         var coresNode = E('div', {
             id: 'hw-cores',
             class: 'hw-stats-list',
@@ -620,8 +603,12 @@ return view.extend({
                     var totalSpace = 0;
                     var totalUsed = 0;
                     var totalPhys = 0;
-                    var nandChipTotal = res.mtd_count > 0 ? Math.round(res.storage_total_phys / 1024) : 0;
+                    var nandChipTotal = (res.mtd_count > 0 && res.mtd_phys) ? Math.round(res.mtd_phys / 1024) : 0;
                     var nandRootfsVol = 0;
+                    var emmcTotal = 0;
+                    var diskTotal = 0;
+                    var diskRootfsVol = 0;
+                    var _seenDiskDev = {};
                     var dskNode = document.getElementById('stats-dsk');
                     if (dskNode) dskNode.innerHTML = '';
                     res.df.forEach(function(fs) {
@@ -633,6 +620,14 @@ return view.extend({
                         if (fs.hw_size > 0 && !isExt) totalPhys += fs.hw_size;
                         if (fs.hw_type === 'NAND' && !isExt && fs.mount === '/' && fs.hw_size > 0) {
                             nandRootfsVol = fs.hw_size;
+                        }
+                        if (!isExt) {
+                            if (fs.hw_type === 'eMMC' || fs.hw_type === 'MMC' || fs.hw_type === 'SD') {
+                                if (fs.hw_size > emmcTotal) emmcTotal = fs.hw_size;
+                            } else if (fs.hw_type === 'HDD' || fs.hw_type === 'SSD' || fs.hw_type === 'NVMe') {
+                                if (!_seenDiskDev[fs.dev]) { diskTotal += fs.hw_size; _seenDiskDev[fs.dev] = true; }
+                                if (fs.mount === '/' && fs.total > 0) diskRootfsVol = fs.total;
+                            }
                         }
                         if (isExt) return;
                         var readSpeed = 0;
@@ -735,50 +730,45 @@ return view.extend({
                             }, bars));
                         }
                     });
-                    if (totalSpace > 0 || nandChipTotal > 0) {
-                        var _ovSi = res.sys_info || {};
-                        var _hasOvDial = nandChipTotal > 0 && (_ovSi.overlay_total || 0) > 0;
-                        var _dialPct = _hasOvDial ? (_ovSi.overlay_used / _ovSi.overlay_total) * 100 : (totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0);
-                        var _dialSub = _hasOvDial ? Math.round(_ovSi.overlay_used / 1048576) + ' MB overlay' : (totalUsed / 1024).toFixed(0) + ' MB';
-                        updateDial('dsk', _dialPct, dskCard.circ);
-                        document.getElementById('dial-sub-dsk').textContent = _dialSub;
-                        var dskMeta = document.getElementById('dial-meta-dsk');
-                        if (!dskMeta) {
-                            dskMeta = E('div', {
-                                id: 'dial-meta-dsk',
-                                style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'
-                            });
-                            var dContainer = document.getElementById('dial-txt-dsk').parentNode.parentNode;
-                            dContainer.appendChild(dskMeta);
-                        }
+                    var _ovSi = res.sys_info || {};
+                    var dskMeta = document.getElementById('dial-meta-dsk');
+                    if (dskMeta) {
                         var fmtSize = function(kb) {
                             if (kb >= 1048576) return (kb / 1048576).toFixed(2) + ' GB';
                             return (kb / 1024).toFixed(0) + ' MB';
                         };
                         var _fmtB = function(b) { return b >= 1073741824 ? (b/1073741824).toFixed(2)+' GB' : b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b >= 1024 ? (b/1024).toFixed(0)+' KB' : b+' B'; };
+                        var addMR = function(lbl, val, color) {
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [
+                                E('span', {class: 'hw-stat-label'}, lbl),
+                                E('span', {class: 'hw-stat-value', style: color ? 'color:' + color + ';' : ''}, val)
+                            ]));
+                        };
                         dskMeta.innerHTML = '';
                         if (nandChipTotal > 0) {
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical NAND Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandChipTotal))]));
-                            if (nandRootfsVol > 0) dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'rootfs Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandRootfsVol))]));
+                            addMR('Physical NAND Total', fmtSize(nandChipTotal));
+                            if (nandRootfsVol > 0 && nandRootfsVol !== nandChipTotal) addMR('rootfs Physical Total', fmtSize(nandRootfsVol));
                             if (_ovSi.overlay_total > 0) {
                                 var _ovPctN = Math.round(_ovSi.overlay_used / _ovSi.overlay_total * 100);
-                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Total'), E('span', {class: 'hw-stat-value'}, _fmtB(_ovSi.overlay_total))]));
-                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Used'), E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPctN)+';'}, _fmtB(_ovSi.overlay_used))]));
-                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Free'), E('span', {class: 'hw-stat-value'}, _fmtB(_ovSi.overlay_free))]));
+                                addMR('Overlay Total', _fmtB(_ovSi.overlay_total));
+                                addMR('Overlay Used', _fmtB(_ovSi.overlay_used), getDynColor(_ovPctN));
+                                addMR('Overlay Free', _fmtB(_ovSi.overlay_free));
                             }
-                        } else {
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(totalPhys > 0 ? totalPhys : totalSpace))]));
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Usable Total'), E('span', {class: 'hw-stat-value'}, fmtSize(totalSpace))]));
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Usable Free'), E('span', {class: 'hw-stat-value'}, fmtSize(totalSpace - totalUsed))]));
-                            if (_ovSi.overlay_total > 0) {
-                                var _ovPct2 = Math.round(_ovSi.overlay_used / _ovSi.overlay_total * 100);
-                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Used'), E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPct2)+';'}, _fmtB(_ovSi.overlay_used)+' / '+_fmtB(_ovSi.overlay_total))]));
-                            }
+                        } else if (emmcTotal > 0) {
+                            addMR('Physical eMMC Total', fmtSize(emmcTotal));
+                            if (totalSpace > 0) { addMR('Usable Total', fmtSize(totalSpace)); addMR('Usable Free', fmtSize(totalSpace - totalUsed)); }
+                        } else if (diskTotal > 0) {
+                            addMR('Physical Disk Total', fmtSize(diskTotal));
+                            if (diskRootfsVol > 0 && diskRootfsVol !== diskTotal) addMR('rootfs Physical Total', fmtSize(diskRootfsVol));
+                            if (totalSpace > 0) { addMR('Usable Total', fmtSize(totalSpace)); addMR('Usable Free', fmtSize(totalSpace - totalUsed)); }
+                        } else if (totalSpace > 0) {
+                            addMR('Usable Total', fmtSize(totalSpace));
+                            addMR('Usable Free', fmtSize(totalSpace - totalUsed));
                         }
-                        if (res.mtd_count > 0) dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'MTD Partitions'), E('span', {class: 'hw-stat-value'}, res.mtd_count)]));
-                        var extCardNode = document.getElementById('hw-ext-card');
-                        if (extCardNode) extCardNode.style.display = 'none';
+                        if (res.mtd_count > 0) addMR('MTD Partitions', String(res.mtd_count));
                     }
+                    var extCardNode = document.getElementById('hw-ext-card');
+                    if (extCardNode) extCardNode.style.display = 'none';
                 }
 
                 (function() {
