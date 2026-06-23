@@ -620,7 +620,7 @@ return view.extend({
                     var totalSpace = 0;
                     var totalUsed = 0;
                     var totalPhys = 0;
-                    var nandChipTotal = 0;
+                    var nandChipTotal = res.mtd_count > 0 ? Math.round(res.storage_total_phys / 1024) : 0;
                     var nandRootfsVol = 0;
                     var dskNode = document.getElementById('stats-dsk');
                     if (dskNode) dskNode.innerHTML = '';
@@ -631,9 +631,8 @@ return view.extend({
                             totalUsed += fs.used;
                         }
                         if (fs.hw_size > 0 && !isExt) totalPhys += fs.hw_size;
-                        if (fs.hw_type === 'NAND' && !isExt) {
-                            if (fs.hw_size > nandChipTotal) nandChipTotal = fs.hw_size;
-                            if (fs.mount === '/' && fs.total > 0) nandRootfsVol = fs.total;
+                        if (fs.hw_type === 'NAND' && !isExt && fs.mount === '/' && fs.hw_size > 0) {
+                            nandRootfsVol = fs.hw_size;
                         }
                         if (isExt) return;
                         var readSpeed = 0;
@@ -685,8 +684,10 @@ return view.extend({
                         var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
                         var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
                         if (dskNode) {
-                            var speedStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'EC: ' + res.ubi_max_ec + ' | Bad: ' + res.ubi_bad_peb : 'R: ' + formatSpeed(readSpeed) + ' | W: ' + formatSpeed(writeSpeed);
-                            var iopsStr = fs.hw_type === 'NAND' && res.ubi_max_ec !== undefined && res.ubi_max_ec != 0 ? 'UBI Wear: ' + (res.ubi_max_ec / 3000 * 100).toFixed(1) + '% (' + res.ubi_max_ec + ' cycles)' : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
+                            var _fmtKb = function(kb) { return kb >= 1048576 ? (kb/1048576).toFixed(1)+' GB' : kb >= 1024 ? (kb/1024).toFixed(0)+' MB' : kb+' KB'; };
+                            var _isNand = fs.hw_type === 'NAND';
+                            var speedStr = _isNand ? _fmtKb(fs.used) + ' / ' + _fmtKb(fs.total) : 'R: ' + formatSpeed(readSpeed) + ' | W: ' + formatSpeed(writeSpeed);
+                            var iopsStr = _isNand ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
                             var bars = [E('div', {
                                 class: 'hw-progress-header'
                             }, [E('span', {
@@ -734,10 +735,13 @@ return view.extend({
                             }, bars));
                         }
                     });
-                    if (totalSpace > 0) {
-                        var usedPct = totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0;
-                        updateDial('dsk', usedPct, dskCard.circ);
-                        document.getElementById('dial-sub-dsk').textContent = (totalUsed / 1024).toFixed(0) + ' MB';
+                    if (totalSpace > 0 || nandChipTotal > 0) {
+                        var _ovSi = res.sys_info || {};
+                        var _hasOvDial = nandChipTotal > 0 && (_ovSi.overlay_total || 0) > 0;
+                        var _dialPct = _hasOvDial ? (_ovSi.overlay_used / _ovSi.overlay_total) * 100 : (totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0);
+                        var _dialSub = _hasOvDial ? Math.round(_ovSi.overlay_used / 1048576) + ' MB overlay' : (totalUsed / 1024).toFixed(0) + ' MB';
+                        updateDial('dsk', _dialPct, dskCard.circ);
+                        document.getElementById('dial-sub-dsk').textContent = _dialSub;
                         var dskMeta = document.getElementById('dial-meta-dsk');
                         if (!dskMeta) {
                             dskMeta = E('div', {
@@ -748,49 +752,30 @@ return view.extend({
                             dContainer.appendChild(dskMeta);
                         }
                         var fmtSize = function(kb) {
-                            if (kb > 1048576) return (kb / 1048576).toFixed(2) + ' GB';
+                            if (kb >= 1048576) return (kb / 1048576).toFixed(2) + ' GB';
                             return (kb / 1024).toFixed(0) + ' MB';
                         };
+                        var _fmtB = function(b) { return b >= 1073741824 ? (b/1073741824).toFixed(2)+' GB' : b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b >= 1024 ? (b/1024).toFixed(0)+' KB' : b+' B'; };
                         dskMeta.innerHTML = '';
                         if (nandChipTotal > 0) {
                             dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical NAND Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandChipTotal))]));
                             if (nandRootfsVol > 0) dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'rootfs Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandRootfsVol))]));
+                            if (_ovSi.overlay_total > 0) {
+                                var _ovPctN = Math.round(_ovSi.overlay_used / _ovSi.overlay_total * 100);
+                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Total'), E('span', {class: 'hw-stat-value'}, _fmtB(_ovSi.overlay_total))]));
+                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Used'), E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPctN)+';'}, _fmtB(_ovSi.overlay_used))]));
+                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Free'), E('span', {class: 'hw-stat-value'}, _fmtB(_ovSi.overlay_free))]));
+                            }
                         } else {
                             dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(totalPhys > 0 ? totalPhys : totalSpace))]));
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Usable Total'), E('span', {class: 'hw-stat-value'}, fmtSize(totalSpace))]));
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Usable Free'), E('span', {class: 'hw-stat-value'}, fmtSize(totalSpace - totalUsed))]));
+                            if (_ovSi.overlay_total > 0) {
+                                var _ovPct2 = Math.round(_ovSi.overlay_used / _ovSi.overlay_total * 100);
+                                dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Overlay Used'), E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPct2)+';'}, _fmtB(_ovSi.overlay_used)+' / '+_fmtB(_ovSi.overlay_total))]));
+                            }
                         }
-                        dskMeta.appendChild(E('div', {
-                            class: 'hw-stat-row'
-                        }, [E('span', {
-                            class: 'hw-stat-label'
-                        }, 'Usable Total'), E('span', {
-                            class: 'hw-stat-value'
-                        }, fmtSize(totalSpace))]));
-                        dskMeta.appendChild(E('div', {
-                            class: 'hw-stat-row'
-                        }, [E('span', {
-                            class: 'hw-stat-label'
-                        }, 'Usable Free'), E('span', {
-                            class: 'hw-stat-value'
-                        }, fmtSize(totalSpace - totalUsed))]));
-                        if (res.mtd_count > 0) {
-                            dskMeta.appendChild(E('div', {
-                                class: 'hw-stat-row'
-                            }, [E('span', {
-                                class: 'hw-stat-label'
-                            }, 'MTD Partitions'), E('span', {
-                                class: 'hw-stat-value'
-                            }, res.mtd_count)]));
-                        }
-                        if (res.sys_info && res.sys_info.overlay_total > 0) {
-                            var _ovTot = res.sys_info.overlay_total;
-                            var _ovUsd = res.sys_info.overlay_used;
-                            var _ovPct = Math.round((_ovUsd / _ovTot) * 100);
-                            var _fmtOv = function(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b >= 1024 ? (b/1024).toFixed(0)+' KB' : b+' B'; };
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [
-                                E('span', {class: 'hw-stat-label'}, 'Overlay Used'),
-                                E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPct)+';'}, _fmtOv(_ovUsd)+' / '+_fmtOv(_ovTot))
-                            ]));
-                        }
+                        if (res.mtd_count > 0) dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'MTD Partitions'), E('span', {class: 'hw-stat-value'}, res.mtd_count)]));
                         var extCardNode = document.getElementById('hw-ext-card');
                         if (extCardNode) extCardNode.style.display = 'none';
                     }
@@ -861,6 +846,7 @@ return view.extend({
                                 var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
                                 var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB' : '';
                                 var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb + ' erase blocks' : ''));
+                                if (res.nand_chip_id !== undefined) box.appendChild(makeRow('Chip ID', res.nand_chip_id || 'Not Available', res.nand_chip_id && res.nand_chip_id !== 'Not Available' ? null : '#9e9e9e'));
                                 box.appendChild(makeBar2('Wear Level (Max EC / ' + ratedEc + ' rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
                                 if (u.eb_size > 0 && u.total_ebs > 0) {
                                     var allocEbs = u.total_ebs - u.avail_ebs - u.bad_pebs;
