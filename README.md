@@ -36,12 +36,11 @@ Installing a newer release over an existing one automatically clears all persist
 
 The dashboard runs on any OpenWrt device. It has been developed and validated on the following JioRouter hardware:
 
-| Model | SoC | Notes |
-|-------|-----|-------|
-| JIDU6J11 | Qualcomm IPQ9554 | Primary development target |
-| JIDU6J01 | Qualcomm IPQ9574 | |
-| JIDU6101 | Qualcomm IPQ9574 | |
-| JIDU6700 | Qualcomm IPQ5018 | WiFi chip temperatures non-functional — calibration data absent from Factory partition |
+| Model | Variants | SoC | Notes |
+|-------|----------|-----|-------|
+| JIDU6J11 | JIDU6111 — JIDU6911 | Qualcomm IPQ9554 | Primary development target |
+| JIDU6J01 | JIDU6101 — JIDU6801 | MediaTek MT7986a | |
+| JIDU6700 | — | Qualcomm IPQ5018 | WiFi chip temperatures non-functional — calibration data absent from Factory partition |
 
 On x86/x86\_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family, SoC ID, machine name) are silently omitted. All other functionality is platform-independent.
 
