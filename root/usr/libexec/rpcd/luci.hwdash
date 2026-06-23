@@ -1,6 +1,6 @@
 #!/bin/sh
 
-json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]//g'; }
 
 read_file() {
 	local __var=$1
