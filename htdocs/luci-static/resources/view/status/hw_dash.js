@@ -1402,9 +1402,16 @@ return view.extend({
                 if (res.pcie_devs) {
                     validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
-                var usbPorts = (res.usb_ports || []).filter(function(u){ return parseInt(u.speed) > 0; });
                 var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
-                var hasUsb = usbPorts.length > 0 || usbDevs.length > 0;
+                // Physical USB port wiring can't be read reliably from the controller:
+                // a USB 3.0 controller often exposes a 2.0-only port. So the port spec
+                // is hardcoded per known JioRouter board and omitted for everything else.
+                var boardId = res.board || '';
+                var hwPortStr = '';
+                if (/JIDU6[J0-9]11/.test(boardId)) hwPortStr = 'USB 3.0 (1 Physical Port)';
+                else if (/JIDU6[J0-9]01/.test(boardId)) hwPortStr = 'USB 2.0 (1 Physical Port)';
+                else if (boardId.indexOf('JIDU6700') !== -1) hwPortStr = 'USB 2.0 (1 Physical Port)';
+                var hasUsb = hwPortStr !== '' || usbDevs.length > 0;
 
                 if (validPcie.length > 0 || hasUsb) {
                     pcieUsbCard.style.display = 'flex';
@@ -1427,19 +1434,6 @@ return view.extend({
                         }
                         if (hasUsb) {
                             puNode.appendChild(E('h4', { style: 'margin: ' + (validPcie.length > 0 ? '8px' : '0') + ' 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'USB Bus'));
-                            var hwPortStr = '';
-                            var boardId = res.board || '';
-                            if (/JIDU6[J0-9]01/.test(boardId)) {
-                                hwPortStr = 'USB 2.0 (1 Physical Port)';
-                            } else if (/JIDU6[J0-9]11/.test(boardId)) {
-                                hwPortStr = 'USB 3.0 (1 Physical Port)';
-                            } else if (usbPorts.length > 0) {
-                                var maxBusSpd = Math.max.apply(null, usbPorts.map(function(u){ return parseInt(u.speed) || 0; }));
-                                if (maxBusSpd >= 10000) hwPortStr = 'USB 3.1/3.2 Capable';
-                                else if (maxBusSpd >= 5000) hwPortStr = 'USB 3.0 Capable';
-                                else if (maxBusSpd >= 480) hwPortStr = 'USB 2.0 Capable';
-                                else hwPortStr = 'USB 1.x';
-                            }
                             if (hwPortStr) {
                                 puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                     E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [

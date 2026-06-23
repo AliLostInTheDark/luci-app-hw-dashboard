@@ -46,9 +46,9 @@ case "$1" in
 				[ -z "$BOARD_DETECT" ] && BOARD_DETECT=$(ubus call system board | jsonfilter -e '@.model' 2>/dev/null)
 
 				if echo "$BOARD_DETECT" | grep -q -E '^JioRouter JIDU6[0-9]01$' || [ "$BOARD_DETECT" = "JioRouter JIDU6J01" ]; then
-					CPU_MODEL="MediaTek MTK7986a (4C/4T)"
+					CPU_MODEL="MediaTek MT7986A (4C/4T)"
 				elif [ "$BOARD_DETECT" = "JioRouter JIDU6700" ]; then
-					CPU_MODEL="MediaTek MTK7981BA (2C/2T)"
+					CPU_MODEL="MediaTek MT7981BA (2C/2T)"
 				elif echo "$BOARD_DETECT" | grep -q -E '^JioRouter JIDU6[0-9]11$' || [ "$BOARD_DETECT" = "JioRouter JIDU6J11" ]; then
 					CPU_MODEL="Qualcomm IPQ9554 (4C/4T)"
 				else
@@ -352,6 +352,18 @@ EOF
 						mtd_phys=$sum_mtd
 						total_phys=$((total_phys + sum_mtd))
 					fi
+				fi
+
+				# NAND/NOR flash chips are always power-of-two sized. MediaTek layouts
+				# (and some others) don't expose a partition spanning the whole device
+				# and reserve a tail region, so the partition sum lands just under the
+				# real chip size (e.g. ~240 MB of partitions on a 256 MB chip). Round
+				# the reported physical total up to the next power of two so it reflects
+				# the actual chip rather than the partitioned area.
+				if [ "$mtd_phys" -gt 0 ]; then
+					_p2=1
+					while [ "$_p2" -lt "$mtd_phys" ]; do _p2=$((_p2 * 2)); done
+					mtd_phys=$_p2
 				fi
 
 
