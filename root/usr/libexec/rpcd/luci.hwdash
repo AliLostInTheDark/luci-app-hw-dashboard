@@ -715,12 +715,140 @@ EOF
 					if [ "$n" = "cpu" ]; then CPU_TICKS=$((u+ni+s+i+iw+ir+sir+st)); break; fi
 				done < /proc/stat
 
+				# Legacy UBI compat
 				UBI_MAX_EC=0
 				UBI_BAD_PEB=0
 				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"block_devs\":$BLOCK_DEVS}"
+				# Full UBI device enumeration
+				UBI_DEVS="["
+				FIRST_UBI_DEV=1
+				for ubi_dp in /sys/class/ubi/ubi[0-9]*; do
+					[ -d "$ubi_dp" ] || continue
+					ubi_nm=${ubi_dp##*/}
+					case "$ubi_nm" in *_*) continue ;; esac
+					read_file u_total "$ubi_dp/total_eraseblocks" 0
+					read_file u_avail "$ubi_dp/avail_eraseblocks" 0
+					read_file u_bad "$ubi_dp/bad_peb_count" 0
+					read_file u_max_ec "$ubi_dp/max_ec" 0
+					read_file u_min_ec "$ubi_dp/min_ec" 0
+					read_file u_eb_sz "$ubi_dp/eraseblock_size" 0
+					read_file u_mtd_num "$ubi_dp/mtd_num" 0
+					nw=0; ne=0; no=0
+					[ -f "/sys/class/mtd/mtd${u_mtd_num}/writesize" ] && read_file nw "/sys/class/mtd/mtd${u_mtd_num}/writesize" 0
+					[ -f "/sys/class/mtd/mtd${u_mtd_num}/erasesize" ] && read_file ne "/sys/class/mtd/mtd${u_mtd_num}/erasesize" 0
+					[ -f "/sys/class/mtd/mtd${u_mtd_num}/oobsize" ] && read_file no "/sys/class/mtd/mtd${u_mtd_num}/oobsize" 0
+					VOLS="["
+					FV=1
+					for vp in /sys/class/ubi/${ubi_nm}_[0-9]*; do
+						[ -d "$vp" ] || continue
+						read_file vn "$vp/name" ""
+						[ -z "$vn" ] && continue
+						read_file vt "$vp/type" "dynamic"
+						read_file vd "$vp/data_bytes" 0
+						read_file vr "$vp/reserved_ebs" 0
+						read_file veb "$vp/usable_eb_size" 0
+						[ $FV -eq 0 ] && VOLS="$VOLS,"
+						VOLS="$VOLS{\"name\":\"$(json_str "$vn")\",\"type\":\"$vt\",\"data_bytes\":$vd,\"reserved_ebs\":$vr,\"eb_size\":$veb}"
+						FV=0
+					done
+					VOLS="$VOLS]"
+					[ $FIRST_UBI_DEV -eq 0 ] && UBI_DEVS="$UBI_DEVS,"
+					UBI_DEVS="$UBI_DEVS{\"dev\":\"$ubi_nm\",\"total_ebs\":$u_total,\"avail_ebs\":$u_avail,\"bad_pebs\":$u_bad,\"max_ec\":$u_max_ec,\"min_ec\":$u_min_ec,\"eb_size\":$u_eb_sz,\"mtd_num\":$u_mtd_num,\"page_size\":$nw,\"block_size\":$ne,\"oob_size\":$no,\"volumes\":$VOLS}"
+					FIRST_UBI_DEV=0
+				done
+				UBI_DEVS="$UBI_DEVS]"
+
+				# MTD partition table
+				MTD_PARTS="["
+				FM=1
+				if [ -f /proc/mtd ]; then
+					while IFS=' ' read -r mdev msz mesz mname; do
+						[ "$mdev" = "dev:" ] && continue
+						mn=${mdev#mtd}; mn=${mn%:}
+						[ -z "$mn" ] && continue
+						mname=$(echo "$mname" | tr -d '"')
+						msz_b=$((0x${msz})) 2>/dev/null || msz_b=0
+						mesz_b=$((0x${mesz})) 2>/dev/null || mesz_b=0
+						mtype="nand"
+						[ -f "/sys/class/mtd/mtd${mn}/type" ] && mtype=$(cat "/sys/class/mtd/mtd${mn}/type" 2>/dev/null)
+						[ $FM -eq 0 ] && MTD_PARTS="$MTD_PARTS,"
+						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\"}"
+						FM=0
+					done < /proc/mtd
+				fi
+				MTD_PARTS="$MTD_PARTS]"
+
+				# eMMC / SD health
+				EMMC_INFO="null"
+				for mmc in /sys/class/block/mmcblk[0-9]*; do
+					[ -d "$mmc/device" ] || continue
+					case "${mmc##*/}" in *p[0-9]*|*boot*|*rpmb*) continue ;; esac
+					read_file em_name "$mmc/device/name" ""
+					read_file em_manfid "$mmc/device/manfid" ""
+					read_file em_fwrev "$mmc/device/fwrev" ""
+					read_file em_hwrev "$mmc/device/hwrev" ""
+					read_file em_pre_eol "$mmc/device/pre_eol_info" ""
+					read_file em_lt "$mmc/device/life_time" ""
+					read_file em_date "$mmc/device/date" ""
+					read_file em_type "$mmc/device/type" "MMC"
+					lt_a=$(echo "$em_lt" | awk '{print $1}')
+					lt_b=$(echo "$em_lt" | awk '{print $2}')
+					lt_a_i=0; lt_b_i=0; peo_i=0
+					[ -n "$lt_a" ] && lt_a_i=$((lt_a)) 2>/dev/null || lt_a_i=0
+					[ -n "$lt_b" ] && lt_b_i=$((lt_b)) 2>/dev/null || lt_b_i=0
+					[ -n "$em_pre_eol" ] && peo_i=$((em_pre_eol)) 2>/dev/null || peo_i=0
+					em_vendor="Unknown"
+					case "$em_manfid" in
+						0x000001|0x000015) em_vendor="Samsung" ;;
+						0x000002) em_vendor="Kingston" ;;
+						0x000003|0x000045) em_vendor="SanDisk/WD" ;;
+						0x000011) em_vendor="Toshiba" ;;
+						0x000013|0x0000fe) em_vendor="Micron" ;;
+						0x000090) em_vendor="SK Hynix" ;;
+						0x000070) em_vendor="Kingston" ;;
+						0x000031) em_vendor="Silicon Motion" ;;
+						*) em_vendor="$em_manfid" ;;
+					esac
+					EMMC_INFO="{\"dev\":\"${mmc##*/}\",\"name\":\"$(json_str "$em_name")\",\"vendor\":\"$(json_str "$em_vendor")\",\"type\":\"$em_type\",\"fwrev\":\"$em_fwrev\",\"hwrev\":\"$em_hwrev\",\"pre_eol\":$peo_i,\"life_a\":$lt_a_i,\"life_b\":$lt_b_i,\"date\":\"$em_date\"}"
+					break
+				done
+
+				# NVMe sysfs info
+				NVME_INFO="null"
+				for nvme in /sys/class/block/nvme[0-9]*n[0-9]*; do
+					[ -d "$nvme/device" ] || continue
+					case "${nvme##*/}" in *p[0-9]*) continue ;; esac
+					read_file nv_model "$nvme/device/model" ""
+					read_file nv_serial "$nvme/device/serial" ""
+					read_file nv_fw "$nvme/device/firmware_rev" ""
+					read_file nv_transport "$nvme/device/transport" "PCIe"
+					nv_model=$(echo "$nv_model" | sed 's/[[:space:]]*$//')
+					nv_serial=$(echo "$nv_serial" | sed 's/[[:space:]]*$//')
+					nv_fw=$(echo "$nv_fw" | sed 's/[[:space:]]*$//')
+					NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$(json_str "$nv_model")\",\"serial\":\"$(json_str "$nv_serial")\",\"fw\":\"$(json_str "$nv_fw")\",\"transport\":\"$nv_transport\"}"
+					break
+				done
+
+				# f2fs filesystem stats
+				F2FS_INFO="["
+				FF=1
+				for f2p in /sys/fs/f2fs/*; do
+					[ -d "$f2p" ] || continue
+					f2dev=${f2p##*/}
+					read_file f2_lw "$f2p/lifetime_write_kbytes" 0
+					read_file f2_util "$f2p/utilization" 0
+					read_file f2_vseg "$f2p/valid_segs" 0
+					read_file f2_dseg "$f2p/dirty_segs" 0
+					read_file f2_fseg "$f2p/free_segs" 0
+					[ $FF -eq 0 ] && F2FS_INFO="$F2FS_INFO,"
+					F2FS_INFO="$F2FS_INFO{\"dev\":\"$f2dev\",\"lifetime_write_kb\":$f2_lw,\"utilization\":$f2_util,\"valid_segs\":$f2_vseg,\"dirty_segs\":$f2_dseg,\"free_segs\":$f2_fseg}"
+					FF=0
+				done
+				F2FS_INFO="$F2FS_INFO]"
+
+				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS}"
 				;;
 		esac
 		;;

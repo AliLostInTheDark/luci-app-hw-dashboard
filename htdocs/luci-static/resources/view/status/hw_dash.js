@@ -184,7 +184,7 @@ return view.extend({
 
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
-        var dskCard = createDial('dsk', 'STORAGE');
+        var dskCard = createDial('dsk', 'Internal Storage');
         var coresNode = E('div', {
             id: 'hw-cores',
             class: 'hw-stats-list',
@@ -228,6 +228,10 @@ return view.extend({
         dskCard.node.appendChild(E('div', {
             id: 'dial-meta-dsk',
             style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'
+        }));
+        dskCard.node.appendChild(E('div', {
+            id: 'hw-int-storage-extra',
+            style: 'width: 100%;'
         }));
         
         
@@ -596,7 +600,7 @@ return view.extend({
                             totalSpace += fs.total;
                             totalUsed += fs.used;
                         }
-                        if (fs.psize > 0 && !isExt) totalPhys += fs.psize;
+                        if (fs.hw_size > 0 && !isExt) totalPhys += fs.hw_size;
                         if (isExt) return;
                         var readSpeed = 0;
                         var writeSpeed = 0;
@@ -748,6 +752,144 @@ return view.extend({
                         if (extCardNode) extCardNode.style.display = 'none';
                     }
                 }
+
+                (function() {
+                    var extraNode = document.getElementById('hw-int-storage-extra');
+                    if (!extraNode) return;
+                    extraNode.innerHTML = '';
+
+                    var makeSep = function(title) {
+                        return E('div', {style: 'margin: 14px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2));'}, [
+                            E('h4', {style: 'margin: 0; font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px;'}, title)
+                        ]);
+                    };
+                    var makeRow = function(label, val, color) {
+                        return E('div', {class: 'hw-stat-row', style: 'margin-bottom: 3px;'}, [
+                            E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;'}, label),
+                            E('span', {class: 'hw-stat-value', style: 'font-size: 0.9em;' + (color ? ' color:' + color + ';' : '')}, val)
+                        ]);
+                    };
+                    var makeBar2 = function(label, pct, valStr, color) {
+                        var c = color || getDynColor(pct);
+                        return E('div', {class: 'hw-progress-item', style: 'margin-bottom: 8px;'}, [
+                            E('div', {class: 'hw-progress-header'}, [
+                                E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;'}, label),
+                                E('span', {class: 'hw-stat-value', style: 'font-size: 0.9em; color:' + c + ';'}, valStr)
+                            ]),
+                            E('div', {class: 'hw-bar-bg'}, [
+                                E('div', {class: 'hw-bar-fill', style: 'width:' + Math.min(pct, 100) + '%; background:' + c + ';'})
+                            ])
+                        ]);
+                    };
+                    var fmtBytesS = function(b) {
+                        if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+                        if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+                        if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
+                        return b + ' B';
+                    };
+                    var makeDevBox = function(headerLeft, headerRight) {
+                        var box = E('div', {style: 'background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.1)); border-radius: 8px; padding: 10px; margin-bottom: 10px;'});
+                        var rightEl = (typeof headerRight === 'string')
+                            ? E('span', {style: 'font-size: 0.8em; opacity: 0.7;'}, headerRight)
+                            : headerRight;
+                        box.appendChild(E('div', {style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.15));'}, [
+                            E('span', {style: 'font-weight: bold; font-size: 0.95em;'}, headerLeft),
+                            rightEl
+                        ]));
+                        return box;
+                    };
+
+                    // UBI devices
+                    if (res.ubi_devs && res.ubi_devs.length > 0) {
+                        extraNode.appendChild(makeSep('UBI / NAND Flash'));
+                        res.ubi_devs.forEach(function(u) {
+                            var ratedEc = 3000;
+                            var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
+                            var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB blocks' : '';
+                            var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb : ''));
+                            box.appendChild(makeBar2('Wear (Max EC / ' + ratedEc + ' MLC rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
+                            if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
+                            box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  |  Avail: ' + u.avail_ebs + '  |  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
+                            if (u.page_size > 0) {
+                                box.appendChild(makeRow('NAND Geometry', 'Page: ' + fmtBytesS(u.page_size) + ' | Block: ' + fmtBytesS(u.block_size) + ' | OOB: ' + u.oob_size + ' B', null));
+                            }
+                            if (u.volumes && u.volumes.length > 0) {
+                                var vd = E('div', {style: 'margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.2));'});
+                                vd.appendChild(E('div', {style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;'}, 'Volumes'));
+                                u.volumes.forEach(function(vol) {
+                                    var vsz = vol.data_bytes > 0 ? ' | ' + fmtBytesS(vol.data_bytes) : '';
+                                    vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
+                                        E('span', {style: 'color:#00bcd4;'}, vol.name),
+                                        E('span', {style: 'opacity: 0.7;'}, vol.type + vsz)
+                                    ]));
+                                });
+                                box.appendChild(vd);
+                            }
+                            extraNode.appendChild(box);
+                        });
+                    }
+
+                    // MTD partition table
+                    if (res.mtd_parts && res.mtd_parts.length > 0) {
+                        extraNode.appendChild(makeSep('MTD Partition Table'));
+                        var mtdWrap = E('div', {style: 'font-size: 0.82em;'});
+                        res.mtd_parts.forEach(function(p) {
+                            var sz = fmtBytesS(p.size);
+                            var tc = p.type === 'nor' ? '#00bcd4' : p.type === 'nand' ? '#ffea00' : '#9e9e9e';
+                            mtdWrap.appendChild(E('div', {style: 'display:flex; justify-content:space-between; align-items:center; padding: 3px 6px; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.08));'}, [
+                                E('span', {style: 'color:#00bcd4; flex-shrink:0; min-width: 48px;'}, 'mtd' + p.num),
+                                E('span', {style: 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding: 0 8px; opacity:0.85;'}, p.name),
+                                E('span', {style: 'flex-shrink:0; opacity:0.7; min-width: 60px; text-align:right;'}, sz),
+                                E('span', {style: 'flex-shrink:0; color:' + tc + '; margin-left: 8px; min-width: 38px; text-align:right;'}, p.type.toUpperCase())
+                            ]));
+                        });
+                        extraNode.appendChild(mtdWrap);
+                    }
+
+                    // eMMC / SD health
+                    if (res.emmc_info) {
+                        extraNode.appendChild(makeSep('eMMC / SD Health'));
+                        var em = res.emmc_info;
+                        var eolLbls = ['Not Defined', 'Normal', 'Warning', 'Urgent'];
+                        var eolClrs = ['#9e9e9e', '#00bcd4', '#ffea00', '#ff1744'];
+                        var ltLbls = ['N/A', '0–10%', '10–20%', '20–30%', '30–40%', '40–50%', '50–60%', '60–70%', '70–80%', '80–90%', '90–100%', 'Exceeded'];
+                        var eolIdx = Math.max(0, Math.min(em.pre_eol || 0, 3));
+                        var eolBadge = E('span', {style: 'padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color:' + eolClrs[eolIdx] + '; background:' + eolClrs[eolIdx] + '22;'}, eolLbls[eolIdx]);
+                        var emBox = makeDevBox(em.dev.toUpperCase() + (em.name ? ' (' + em.name + ')' : ''), eolBadge);
+                        if (em.vendor && em.vendor !== 'Unknown') emBox.appendChild(makeRow('Manufacturer', em.vendor + (em.date ? ' (' + em.date + ')' : ''), null));
+                        if (em.fwrev && em.fwrev !== '0x0' && em.fwrev !== '') emBox.appendChild(makeRow('FW Rev / HW Rev', em.fwrev + ' / ' + em.hwrev, null));
+                        var la = Math.min(em.life_a || 0, 11), lb = Math.min(em.life_b || 0, 11);
+                        if (em.life_a > 0) emBox.appendChild(makeBar2('Lifetime Type A', Math.min(em.life_a * 10, 100), ltLbls[la] || 'Exceeded', getDynColor(em.life_a * 10)));
+                        if (em.life_b > 0) emBox.appendChild(makeBar2('Lifetime Type B', Math.min(em.life_b * 10, 100), ltLbls[lb] || 'Exceeded', getDynColor(em.life_b * 10)));
+                        if (!em.life_a && !em.life_b) emBox.appendChild(makeRow('Lifetime', 'Not reported by device', '#9e9e9e'));
+                        extraNode.appendChild(emBox);
+                    }
+
+                    // NVMe
+                    if (res.nvme_info) {
+                        extraNode.appendChild(makeSep('NVMe Details'));
+                        var nv = res.nvme_info;
+                        var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), '');
+                        if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
+                        if (nv.fw) nvBox.appendChild(makeRow('Firmware', nv.fw, null));
+                        if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
+                        extraNode.appendChild(nvBox);
+                    }
+
+                    // f2fs
+                    if (res.f2fs_info && res.f2fs_info.length > 0) {
+                        extraNode.appendChild(makeSep('f2fs Statistics'));
+                        res.f2fs_info.forEach(function(f) {
+                            var lwStr = fmtBytesS(f.lifetime_write_kb * 1024);
+                            var totSegs = (f.valid_segs || 0) + (f.dirty_segs || 0) + (f.free_segs || 0);
+                            var f2Box = makeDevBox(f.dev.toUpperCase(), '');
+                            if (f.lifetime_write_kb > 0) f2Box.appendChild(makeRow('Lifetime Written', lwStr, null));
+                            if (f.utilization > 0) f2Box.appendChild(makeBar2('Utilization', f.utilization, f.utilization + '%', getDynColor(f.utilization)));
+                            if (totSegs > 0) f2Box.appendChild(makeRow('Segments (Valid/Dirty/Free)', f.valid_segs + ' / ' + f.dirty_segs + ' / ' + f.free_segs, f.dirty_segs > 0 ? '#ffb300' : null));
+                            extraNode.appendChild(f2Box);
+                        });
+                    }
+                })();
 
                 if (res.block_devs && Array.isArray(res.block_devs)) {
                     var extWrapper = document.getElementById('my-ext-wrapper');
