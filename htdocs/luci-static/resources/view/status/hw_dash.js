@@ -227,7 +227,8 @@ return view.extend({
         });
         cpuCard.node.appendChild(cpuMetaNode);
         var advCard = E('div', {
-            class: 'hw-card'
+            class: 'hw-card',
+            style: 'justify-content: flex-start;'
         }, [E('h3', {}, 'CPU Detailed Load'), E('div', {
             id: 'hw-adv',
             class: 'hw-stats-list',
@@ -416,7 +417,7 @@ return view.extend({
                                 }, 'Load Average'), E('span', {
                                     class: 'hw-stat-value'
                                 }, (res.cpu_meta.load_1 || '0') + ', ' + (res.cpu_meta.load_5 || '0') + ', ' + (res.cpu_meta.load_15 || '0'))]));
-                                if (res.cpu_meta.governor && res.cpu_meta.governor.trim() !== '' && res.cpu_meta.governor !== 'null') {
+                                if (res.cpu_meta.governor && res.cpu_meta.governor.trim() !== '' && res.cpu_meta.governor !== 'null' && res.cpu_meta.governor.toLowerCase() !== 'unknown') {
                                     metaNode.appendChild(E('div', {
                                         class: 'hw-stat-row'
                                     }, [E('span', {
@@ -760,7 +761,7 @@ return view.extend({
                         dskMeta.innerHTML = '';
                         if (nandChipTotal > 0) {
                             addMR('Physical NAND Total', fmtSize(nandChipTotal));
-                            if (nandRootfsVol > 0 && nandRootfsVol !== nandChipTotal) addMR('rootfs Physical Total', fmtSize(nandRootfsVol));
+                            if (nandRootfsVol > 0 && nandRootfsVol !== nandChipTotal) addMR('Rootfs Total', fmtSize(nandRootfsVol));
                             if (_ovSi.overlay_total > 0) {
                                 var _ovPctN = Math.round(_ovSi.overlay_used / _ovSi.overlay_total * 100);
                                 addMR('Overlay Total', _fmtB(_ovSi.overlay_total));
@@ -772,7 +773,7 @@ return view.extend({
                             if (totalSpace > 0) { addMR('Usable Total', fmtSize(totalSpace)); addMR('Usable Free', fmtSize(totalSpace - totalUsed)); }
                         } else if (diskTotal > 0) {
                             addMR('Physical Disk Total', fmtSize(diskTotal));
-                            if (diskRootfsVol > 0 && diskRootfsVol !== diskTotal) addMR('rootfs Physical Total', fmtSize(diskRootfsVol));
+                            if (diskRootfsVol > 0 && diskRootfsVol !== diskTotal) addMR('Rootfs Total', fmtSize(diskRootfsVol));
                             if (totalSpace > 0) { addMR('Usable Total', fmtSize(totalSpace)); addMR('Usable Free', fmtSize(totalSpace - totalUsed)); }
                         } else if (totalSpace > 0) {
                             addMR('Usable Total', fmtSize(totalSpace));
@@ -856,9 +857,9 @@ return view.extend({
                                     var allocBytes = allocEbs * u.eb_size;
                                     var totalUbiBytes = u.total_ebs * u.eb_size;
                                     var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
-                                    // UBI normally reserves all PEBs upfront; only warn on extreme over-allocation
-                                    var capColor = capPct >= 98 ? '#ff5252' : capPct >= 88 ? '#ffb300' : '#00bcd4';
-                                    box.appendChild(makeBar2('PEB Utilization', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), capColor));
+                                    // UBI reserves essentially all PEBs upfront, so a "full" bar is the
+                                    // normal, healthy state — keep it cyan rather than alarming red.
+                                    box.appendChild(makeBar2('PEB Utilization', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), '#00bcd4'));
                                 }
                                 box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
                                 if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
@@ -882,7 +883,7 @@ return view.extend({
                                         if (reservedBytes > 0 && reservedBytes !== vol.data_bytes) vsz += ' / ' + fmtBytesS(reservedBytes);
                                         vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
                                             E('span', {style: 'color:#00bcd4;'}, vol.name),
-                                            E('span', {style: 'opacity: 0.7;'}, vol.type + ' | ' + vsz)
+                                            E('span', {style: 'opacity: 0.7;'}, vsz + ' | ' + vol.type)
                                         ]));
                                     });
                                     box.appendChild(vd);
@@ -1531,16 +1532,26 @@ return view.extend({
                             var regStr = '';
                             if (w.country && w.country !== '00' && w.country !== '') regStr = w.country + (w.dfs_region ? ' · ' + w.dfs_region : '');
                             else if (w.country === '00') regStr = '00 · World';
-                            // Channel survey: airtime load (busy %) + noise floor
-                            var surveyAct = parseInt(w.survey_active) || 0;
-                            var busyPct = surveyAct > 0 ? Math.round((parseInt(w.survey_busy) || 0) / surveyAct * 100) : -1;
-                            var surveyStr = '';
-                            if (busyPct >= 0) {
-                                var txPct = Math.round((parseInt(w.survey_tx) || 0) / surveyAct * 100);
-                                var rxPct = Math.round((parseInt(w.survey_rx) || 0) / surveyAct * 100);
-                                surveyStr = busyPct + '% busy (' + txPct + '% tx / ' + rxPct + '% rx)';
+                            // Channel survey — live airtime load (busy %) + noise floor,
+                            // computed from the between-poll delta of the cumulative
+                            // survey counters so it tracks current congestion.
+                            var sv = (res.wifi_survey && res.wifi_survey[w.iface]) || null;
+                            var busyPct = -1, surveyStr = '', noiseVal = 0;
+                            if (sv) {
+                                noiseVal = parseInt(sv.noise) || 0;
+                                if (!self.prevSurvey) self.prevSurvey = {};
+                                var psv = self.prevSurvey[w.iface];
+                                var curAct = parseInt(sv.active) || 0, curBusy = parseInt(sv.busy) || 0;
+                                var curTx = parseInt(sv.tx) || 0, curRx = parseInt(sv.rx) || 0;
+                                if (psv && curAct > psv.active) {
+                                    var dAct = curAct - psv.active;
+                                    busyPct = Math.max(0, Math.min(100, Math.round((curBusy - psv.busy) / dAct * 100)));
+                                    var txPct = Math.max(0, Math.min(100, Math.round((curTx - psv.tx) / dAct * 100)));
+                                    var rxPct = Math.max(0, Math.min(100, Math.round((curRx - psv.rx) / dAct * 100)));
+                                    surveyStr = busyPct + '% busy (' + txPct + '% tx / ' + rxPct + '% rx)';
+                                }
+                                self.prevSurvey[w.iface] = { active: curAct, busy: curBusy, tx: curTx, rx: curRx };
                             }
-                            var noiseVal = parseInt(w.noise) || 0;
 
                             wifiRendered++;
                             wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
