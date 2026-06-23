@@ -193,12 +193,13 @@ return view.extend({
         var _dskS = dskCard.node.children[2];
         dskCard.node.innerHTML = '';
         dskCard.node.appendChild(_dskT);
-        // Header row: dial | vertical rule | fs bars + meta stats
-        var _dskOvRow = E('div', {style: 'display: flex; align-items: flex-start; width: 100%;'});
-        var _dskDialArea = E('div', {style: 'flex: 0 0 auto; width: 180px; display: flex; flex-direction: column; align-items: center;'});
+        // Header row: dial | divider | fs bars + meta stats
+        // hw-thermals-container has @media ≤768px that collapses to column on phones
+        var _dskOvRow = E('div', {class: 'hw-thermals-container'});
+        var _dskDialArea = E('div', {class: 'hw-thermals-col hw-thermals-col-left', style: 'flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;'});
         _dskDialArea.appendChild(_dskD);
-        var _dskVRule = E('div', {style: 'width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); align-self: stretch; margin: 8px 20px;'});
-        var _dskStatsArea = E('div', {style: 'flex: 1 1 0; min-width: 0; padding-top: 5px;'});
+        var _dskVRule = E('div', {class: 'hw-thermals-divider'});
+        var _dskStatsArea = E('div', {class: 'hw-thermals-col hw-thermals-col-right'});
         _dskStatsArea.appendChild(_dskS);
         _dskStatsArea.appendChild(E('div', {id: 'dial-meta-dsk', style: 'margin-top: 12px; display: flex; flex-direction: column; gap: 5px;'}));
         _dskOvRow.appendChild(_dskDialArea);
