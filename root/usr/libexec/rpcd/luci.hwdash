@@ -186,12 +186,19 @@ case "$1" in
 							ubi_vol=${ubi_vol#ubi}
 							local ubi_dev=${ubi_vol%_*}
 							local mtd_num=$(cat "/sys/class/ubi/ubi${ubi_dev}/mtd_num" 2>/dev/null)
-							parent=$dev
+							# Do NOT set parent=$dev — that would read the UBI volume size
+							# (e.g. 26 MB for rootfs), not the physical NAND chip size.
+							# Read the parent MTD device size directly here instead.
+							parent=""
 							if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
 								local t=$(cat "/sys/class/mtd/mtd${mtd_num}/type" 2>/dev/null)
 								if [ "$t" = "nand" ]; then dtype="NAND"
 								elif [ "$t" = "nor" ]; then dtype="NOR"
 								else dtype="Flash"
+								fi
+								if [ -f "/sys/class/mtd/mtd${mtd_num}/size" ]; then
+									local sz=$(cat "/sys/class/mtd/mtd${mtd_num}/size" 2>/dev/null)
+									[ -n "$sz" ] && psize=$((sz / 1024))
 								fi
 							else
 								dtype="NAND/NOR"
