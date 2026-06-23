@@ -503,10 +503,12 @@ EOF
 							read_file rx_d "$netdev/statistics/rx_dropped" "0"
 							read_file tx_d "$netdev/statistics/tx_dropped" "0"
 							read_file rx_e "$netdev/statistics/rx_errors" "0"
-							read_file tx_e "$netdev/statistics/tx_errors" "0" 
+							read_file tx_e "$netdev/statistics/tx_errors" "0"
+							read_file rx_b "$netdev/statistics/rx_bytes" "0"
+							read_file tx_b "$netdev/statistics/tx_bytes" "0"
 							if [ "$speed" = "-1" ] || [ -z "$speed" ]; then speed="Down"; fi
 							if [ $FIRST_ETH -eq 0 ]; then ETH_LINKS="$ETH_LINKS,"; fi
-							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\",\"rx_drop\":$rx_d,\"tx_drop\":$tx_d,\"rx_err\":$rx_e,\"tx_err\":$tx_e}"
+							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\",\"rx_drop\":$rx_d,\"tx_drop\":$tx_d,\"rx_err\":$rx_e,\"tx_err\":$tx_e,\"rx_bytes\":$rx_b,\"tx_bytes\":$tx_b}"
 							FIRST_ETH=0
 						fi
 					fi
@@ -684,6 +686,14 @@ EOF
 				else
 				WIFI_RADIOS="["
 				FIRST_WIFI=1
+				# Active regulatory domain (country + DFS regime). Usually global to
+				# the device; explains the enabled-channel set shown per radio.
+				REG_COUNTRY=""; REG_DFS=""
+				if command -v iw >/dev/null; then
+					_reg=$(iw reg get 2>/dev/null | grep -m1 '^country')
+					REG_COUNTRY=$(echo "$_reg" | awk '{print $2}' | tr -d ':')
+					REG_DFS=$(echo "$_reg" | grep -oE 'DFS-[A-Z]+' | head -1 | sed 's/DFS-//')
+				fi
 				if command -v iwinfo >/dev/null; then
 					for iface in $(iwinfo | awk '/^[a-zA-Z0-9_-]+/ {print $1}'); do
 						info=$(iwinfo "$iface" info 2>/dev/null)
@@ -772,8 +782,30 @@ EOF
 							enabled_ch=$(echo "$freqlist" | grep -vi 'restricted' | grep -oE "Channel [0-9]+" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
 						fi
 
+						# Per-radio country code (falls back to the global regdomain).
+						cc=$(iwinfo "$iface" countrycode 2>/dev/null | tr -d '[:space:]')
+						[ -z "$cc" ] && cc="$REG_COUNTRY"
+						[ -z "$cc" ] && cc="00"
+
+						# Channel survey: noise floor + airtime accounting for the
+						# in-use channel (cumulative since the radio came up).
+						s_noise=0; s_act=0; s_busy=0; s_rxt=0; s_txt=0
+						if command -v iw >/dev/null; then
+							read s_noise s_act s_busy s_rxt s_txt <<EOF
+$(iw dev "$iface" survey dump 2>/dev/null | awk '
+	/frequency:/ { inblk = ($0 ~ /\[in use\]/) ? 1 : 0 }
+	inblk && /noise:/ { noise=$(NF-1) }
+	inblk && /channel active time:/ { act=$(NF-1) }
+	inblk && /channel busy time:/ { busy=$(NF-1) }
+	inblk && /channel receive time:/ { rxt=$(NF-1) }
+	inblk && /channel transmit time:/ { txt=$(NF-1) }
+	END { printf "%d %d %d %d %d\n", noise, act, busy, rxt, txt }')
+EOF
+							: "${s_noise:=0}" "${s_act:=0}" "${s_busy:=0}" "${s_rxt:=0}" "${s_txt:=0}"
+						fi
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"curr_width\":\"$curr_width\",\"cfg_nss\":\"$cfg_nss\",\"hw_nss\":$hw_nss,\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"phycap\":$phycap}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$hardware\",\"channel\":\"$channel\",\"curr_width\":\"$curr_width\",\"cfg_nss\":\"$cfg_nss\",\"hw_nss\":$hw_nss,\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"country\":\"$cc\",\"dfs_region\":\"$REG_DFS\",\"noise\":$s_noise,\"survey_active\":$s_act,\"survey_busy\":$s_busy,\"survey_rx\":$s_rxt,\"survey_tx\":$s_txt,\"phycap\":$phycap}"
 						FIRST_WIFI=0
 					done
 				fi

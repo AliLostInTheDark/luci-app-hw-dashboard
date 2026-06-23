@@ -1384,7 +1384,20 @@ return view.extend({
                             
                             var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
                             var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
-                            
+
+                            // Live throughput from rx/tx byte deltas between polls.
+                            if (!self.prevEth) self.prevEth = {};
+                            var dlMbps = null, ulMbps = null;
+                            var curRx = parseInt(l.rx_bytes) || 0, curTx = parseInt(l.tx_bytes) || 0, nowT = Date.now();
+                            var pe = self.prevEth[l.iface];
+                            if (pe && nowT > pe.t && curRx >= pe.rx && curTx >= pe.tx) {
+                                var dt = (nowT - pe.t) / 1000;
+                                dlMbps = (curRx - pe.rx) * 8 / 1e6 / dt;
+                                ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
+                            }
+                            self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
+                            var fmtMbps = function(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' Gbps' : m >= 1 ? m.toFixed(1) + ' Mbps' : (m * 1000).toFixed(0) + ' Kbps'; };
+
                             var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
                                     E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
@@ -1396,8 +1409,14 @@ return view.extend({
                             ]);
                             
                             if (st !== 'Down') {
+                                if (dlMbps !== null) {
+                                    box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [
+                                        E('span', {}, 'Throughput:'),
+                                        E('span', { style: 'color:#00bcd4;' }, '↓ ' + fmtMbps(dlMbps) + '   ↑ ' + fmtMbps(ulMbps))
+                                    ]));
+                                }
                                 var errColor = (rxErr > 0 || txErr > 0 || rxDrop > 0 || txDrop > 0) ? '#ff5252' : 'currentColor';
-                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [
+                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px;' }, [
                                     E('span', {}, 'Errors/Drops:'),
                                     E('span', { style: 'color:' + errColor + ';' }, 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop)
                                 ]));
@@ -1508,6 +1527,21 @@ return view.extend({
                             var cleanHw = w.hardware ? w.hardware.replace(/^.*\[/, '').replace(/\]$/, '') : '';
                             var chStr = (w.channel && w.channel !== 'Unknown' && w.channel !== 'unknown' && w.channel !== '0') ? w.channel : null;
 
+                            // Regulatory domain (country code + DFS regime)
+                            var regStr = '';
+                            if (w.country && w.country !== '00' && w.country !== '') regStr = w.country + (w.dfs_region ? ' · ' + w.dfs_region : '');
+                            else if (w.country === '00') regStr = '00 · World';
+                            // Channel survey: airtime load (busy %) + noise floor
+                            var surveyAct = parseInt(w.survey_active) || 0;
+                            var busyPct = surveyAct > 0 ? Math.round((parseInt(w.survey_busy) || 0) / surveyAct * 100) : -1;
+                            var surveyStr = '';
+                            if (busyPct >= 0) {
+                                var txPct = Math.round((parseInt(w.survey_tx) || 0) / surveyAct * 100);
+                                var rxPct = Math.round((parseInt(w.survey_rx) || 0) / surveyAct * 100);
+                                surveyStr = busyPct + '% busy (' + txPct + '% tx / ' + rxPct + '% rx)';
+                            }
+                            var noiseVal = parseInt(w.noise) || 0;
+
                             wifiRendered++;
                             wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
@@ -1519,8 +1553,11 @@ return view.extend({
                                 chipMaxBr ? E('div', { class: 'hw-wifi-detail' }, 'Chip HW Max: ' + chipMaxBr + ' (' + hwMaxSp + 'x' + hwMaxSp + ' MIMO @ ' + hwMaxCw + ')') : '',
                                 cfgMaxBr ? E('div', { class: 'hw-wifi-detail', style: 'color: #00bcd4;' }, 'Config Max: ' + cfgMaxBr + ' (' + cfgMaxLabel + ')') : '',
                                 chStr ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + chStr) : '',
+                                surveyStr ? E('div', { class: 'hw-wifi-detail' }, ['Channel Load: ', E('span', { style: 'color:' + getDynColor(busyPct) + ';' }, surveyStr)]) : '',
+                                noiseVal < 0 ? E('div', { class: 'hw-wifi-detail' }, 'Noise Floor: ' + noiseVal + ' dBm') : '',
                                 hwMaxCw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + hwMaxCw) : '',
                                 w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
+                                regStr ? E('div', { class: 'hw-wifi-detail' }, 'Regulatory Domain: ' + regStr) : '',
                                 suppChs && suppChs.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, suppChs)) : '',
                                 bCap && bCap.disabled && bCap.disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')) : '',
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
