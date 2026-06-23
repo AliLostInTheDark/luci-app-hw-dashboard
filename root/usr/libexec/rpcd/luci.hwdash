@@ -773,8 +773,13 @@ EOF
 						mesz_b=$((0x${mesz})) 2>/dev/null || mesz_b=0
 						mtype="nand"
 						[ -f "/sys/class/mtd/mtd${mn}/type" ] && mtype=$(cat "/sys/class/mtd/mtd${mn}/type" 2>/dev/null)
+						_mecc_c=0; _mecc_f=0
+						if [ -f "/sys/class/mtd/mtd${mn}/ecc_stats" ]; then
+							read _mecc_c _mecc_f _ 2>/dev/null < "/sys/class/mtd/mtd${mn}/ecc_stats"
+							: "${_mecc_c:=0}" "${_mecc_f:=0}"
+						fi
 						[ $FM -eq 0 ] && MTD_PARTS="$MTD_PARTS,"
-						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\"}"
+						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\",\"ecc_corr\":${_mecc_c},\"ecc_fail\":${_mecc_f}}"
 						FM=0
 					done < /proc/mtd
 				fi
@@ -849,7 +854,46 @@ EOF
 				done
 				F2FS_INFO="$F2FS_INFO]"
 
-				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS}"
+				# System info — static device identity, OS, CPU caches, vulns, overlay
+				SYS_HOSTNAME=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
+				SYS_KVER=$(uname -r 2>/dev/null || echo "")
+				SYS_ARCH=$(uname -m 2>/dev/null || echo "")
+				DISTRIB_ID=""; DISTRIB_RELEASE=""; DISTRIB_REVISION=""
+				[ -f /etc/openwrt_release ] && . /etc/openwrt_release
+				L1D_SIZE=0; L1I_SIZE=0; L2_SIZE=0; L3_SIZE=0
+				for _idir in /sys/devices/system/cpu/cpu0/cache/index*/; do
+					[ -f "$_idir/level" ] || continue
+					_lvl=$(cat "$_idir/level" 2>/dev/null)
+					_ct=$(cat "$_idir/type" 2>/dev/null)
+					_csz=$(cat "$_idir/size" 2>/dev/null | sed 's/[^0-9]//g')
+					[ -z "$_csz" ] && _csz=0
+					case "$_lvl-$_ct" in
+						1-Data) L1D_SIZE=$((_csz*1024)) ;;
+						1-Instruction) L1I_SIZE=$((_csz*1024)) ;;
+						2-*) [ $L2_SIZE -eq 0 ] && L2_SIZE=$((_csz*1024)) ;;
+						3-*) [ $L3_SIZE -eq 0 ] && L3_SIZE=$((_csz*1024)) ;;
+					esac
+				done
+				VULNS="{"
+				_FV=1
+				for _vf in /sys/devices/system/cpu/vulnerabilities/*; do
+					[ -f "$_vf" ] || continue
+					_vname=$(basename "$_vf")
+					_vstatus=$(head -c 80 "$_vf" 2>/dev/null | tr -d '\n')
+					[ $_FV -eq 0 ] && VULNS="$VULNS,"
+					VULNS="${VULNS}\"$(json_str "$_vname")\":\"$(json_str "$_vstatus")\""
+					_FV=0
+				done
+				VULNS="$VULNS}"
+				OV_TOTAL=0; OV_USED=0; OV_FREE=0
+				if grep -qs ' /overlay ' /proc/mounts 2>/dev/null; then
+					_ovl=$(df -k /overlay 2>/dev/null | awk 'NR==2{print $2,$3,$4}')
+					OV_TOTAL=$(($(echo "$_ovl" | awk '{print $1}')*1024))
+					OV_USED=$(($(echo "$_ovl" | awk '{print $2}')*1024))
+					OV_FREE=$(($(echo "$_ovl" | awk '{print $3}')*1024))
+				fi
+
+				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":{\"hostname\":\"$(json_str "$SYS_HOSTNAME")\",\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"vulns\":$VULNS,\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}}"
 				;;
 		esac
 		;;

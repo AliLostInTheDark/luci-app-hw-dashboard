@@ -300,8 +300,10 @@ return view.extend({
         
         var wifiCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
 
-        
-        
+        var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
+        sysCard.appendChild(E('h3', {}, 'System Info'));
+        sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
+
         container.appendChild(style);
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
@@ -317,6 +319,7 @@ return view.extend({
         container.appendChild(pcieUsbCard);
         container.appendChild(wifiCard);
         container.appendChild(thermCard);
+        container.appendChild(sysCard);
         var self = this;
         poll.add(function() {
             return callHwInfo().then(function(res) {
@@ -763,6 +766,16 @@ return view.extend({
                                 class: 'hw-stat-value'
                             }, res.mtd_count)]));
                         }
+                        if (res.sys_info && res.sys_info.overlay_total > 0) {
+                            var _ovTot = res.sys_info.overlay_total;
+                            var _ovUsd = res.sys_info.overlay_used;
+                            var _ovPct = Math.round((_ovUsd / _ovTot) * 100);
+                            var _fmtOv = function(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b >= 1024 ? (b/1024).toFixed(0)+' KB' : b+' B'; };
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [
+                                E('span', {class: 'hw-stat-label'}, 'Overlay Used'),
+                                E('span', {class: 'hw-stat-value', style: 'color:'+getDynColor(_ovPct)+';'}, _fmtOv(_ovUsd)+' / '+_fmtOv(_ovTot))
+                            ]));
+                        }
                         var extCardNode = document.getElementById('hw-ext-card');
                         if (extCardNode) extCardNode.style.display = 'none';
                     }
@@ -892,6 +905,22 @@ return view.extend({
                                 ]));
                             });
                             mtdCol.appendChild(mtdWrap);
+                            // ECC error alert — only shown when non-zero errors exist
+                            var eccParts = res.mtd_parts.filter(function(p) { return p.ecc_fail > 0 || p.ecc_corr > 0; });
+                            if (eccParts.length > 0) {
+                                var eccDiv = E('div', {style: 'margin-top:10px; padding-top:8px; border-top:1px dashed var(--border-color,rgba(128,128,128,0.2));'});
+                                eccDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;'}, 'ECC Alerts'));
+                                eccParts.forEach(function(p) {
+                                    var eccRow = E('div', {style: 'display:flex; justify-content:space-between; font-size:0.82em; padding:3px 0;'});
+                                    eccRow.appendChild(E('span', {style: 'color:#00bcd4;'}, 'mtd'+p.num+' ('+p.name+')'));
+                                    var eccVals = E('span', {});
+                                    if (p.ecc_corr > 0) eccVals.appendChild(E('span', {style: 'color:#ffb300; margin-right:8px;'}, p.ecc_corr+' corr'));
+                                    if (p.ecc_fail > 0) eccVals.appendChild(E('span', {style: 'color:#ff5252;'}, p.ecc_fail+' fail'));
+                                    eccRow.appendChild(eccVals);
+                                    eccDiv.appendChild(eccRow);
+                                });
+                                mtdCol.appendChild(eccDiv);
+                            }
                             nandRow.appendChild(mtdCol);
                         }
 
@@ -1503,6 +1532,62 @@ return view.extend({
                     }
                 } else {
                     wifiCard.style.display = 'none';
+                }
+
+                // System Info card
+                var sysInfoGrid = document.getElementById('hw-sysinfo-grid');
+                if (sysInfoGrid && res.sys_info) {
+                    sysInfoGrid.innerHTML = '';
+                    var si = res.sys_info;
+                    // Header: board name + OS badge
+                    var boardName = res.board || si.hostname || 'OpenWrt Device';
+                    var siHeader = E('div', {style: 'display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--border-color,rgba(128,128,128,0.2));'});
+                    var siTitle = E('div', {});
+                    siTitle.appendChild(E('div', {style: 'font-size:1.1em; font-weight:600; opacity:0.9;'}, boardName));
+                    if (res.model) siTitle.appendChild(E('div', {style: 'font-size:0.8em; opacity:0.55; margin-top:3px;'}, res.model));
+                    siHeader.appendChild(siTitle);
+                    var osStr = (si.distrib || 'OpenWrt') + (si.release ? ' ' + si.release : '');
+                    if (si.revision) osStr += ' (' + si.revision + ')';
+                    siHeader.appendChild(E('span', {style: 'font-size:0.85em; padding:4px 10px; border-radius:6px; background:rgba(0,188,212,0.1); border:1px solid rgba(0,188,212,0.3); color:#00bcd4; white-space:nowrap;'}, osStr));
+                    sysInfoGrid.appendChild(siHeader);
+                    // Info grid — auto-fill columns, wraps gracefully on mobile
+                    var siGrid = E('div', {style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:5px 20px; margin-bottom:12px;'});
+                    var addSi = function(lbl, val) {
+                        siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;'}, [
+                            E('span', {class:'hw-stat-label', style:'font-size:0.88em;'}, lbl),
+                            E('span', {class:'hw-stat-value', style:'font-size:0.88em;'}, val)
+                        ]));
+                    };
+                    if (si.hostname) addSi('Hostname', si.hostname);
+                    if (si.kver) addSi('Kernel', si.kver);
+                    if (si.arch) addSi('Architecture', si.arch);
+                    var fmtCache = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
+                    if (si.l1d > 0 || si.l1i > 0) {
+                        var cArr = [];
+                        if (si.l1d > 0) cArr.push('L1d '+fmtCache(si.l1d));
+                        if (si.l1i > 0) cArr.push('L1i '+fmtCache(si.l1i));
+                        addSi('L1 Cache', cArr.join(' / '));
+                    }
+                    if (si.l2 > 0) addSi('L2 Cache', fmtCache(si.l2));
+                    if (si.l3 > 0) addSi('L3 Cache', fmtCache(si.l3));
+                    sysInfoGrid.appendChild(siGrid);
+                    // CPU Security vulnerability chips
+                    if (si.vulns && typeof si.vulns === 'object' && Object.keys(si.vulns).length > 0) {
+                        var vulnDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
+                        vulnDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Security'));
+                        var chipRow = E('div', {style: 'display:flex; flex-wrap:wrap; gap:6px;'});
+                        for (var vn in si.vulns) {
+                            var vst = si.vulns[vn];
+                            var isOk = vst.indexOf('Not affected') === 0;
+                            var isMit = vst.indexOf('Mitigated') === 0;
+                            var vc = isOk ? '#00bcd4' : isMit ? '#ffb300' : '#ff5252';
+                            var vdn = vn.replace(/_/g, ' ');
+                            var vshort = isOk ? 'OK' : isMit ? 'Mitigated' : 'Vulnerable';
+                            chipRow.appendChild(E('span', {style: 'font-size:0.75em; padding:3px 8px; border-radius:4px; border:1px solid '+vc+'44; color:'+vc+'; background:'+vc+'18; white-space:nowrap;'}, vdn+': '+vshort));
+                        }
+                        vulnDiv.appendChild(chipRow);
+                        sysInfoGrid.appendChild(vulnDiv);
+                    }
                 }
 
             }).catch(function(err) {
