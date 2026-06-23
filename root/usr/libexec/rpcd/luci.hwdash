@@ -690,19 +690,34 @@ EOF
 						curr_width=$(echo "$info" | awk -F'Width: ' '/Width:/ {print $2}' | awk '{print $1}')
 						[ -z "$curr_width" ] && curr_width="0"
 
-						freq=$(echo "$info" | awk -F'[(/]' '/Channel:/ {print $2}' | sed 's/[^0-9.]*//g')
-						if [ -n "$freq" ]; then
-							if echo "$freq" | grep -q "^2\."; then band="2.4 GHz"
-							elif echo "$freq" | grep -q "^5\."; then band="5 GHz"
-							elif echo "$freq" | grep -q "^6\."; then band="6 GHz"
-							else band="$freq GHz"
-							fi
-						else
-							band="Unknown"
+						# Band detection: take ONLY the first numeric token inside the
+						# Channel "(...)" group (the frequency in GHz). The old parser
+						# stripped every non-digit on the line, so when the channel read
+						# "unknown" it scraped the "20" out of "HT Mode: HE20" and
+						# reported a bogus "20 GHz" for the 2.4 GHz radio.
+						freq=$(echo "$info" | sed -n 's/.*Channel:[^(]*(\([0-9][0-9.]*\).*/\1/p' | head -1)
+						case "$freq" in
+							2.*) band="2.4 GHz" ;;
+							5.*) band="5 GHz" ;;
+							6.*|7.*) band="6 GHz" ;;
+							*)   band="Unknown" ;;
+						esac
+						# Fall back to the channel number when the frequency was not a
+						# plausible GHz value (channel unknown, or reported in MHz).
+						if [ "$band" = "Unknown" ] && [ "$channel" != "Unknown" ]; then
+							case "$channel" in
+								[1-9]|1[0-4])               band="2.4 GHz" ;;
+								3[6-9]|[4-9][0-9]|1[0-9][0-9]) band="5 GHz" ;;
+							esac
 						fi
 
-						phyname=$(echo "$info" | grep "Phy name:" | awk '{print $3}')
-						[ -z "$phyname" ] && phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
+						# sysfs is the authoritative, always-present phy name. Prefer it
+						# over scraping iwinfo text — when the driver returns a partial
+						# "info" block (the same transient that drops the channel) the
+						# "Phy name:" line is missing, phycap lookup misses and Chip HW
+						# Max vanishes. sysfs keeps phyname (and thus phycap) stable.
+						phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
+						[ -z "$phyname" ] && phyname=$(echo "$info" | grep "Phy name:" | awk '{print $3}')
 						[ -z "$phyname" ] && phyname=$(iw dev "$iface" info 2>/dev/null | grep wiphy | awk '{print "phy"$2}')
 						[ -z "$phyname" ] && phyname="Unknown"
 

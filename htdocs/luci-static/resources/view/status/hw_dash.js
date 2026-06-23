@@ -75,15 +75,17 @@ return view.extend({
             var circumference = 2 * Math.PI * radius;
             var svgContainer = E('div', {
                 id: 'dial-svg-' + id,
-                style: 'position:absolute; top:0; left:0; width:100%; height:100%;'
+                style: 'position:absolute; top:0; left:0; width:100%; height:100%; background:transparent !important;'
             });
-            svgContainer.innerHTML = '<svg viewBox="0 0 160 160"><circle class="hw-dial-bg" cx="80" cy="80" r="' + radius + '"/><circle id="dial-prog-' + id + '" class="hw-dial-progress" cx="80" cy="80" r="' + radius + '" style="stroke: #00bcd4; stroke-dasharray: 0 ' + circumference + ';"/></svg>';
+            svgContainer.innerHTML = '<svg viewBox="0 0 160 160" style="background:transparent !important;"><circle class="hw-dial-bg" cx="80" cy="80" r="' + radius + '"/><circle id="dial-prog-' + id + '" class="hw-dial-progress" cx="80" cy="80" r="' + radius + '" style="stroke: #00bcd4; stroke-dasharray: 0 ' + circumference + ';"/></svg>';
             var card = E('div', {
-                class: 'hw-card'
+                class: 'hw-card',
+                style: 'justify-content: flex-start;'
             }, [E('h3', {
                 id: 'title-' + id
             }, title), E('div', {
-                class: 'hw-dial'
+                class: 'hw-dial',
+                style: 'background:transparent !important;'
             }, [svgContainer, E('div', {
                 id: 'dial-txt-' + id,
                 class: 'hw-dial-text'
