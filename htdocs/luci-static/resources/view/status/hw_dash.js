@@ -305,6 +305,7 @@ return view.extend({
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
 
         container.appendChild(style);
+        container.appendChild(sysCard);
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
@@ -319,7 +320,6 @@ return view.extend({
         container.appendChild(pcieUsbCard);
         container.appendChild(wifiCard);
         container.appendChild(thermCard);
-        container.appendChild(sysCard);
         var self = this;
         poll.add(function() {
             return callHwInfo().then(function(res) {
