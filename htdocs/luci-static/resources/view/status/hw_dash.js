@@ -620,6 +620,8 @@ return view.extend({
                     var totalSpace = 0;
                     var totalUsed = 0;
                     var totalPhys = 0;
+                    var nandChipTotal = 0;
+                    var nandRootfsVol = 0;
                     var dskNode = document.getElementById('stats-dsk');
                     if (dskNode) dskNode.innerHTML = '';
                     res.df.forEach(function(fs) {
@@ -629,6 +631,10 @@ return view.extend({
                             totalUsed += fs.used;
                         }
                         if (fs.hw_size > 0 && !isExt) totalPhys += fs.hw_size;
+                        if (fs.hw_type === 'NAND' && !isExt) {
+                            if (fs.hw_size > nandChipTotal) nandChipTotal = fs.hw_size;
+                            if (fs.mount === '/' && fs.total > 0) nandRootfsVol = fs.total;
+                        }
                         if (isExt) return;
                         var readSpeed = 0;
                         var writeSpeed = 0;
@@ -746,13 +752,12 @@ return view.extend({
                             return (kb / 1024).toFixed(0) + ' MB';
                         };
                         dskMeta.innerHTML = '';
-                        dskMeta.appendChild(E('div', {
-                            class: 'hw-stat-row'
-                        }, [E('span', {
-                            class: 'hw-stat-label'
-                        }, 'Physical Total'), E('span', {
-                            class: 'hw-stat-value'
-                        }, fmtSize(totalPhys > 0 ? totalPhys : totalSpace))]));
+                        if (nandChipTotal > 0) {
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical NAND Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandChipTotal))]));
+                            if (nandRootfsVol > 0) dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'rootfs Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(nandRootfsVol))]));
+                        } else {
+                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [E('span', {class: 'hw-stat-label'}, 'Physical Total'), E('span', {class: 'hw-stat-value'}, fmtSize(totalPhys > 0 ? totalPhys : totalSpace))]));
+                        }
                         dskMeta.appendChild(E('div', {
                             class: 'hw-stat-row'
                         }, [E('span', {
@@ -1571,6 +1576,11 @@ return view.extend({
                     if (si.hostname) addSi('Hostname', si.hostname);
                     if (si.kver) addSi('Kernel', si.kver);
                     if (si.arch) addSi('Architecture', si.arch);
+                    if (si.soc_family) addSi('SoC Family', si.soc_family);
+                    if (si.soc_machine) addSi('Machine', si.soc_machine);
+                    if (si.soc_id) addSi('SoC ID', si.soc_id);
+                    if (si.soc_revision) addSi('SoC Revision', si.soc_revision);
+                    if (si.soc_serial) addSi('SoC Serial', si.soc_serial);
                     var fmtCache = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
                     if (si.l0 > 0) addSi('L0 Cache', fmtCache(si.l0));
                     if (si.l1d > 0 || si.l1i > 0) {

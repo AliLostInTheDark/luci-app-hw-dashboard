@@ -912,6 +912,40 @@ EOF
 							4-*) [ $L4_SIZE -eq 0 ] && L4_SIZE=$((_csz*1024)) ;;
 						esac
 					done
+					# Fallback for kernels that don't expose cache sysfs (common on embedded SoCs).
+					# L1 sizes are standardised per ARM core type; look up from CPU part number.
+					# L2+ are implementation-defined and left at 0 if sysfs didn't provide them.
+					if [ $L1D_SIZE -eq 0 ] && [ $L1I_SIZE -eq 0 ]; then
+						_cpu_impl=$(awk '/^CPU implementer/{print $NF; exit}' /proc/cpuinfo 2>/dev/null)
+						_cpu_part=$(awk '/^CPU part/{print $NF; exit}' /proc/cpuinfo 2>/dev/null)
+						case "${_cpu_impl}-${_cpu_part}" in
+							0x41-0xd01) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Cortex-A32
+							0x41-0xd03) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Cortex-A53
+							0x41-0xd04) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Cortex-A35
+							0x41-0xd05) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Cortex-A55
+							0x41-0xd06) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A65
+							0x41-0xd07) L1D_SIZE=49152;  L1I_SIZE=49152  ;;  # Cortex-A57
+							0x41-0xd08) L1D_SIZE=49152;  L1I_SIZE=49152  ;;  # Cortex-A72
+							0x41-0xd09) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A73
+							0x41-0xd0a) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A75
+							0x41-0xd0b) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A76
+							0x41-0xd0d) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A77
+							0x41-0xd0e) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A76AE
+							0x41-0xd40) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Neoverse V1
+							0x41-0xd41) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A78
+							0x41-0xd44) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-X1
+							0x41-0xd46) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A510
+							0x41-0xd47) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A710
+							0x41-0xd4d) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-A715
+							0x41-0xd4e) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Cortex-X3
+							0x51-0x801) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Kryo 250 Silver (A53)
+							0x51-0x802) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Kryo 250 Gold (A73)
+							0x51-0x803) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Kryo 250 Silver (A53)
+							0x51-0x804) L1D_SIZE=65536;  L1I_SIZE=65536  ;;  # Kryo 260 Gold (A73)
+							0x51-0x805) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Kryo 260 Silver (A53)
+							0x51-0xc00) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Falkor (Qualcomm server)
+						esac
+					fi
 					VULNS="{"
 					_FV=1
 					for _vf in /sys/devices/system/cpu/vulnerabilities/*; do
@@ -923,7 +957,12 @@ EOF
 						_FV=0
 					done
 					VULNS="$VULNS}"
-					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS"
+					SOC0_FAMILY=$(cat /sys/devices/soc0/family 2>/dev/null | tr -d '\n\r')
+					SOC0_MACHINE=$(cat /sys/devices/soc0/machine 2>/dev/null | tr -d '\n\r')
+					SOC0_REVISION=$(cat /sys/devices/soc0/revision 2>/dev/null | tr -d '\n\r')
+					SOC0_SERIAL=$(cat /sys/devices/soc0/serial_number 2>/dev/null | tr -d '\n\r')
+					SOC0_ID=$(cat /sys/devices/soc0/soc_id 2>/dev/null | tr -d '\n\r')
+					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS,\"soc_family\":\"$(json_str "$SOC0_FAMILY")\",\"soc_machine\":\"$(json_str "$SOC0_MACHINE")\",\"soc_revision\":\"$(json_str "$SOC0_REVISION")\",\"soc_serial\":\"$(json_str "$SOC0_SERIAL")\",\"soc_id\":\"$(json_str "$SOC0_ID")\""
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi
 				SYS_HOSTNAME=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
