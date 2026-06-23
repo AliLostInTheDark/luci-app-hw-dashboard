@@ -193,18 +193,21 @@ return view.extend({
         var _dskS = dskCard.node.children[2];
         dskCard.node.innerHTML = '';
         dskCard.node.appendChild(_dskT);
-        var _dskLayout = E('div', {class: 'hw-thermals-container', style: 'align-items: flex-start;'});
-        var _dskColL = E('div', {class: 'hw-thermals-col hw-thermals-col-left', style: 'flex: 0 0 auto; width: 230px; display: flex; flex-direction: column; align-items: center;'});
-        var _dskColDiv = E('div', {id: 'hw-dsk-col-divider', class: 'hw-thermals-divider', style: 'display: none;'});
-        var _dskColR = E('div', {class: 'hw-thermals-col hw-thermals-col-right', style: 'flex: 1 1 0; min-width: 0;'});
-        _dskColL.appendChild(_dskD);
-        _dskColL.appendChild(_dskS);
-        _dskColL.appendChild(E('div', {id: 'dial-meta-dsk', style: 'width: 100%; margin-top: 15px; display: flex; flex-direction: column; gap: 6px;'}));
-        _dskColR.appendChild(E('div', {id: 'hw-int-storage-extra', style: 'width: 100%;'}));
-        _dskLayout.appendChild(_dskColL);
-        _dskLayout.appendChild(_dskColDiv);
-        _dskLayout.appendChild(_dskColR);
-        dskCard.node.appendChild(_dskLayout);
+        // Header row: dial | vertical rule | fs bars + meta stats
+        var _dskOvRow = E('div', {style: 'display: flex; align-items: flex-start; width: 100%;'});
+        var _dskDialArea = E('div', {style: 'flex: 0 0 auto; width: 180px; display: flex; flex-direction: column; align-items: center;'});
+        _dskDialArea.appendChild(_dskD);
+        var _dskVRule = E('div', {style: 'width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); align-self: stretch; margin: 8px 20px;'});
+        var _dskStatsArea = E('div', {style: 'flex: 1 1 0; min-width: 0; padding-top: 5px;'});
+        _dskStatsArea.appendChild(_dskS);
+        _dskStatsArea.appendChild(E('div', {id: 'dial-meta-dsk', style: 'margin-top: 12px; display: flex; flex-direction: column; gap: 5px;'}));
+        _dskOvRow.appendChild(_dskDialArea);
+        _dskOvRow.appendChild(_dskVRule);
+        _dskOvRow.appendChild(_dskStatsArea);
+        dskCard.node.appendChild(_dskOvRow);
+        // Horizontal rule shown only when detail sections exist
+        dskCard.node.appendChild(E('div', {id: 'hw-dsk-horiz-divider', style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0; display: none;'}));
+        dskCard.node.appendChild(E('div', {id: 'hw-int-storage-extra', style: 'width: 100%;'}));
         var coresNode = E('div', {
             id: 'hw-cores',
             class: 'hw-stats-list',
@@ -770,11 +773,6 @@ return view.extend({
                     if (!extraNode) return;
                     extraNode.innerHTML = '';
 
-                    var makeSep = function(title) {
-                        return E('div', {style: 'margin: 14px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2));'}, [
-                            E('h4', {style: 'margin: 0; font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px;'}, title)
-                        ]);
-                    };
                     var makeRow = function(label, val, color) {
                         return E('div', {class: 'hw-stat-row', style: 'margin-bottom: 3px;'}, [
                             E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;'}, label),
@@ -810,75 +808,98 @@ return view.extend({
                         ]));
                         return box;
                     };
+                    var secH = function(title) {
+                        return E('h4', {style: 'margin: 0 0 10px 0; font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px;'}, title);
+                    };
+                    var hRule = function() {
+                        return E('div', {style: 'width:100%;height:1px;background:var(--border-color,rgba(128,128,128,0.15));margin:12px 0;'});
+                    };
 
-                    // UBI devices
-                    if (res.ubi_devs && res.ubi_devs.length > 0) {
-                        extraNode.appendChild(makeSep('UBI / NAND Flash'));
-                        res.ubi_devs.forEach(function(u) {
-                            var ratedEc = 3000;
-                            var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
-                            var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB' : '';
-                            var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb + ' erase blocks' : ''));
-                            box.appendChild(makeBar2('Wear Level (Max EC / ' + ratedEc + ' rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
-                            if (u.eb_size > 0 && u.total_ebs > 0) {
-                                var allocEbs = u.total_ebs - u.avail_ebs - u.bad_pebs;
-                                var allocBytes = allocEbs * u.eb_size;
-                                var totalUbiBytes = u.total_ebs * u.eb_size;
-                                var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
-                                box.appendChild(makeBar2('Allocated Capacity', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), getDynColor(capPct)));
-                            }
-                            var badClr = u.bad_pebs > 0 ? '#ffb300' : null;
-                            box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, badClr));
-                            if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
-                            if (u.page_size > 0) {
-                                var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
-                                box.appendChild(E('div', {style: 'margin-bottom: 8px;'}, [
-                                    E('div', {style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;'}, 'NAND Geometry'),
-                                    E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, [
-                                        geoChip('Page ' + fmtBytesS(u.page_size)),
-                                        geoChip('Block ' + fmtBytesS(u.block_size)),
-                                        geoChip('OOB ' + u.oob_size + ' B')
-                                    ])
-                                ]));
-                            }
-                            if (u.volumes && u.volumes.length > 0) {
-                                var vd = E('div', {style: 'margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.2));'});
-                                vd.appendChild(E('div', {style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;'}, 'Volumes'));
-                                u.volumes.forEach(function(vol) {
-                                    var reservedBytes = (vol.reserved_ebs || 0) * (vol.eb_size || u.eb_size);
-                                    var vsz = vol.data_bytes > 0 ? fmtBytesS(vol.data_bytes) : '0 B';
-                                    if (reservedBytes > 0 && reservedBytes !== vol.data_bytes) vsz += ' / ' + fmtBytesS(reservedBytes);
-                                    vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
-                                        E('span', {style: 'color:#00bcd4;'}, vol.name),
-                                        E('span', {style: 'opacity: 0.7;'}, vol.type + ' | ' + vsz)
+                    var hasUbi = res.ubi_devs && res.ubi_devs.length > 0;
+                    var hasMtd = res.mtd_parts && res.mtd_parts.length > 0;
+                    var hasEmmc = !!res.emmc_info;
+                    var hasNvme = !!res.nvme_info;
+                    var hasF2fs = res.f2fs_info && res.f2fs_info.length > 0;
+
+                    // UBI + MTD side-by-side in a two-column thermals-style row
+                    if (hasUbi || hasMtd) {
+                        var nandRow = E('div', {class: 'hw-thermals-container', style: 'align-items: flex-start;'});
+
+                        if (hasUbi) {
+                            var ubiCol = E('div', {class: 'hw-thermals-col' + (hasMtd ? ' hw-thermals-col-left' : '')});
+                            ubiCol.appendChild(secH('UBI / NAND Flash'));
+                            res.ubi_devs.forEach(function(u) {
+                                var ratedEc = 3000;
+                                var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
+                                var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB' : '';
+                                var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb + ' erase blocks' : ''));
+                                box.appendChild(makeBar2('Wear Level (Max EC / ' + ratedEc + ' rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
+                                if (u.eb_size > 0 && u.total_ebs > 0) {
+                                    var allocEbs = u.total_ebs - u.avail_ebs - u.bad_pebs;
+                                    var allocBytes = allocEbs * u.eb_size;
+                                    var totalUbiBytes = u.total_ebs * u.eb_size;
+                                    var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
+                                    box.appendChild(makeBar2('Allocated Capacity', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), getDynColor(capPct)));
+                                }
+                                box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
+                                if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
+                                if (u.page_size > 0) {
+                                    var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
+                                    box.appendChild(E('div', {style: 'margin-bottom: 8px;'}, [
+                                        E('div', {style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;'}, 'NAND Geometry'),
+                                        E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, [
+                                            geoChip('Page ' + fmtBytesS(u.page_size)),
+                                            geoChip('Block ' + fmtBytesS(u.block_size)),
+                                            geoChip('OOB ' + u.oob_size + ' B')
+                                        ])
                                     ]));
-                                });
-                                box.appendChild(vd);
-                            }
-                            extraNode.appendChild(box);
-                        });
-                    }
+                                }
+                                if (u.volumes && u.volumes.length > 0) {
+                                    var vd = E('div', {style: 'margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.2));'});
+                                    vd.appendChild(E('div', {style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;'}, 'Volumes'));
+                                    u.volumes.forEach(function(vol) {
+                                        var reservedBytes = (vol.reserved_ebs || 0) * (vol.eb_size || u.eb_size);
+                                        var vsz = vol.data_bytes > 0 ? fmtBytesS(vol.data_bytes) : '0 B';
+                                        if (reservedBytes > 0 && reservedBytes !== vol.data_bytes) vsz += ' / ' + fmtBytesS(reservedBytes);
+                                        vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
+                                            E('span', {style: 'color:#00bcd4;'}, vol.name),
+                                            E('span', {style: 'opacity: 0.7;'}, vol.type + ' | ' + vsz)
+                                        ]));
+                                    });
+                                    box.appendChild(vd);
+                                }
+                                ubiCol.appendChild(box);
+                            });
+                            nandRow.appendChild(ubiCol);
+                        }
 
-                    // MTD partition table
-                    if (res.mtd_parts && res.mtd_parts.length > 0) {
-                        extraNode.appendChild(makeSep('MTD Partition Table'));
-                        var mtdWrap = E('div', {style: 'font-size: 0.82em;'});
-                        res.mtd_parts.forEach(function(p) {
-                            var sz = fmtBytesS(p.size);
-                            var tc = p.type === 'nor' ? '#00bcd4' : p.type === 'nand' ? '#ffea00' : '#9e9e9e';
-                            mtdWrap.appendChild(E('div', {style: 'display:flex; justify-content:space-between; align-items:center; padding: 3px 6px; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.08));'}, [
-                                E('span', {style: 'color:#00bcd4; flex-shrink:0; min-width: 48px;'}, 'mtd' + p.num),
-                                E('span', {style: 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding: 0 8px; opacity:0.85;'}, p.name),
-                                E('span', {style: 'flex-shrink:0; opacity:0.7; min-width: 60px; text-align:right;'}, sz),
-                                E('span', {style: 'flex-shrink:0; color:' + tc + '; margin-left: 8px; min-width: 38px; text-align:right;'}, p.type.toUpperCase())
-                            ]));
-                        });
-                        extraNode.appendChild(mtdWrap);
+                        if (hasUbi && hasMtd) nandRow.appendChild(E('div', {class: 'hw-thermals-divider'}));
+
+                        if (hasMtd) {
+                            var mtdCol = E('div', {class: 'hw-thermals-col' + (hasUbi ? ' hw-thermals-col-right' : ''), style: 'min-width: 0;'});
+                            mtdCol.appendChild(secH('MTD Partition Table'));
+                            var mtdWrap = E('div', {style: 'font-size: 0.82em;'});
+                            res.mtd_parts.forEach(function(p) {
+                                var sz = fmtBytesS(p.size);
+                                var tc = p.type === 'nor' ? '#00bcd4' : p.type === 'nand' ? '#ffea00' : '#9e9e9e';
+                                mtdWrap.appendChild(E('div', {style: 'display:flex; justify-content:space-between; align-items:center; padding: 3px 6px; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.08));'}, [
+                                    E('span', {style: 'color:#00bcd4; flex-shrink:0; min-width: 48px;'}, 'mtd' + p.num),
+                                    E('span', {style: 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding: 0 8px; opacity:0.85;'}, p.name),
+                                    E('span', {style: 'flex-shrink:0; opacity:0.7; min-width: 60px; text-align:right;'}, sz),
+                                    E('span', {style: 'flex-shrink:0; color:' + tc + '; margin-left: 8px; min-width: 38px; text-align:right;'}, p.type.toUpperCase())
+                                ]));
+                            });
+                            mtdCol.appendChild(mtdWrap);
+                            nandRow.appendChild(mtdCol);
+                        }
+
+                        extraNode.appendChild(nandRow);
                     }
 
                     // eMMC / SD health
-                    if (res.emmc_info) {
-                        extraNode.appendChild(makeSep('eMMC / SD Health'));
+                    if (hasEmmc) {
+                        if (hasUbi || hasMtd) extraNode.appendChild(hRule());
+                        extraNode.appendChild(secH('eMMC / SD Health'));
                         var em = res.emmc_info;
                         var eolLbls = ['Not Defined', 'Normal', 'Warning', 'Urgent'];
                         var eolClrs = ['#9e9e9e', '#00bcd4', '#ffea00', '#ff1744'];
@@ -896,8 +917,9 @@ return view.extend({
                     }
 
                     // NVMe
-                    if (res.nvme_info) {
-                        extraNode.appendChild(makeSep('NVMe Details'));
+                    if (hasNvme) {
+                        if (hasUbi || hasMtd || hasEmmc) extraNode.appendChild(hRule());
+                        extraNode.appendChild(secH('NVMe Details'));
                         var nv = res.nvme_info;
                         var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), '');
                         if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
@@ -907,8 +929,9 @@ return view.extend({
                     }
 
                     // f2fs
-                    if (res.f2fs_info && res.f2fs_info.length > 0) {
-                        extraNode.appendChild(makeSep('f2fs Statistics'));
+                    if (hasF2fs) {
+                        if (hasUbi || hasMtd || hasEmmc || hasNvme) extraNode.appendChild(hRule());
+                        extraNode.appendChild(secH('f2fs Statistics'));
                         res.f2fs_info.forEach(function(f) {
                             var lwStr = fmtBytesS(f.lifetime_write_kb * 1024);
                             var totSegs = (f.valid_segs || 0) + (f.dirty_segs || 0) + (f.free_segs || 0);
@@ -922,8 +945,8 @@ return view.extend({
                 })();
                 (function() {
                     var extraNode = document.getElementById('hw-int-storage-extra');
-                    var colDiv = document.getElementById('hw-dsk-col-divider');
-                    if (colDiv && extraNode) colDiv.style.display = extraNode.children.length > 0 ? '' : 'none';
+                    var horizDiv = document.getElementById('hw-dsk-horiz-divider');
+                    if (horizDiv && extraNode) horizDiv.style.display = extraNode.children.length > 0 ? '' : 'none';
                 })();
 
                 if (res.block_devs && Array.isArray(res.block_devs)) {
