@@ -5,7 +5,7 @@ LUCI_TITLE:=Hardware Dashboard
 LUCI_DEPENDS:=+luci-base
 LUCI_PKGARCH:=all
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
