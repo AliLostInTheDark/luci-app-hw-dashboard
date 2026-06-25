@@ -177,28 +177,25 @@ case "$1" in
 					local psize=0
 					local model=""
 					local parent=""
+					local t="" sz="" rot="" rem=""
 
 					case "$dev" in
 						nvme*)
 							dtype="NVMe"
 							parent=${dev%%p[0-9]*}
-							[ -f "/sys/class/block/$parent/device/model" ] && model=$(cat "/sys/class/block/$parent/device/model" 2>/dev/null)
+							read_file model "/sys/class/block/$parent/device/model" ""
 							;;
 						mmcblk*)
 							parent=${dev%%p[0-9]*}
-							if [ -f "/sys/class/block/$parent/device/type" ]; then
-								dtype=$(cat "/sys/class/block/$parent/device/type" 2>/dev/null)
-							else
-								dtype="eMMC"
-							fi
-							[ -f "/sys/class/block/$parent/device/name" ] && model=$(cat "/sys/class/block/$parent/device/name" 2>/dev/null)
+							read_file dtype "/sys/class/block/$parent/device/type" "eMMC"
+							read_file model "/sys/class/block/$parent/device/name" ""
 							;;
 						mtd*)
 							local mtd_num=${dev#mtdblock}
 							mtd_num=${mtd_num#mtd}
 							parent=$dev
 							if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
-								local t=$(cat "/sys/class/mtd/mtd${mtd_num}/type" 2>/dev/null)
+								read_file t "/sys/class/mtd/mtd${mtd_num}/type" ""
 								if [ "$t" = "nand" ]; then dtype="NAND"
 								elif [ "$t" = "nor" ]; then dtype="NOR"
 								else dtype="Flash"
@@ -211,19 +208,20 @@ case "$1" in
 							local ubi_vol=${dev#ubiblock}
 							ubi_vol=${ubi_vol#ubi}
 							local ubi_dev=${ubi_vol%_*}
-							local mtd_num=$(cat "/sys/class/ubi/ubi${ubi_dev}/mtd_num" 2>/dev/null)
+							local mtd_num=""
+							read_file mtd_num "/sys/class/ubi/ubi${ubi_dev}/mtd_num" ""
 							# Do NOT set parent=$dev — that would read the UBI volume size
 							# (e.g. 26 MB for rootfs), not the physical NAND chip size.
 							# Read the parent MTD device size directly here instead.
 							parent=""
 							if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
-								local t=$(cat "/sys/class/mtd/mtd${mtd_num}/type" 2>/dev/null)
+								read_file t "/sys/class/mtd/mtd${mtd_num}/type" ""
 								if [ "$t" = "nand" ]; then dtype="NAND"
 								elif [ "$t" = "nor" ]; then dtype="NOR"
 								else dtype="Flash"
 								fi
 								if [ -f "/sys/class/mtd/mtd${mtd_num}/size" ]; then
-									local sz=$(cat "/sys/class/mtd/mtd${mtd_num}/size" 2>/dev/null)
+									read_file sz "/sys/class/mtd/mtd${mtd_num}/size" ""
 									[ -n "$sz" ] && psize=$((sz / 1024))
 								fi
 							else
@@ -232,14 +230,14 @@ case "$1" in
 							;;
 						sd*)
 							parent=${dev%%[0-9]*}
-							rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
-							rem=$(cat "/sys/class/block/$parent/removable" 2>/dev/null)
+							read_file rot "/sys/class/block/$parent/queue/rotational" ""
+							read_file rem "/sys/class/block/$parent/removable" ""
 							if [ "$rem" = "1" ]; then dtype="USB"
 							elif [ "$rot" = "1" ]; then dtype="HDD"
 							elif [ "$rot" = "0" ]; then dtype="SSD"
 							else dtype="USB/SATA"
 							fi
-							[ -f "/sys/class/block/$parent/device/model" ] && model=$(cat "/sys/class/block/$parent/device/model" 2>/dev/null)
+							read_file model "/sys/class/block/$parent/device/model" ""
 							;;
 						*)
 							dtype="Virtual"
@@ -248,10 +246,10 @@ case "$1" in
 					esac
 
 					if [ -n "$parent" ] && [ -f "/sys/class/block/$parent/size" ]; then
-						local sz=$(cat "/sys/class/block/$parent/size" 2>/dev/null)
+						read_file sz "/sys/class/block/$parent/size" ""
 						[ -n "$sz" ] && psize=$((sz * 512 / 1024))
 					elif [ -n "$parent" ] && [ -f "/sys/class/mtd/$parent/size" ]; then
-						local sz=$(cat "/sys/class/mtd/$parent/size" 2>/dev/null)
+						read_file sz "/sys/class/mtd/$parent/size" ""
 						[ -n "$sz" ] && psize=$((sz / 1024))
 					fi
 
@@ -555,49 +553,47 @@ EOF
 				for dev in /sys/class/block/*; do
 					[ ! -d "$dev" ] && continue
 					devname=${dev##*/}
-					# Ignore loop, ram, mtd blocks
+					# Ignore loop/ram/mtd/mmcblk/ubi/zram blocks. mmcblk is fully
+					# covered by the dedicated EMMC_INFO block below with richer
+					# health data; ubi/zram have no meaningful "external storage"
+					# identity. hw_dash.js discards all of these from block_devs
+					# unconditionally, so skip them here rather than forking cat
+					# per field just to ship JSON the client throws away.
 					case "$devname" in
-						loop*|ram*|mtdblock*) continue ;;
+						loop*|ram*|mtdblock*|mmcblk*|ubi*|zram*) continue ;;
 					esac
-					
+
 					# Get model/type
 					model="Unknown"
 					dtype="Unknown"
 					removable="0"
-					health="Unknown"
-					
-					if [ -f "$dev/removable" ]; then
-						removable=$(cat "$dev/removable" 2>/dev/null)
-					fi
-					
+
+					read_file removable "$dev/removable" "0"
+
 					case "$devname" in
-						mmcblk*)
-							dtype="eMMC/SD"
-							[ -f "$dev/device/name" ] && model=$(cat "$dev/device/name" 2>/dev/null)
-							if [ -f "$dev/device/life_time" ]; then
-								health=$(cat "$dev/device/life_time" 2>/dev/null)
-							fi
-							;;
 						nvme*)
 							dtype="NVMe"
-							[ -f "$dev/device/model" ] && model=$(cat "$dev/device/model" 2>/dev/null)
+							read_file model "$dev/device/model" "Unknown"
 							;;
 						sd*)
 							parent=${devname%%[0-9]*}
-							rot=$(cat "/sys/class/block/$parent/queue/rotational" 2>/dev/null)
+							read_file rot "/sys/class/block/$parent/queue/rotational" ""
 							if [ "$removable" = "1" ]; then dtype="USB"
 							elif [ "$rot" = "1" ]; then dtype="HDD"
 							elif [ "$rot" = "0" ]; then dtype="SSD"
 							else dtype="USB/SATA"
 							fi
-							[ -f "/sys/class/block/$parent/device/model" ] && model=$(cat "/sys/class/block/$parent/device/model" 2>/dev/null)
+							read_file model "/sys/class/block/$parent/device/model" "Unknown"
 							;;
 					esac
-					
+
 					# Get size
 					size_bytes=0
-					[ -f "$dev/size" ] && size_bytes=$(($(cat "$dev/size" 2>/dev/null) * 512))
-					
+					if [ -f "$dev/size" ]; then
+						read_file _sz_sectors "$dev/size" 0
+						size_bytes=$((_sz_sectors * 512))
+					fi
+
 					# Get IO stats
 					read_bytes=0
 					write_bytes=0
@@ -634,7 +630,7 @@ EOF
 					[ -z "$model" ] && model="Storage Device"
 					
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
-					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\",\"health\":\"$health\"}"
+					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
 					FIRST_BDEV=0
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
@@ -953,8 +949,9 @@ EOF
 					read_file em_lt "$mmc/device/life_time" ""
 					read_file em_date "$mmc/device/date" ""
 					read_file em_type "$mmc/device/type" "MMC"
-					lt_a=$(echo "$em_lt" | awk '{print $1}')
-					lt_b=$(echo "$em_lt" | awk '{print $2}')
+					read lt_a lt_b _ <<EOF
+$em_lt
+EOF
 					lt_a_i=0; lt_b_i=0; peo_i=0
 					[ -n "$lt_a" ] && lt_a_i=$((lt_a)) 2>/dev/null || lt_a_i=0
 					[ -n "$lt_b" ] && lt_b_i=$((lt_b)) 2>/dev/null || lt_b_i=0
