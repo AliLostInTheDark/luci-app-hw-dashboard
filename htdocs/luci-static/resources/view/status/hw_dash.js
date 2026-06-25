@@ -846,23 +846,10 @@ return view.extend({
                             var ubiCol = E('div', {class: 'hw-thermals-col' + (hasMtd ? ' hw-thermals-col-left' : '')});
                             ubiCol.appendChild(secH('UBI / NAND Flash'));
                             res.ubi_devs.forEach(function(u) {
-                                var ratedEc = 3000;
-                                var wearPct = u.max_ec > 0 ? Math.min((u.max_ec / ratedEc) * 100, 100) : 0;
-                                var eb_kb = u.eb_size > 0 ? (u.eb_size / 1024).toFixed(0) + ' KB' : '';
-                                var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (eb_kb ? ' | ' + eb_kb + ' erase blocks' : ''));
-                                if (res.nand_chip_id !== undefined) box.appendChild(makeRow('Chip ID', res.nand_chip_id || 'Not Available', res.nand_chip_id && res.nand_chip_id !== 'Not Available' ? null : '#9e9e9e'));
-                                box.appendChild(makeBar2('Wear Level (Max EC / ' + ratedEc + ' rated)', wearPct, u.max_ec + ' cycles', getDynColor(wearPct)));
-                                if (u.eb_size > 0 && u.total_ebs > 0) {
-                                    var allocEbs = u.total_ebs - u.avail_ebs - u.bad_pebs;
-                                    var allocBytes = allocEbs * u.eb_size;
-                                    var totalUbiBytes = u.total_ebs * u.eb_size;
-                                    var capPct = totalUbiBytes > 0 ? (allocBytes / totalUbiBytes) * 100 : 0;
-                                    // UBI reserves essentially all PEBs upfront, so a "full" bar is the
-                                    // normal, healthy state — keep it cyan rather than alarming red.
-                                    box.appendChild(makeBar2('PEB Utilization', capPct, fmtBytesS(allocBytes) + ' / ' + fmtBytesS(totalUbiBytes), '#00bcd4'));
-                                }
+                                var peb_str = u.block_size > 0 ? fmtBytesS(u.block_size) + ' blocks' : '';
+                                var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (peb_str ? ' | ' + peb_str : ''));
+                                if (u.max_ec > 0) box.appendChild(makeRow('Erase Count (min / max)', u.min_ec + ' / ' + u.max_ec + ' cycles', null));
                                 box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
-                                if (u.min_ec > 0) box.appendChild(makeRow('Min / Max Erase Count', u.min_ec + ' / ' + u.max_ec, null));
                                 if (u.page_size > 0) {
                                     var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
                                     box.appendChild(E('div', {style: 'margin-bottom: 8px;'}, [
@@ -870,17 +857,24 @@ return view.extend({
                                         E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, [
                                             geoChip('Page ' + fmtBytesS(u.page_size)),
                                             geoChip('Block ' + fmtBytesS(u.block_size)),
-                                            geoChip('OOB ' + u.oob_size + ' B')
+                                            geoChip('OOB ' + fmtBytesS(u.oob_size))
                                         ])
                                     ]));
                                 }
                                 if (u.volumes && u.volumes.length > 0) {
                                     var vd = E('div', {style: 'margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.2));'});
                                     vd.appendChild(E('div', {style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;'}, 'Volumes'));
+                                    var si = res.sys_info || {};
                                     u.volumes.forEach(function(vol) {
                                         var reservedBytes = (vol.reserved_ebs || 0) * (vol.eb_size || u.eb_size);
-                                        var vsz = vol.data_bytes > 0 ? fmtBytesS(vol.data_bytes) : '0 B';
-                                        if (reservedBytes > 0 && reservedBytes !== vol.data_bytes) vsz += ' / ' + fmtBytesS(reservedBytes);
+                                        var vsz;
+                                        if (vol.name === 'rootfs_data' && si.overlay_total > 0) {
+                                            vsz = fmtBytesS(si.overlay_used) + ' used, ' + fmtBytesS(si.overlay_free) + ' free';
+                                        } else if (reservedBytes > 0 && vol.data_bytes !== reservedBytes) {
+                                            vsz = fmtBytesS(vol.data_bytes) + ' / ' + fmtBytesS(reservedBytes);
+                                        } else {
+                                            vsz = fmtBytesS(reservedBytes > 0 ? reservedBytes : vol.data_bytes);
+                                        }
                                         vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
                                             E('span', {style: 'color:#00bcd4;'}, vol.name),
                                             E('span', {style: 'opacity: 0.7;'}, vsz + ' | ' + vol.type)
