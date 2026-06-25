@@ -188,11 +188,11 @@ The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advance
 
 ## Screenshots
 
-<img width="1439" height="365" alt="Screenshot 2026-06-25 222801" src="https://github.com/user-attachments/assets/01e3a39b-8238-4f47-9fe1-d70485eb644f" />
-<img width="1444" height="985" alt="Screenshot 2026-06-25 222810" src="https://github.com/user-attachments/assets/99892f50-7137-41f9-91e0-4b8c11eba0ba" />
-<img width="1297" height="952" alt="Screenshot 2026-06-25 222823" src="https://github.com/user-attachments/assets/2fe91d7c-933e-4c57-9e8d-def41bf96abf" />
-<img width="1299" height="746" alt="Screenshot 2026-06-25 222831" src="https://github.com/user-attachments/assets/7df97a47-1c54-4c97-af26-98e2c730ca08" />
-<img width="1296" height="321" alt="Screenshot 2026-06-25 222838" src="https://github.com/user-attachments/assets/28c13fea-d17e-4af9-9eb5-77fca66532ab" />
+<img width="1296" height="325" alt="Screenshot 2026-06-25 223409" src="https://github.com/user-attachments/assets/6756f8aa-0177-4e80-b8df-a3e5fc1ae81d" />
+<img width="1299" height="890" alt="Screenshot 2026-06-25 223424" src="https://github.com/user-attachments/assets/8381dc23-6229-4712-a911-a345a0be567e" />
+<img width="1299" height="859" alt="Screenshot 2026-06-25 223432" src="https://github.com/user-attachments/assets/b7f04214-3a0a-4189-a202-484ab40d491b" />
+<img width="1300" height="748" alt="Screenshot 2026-06-25 223439" src="https://github.com/user-attachments/assets/4e6e6661-5d16-45e3-abf4-10a0cb1bb415" />
+<img width="1301" height="325" alt="Screenshot 2026-06-25 223447" src="https://github.com/user-attachments/assets/7f994977-52ac-4567-b7f1-586db27eed5b" />
 
 ## License
 
