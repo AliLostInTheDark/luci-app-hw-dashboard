@@ -4,6 +4,7 @@ A real-time hardware monitoring dashboard for OpenWrt LuCI. Built entirely from 
 
 The dashboard is designed to be genuinely informative rather than decorative. It surfaces data that standard LuCI status pages omit: CPU cache topology, NAND wear levels, SoC identity, PCIe negotiated link state, WiFi PHY capabilities, and more. Layout is fully responsive; all cards collapse correctly on mobile.
 
+# NOTE: THIS WAS MADE FOR PERSONAL USE ONLY AND IS NEVER INTENDED TO BE UPSTREAMED. THIS WAS MADE BY CLAUDE AI WITH FULL DEBUGGING AND APPROVAL BY ME.
 
 ## Installation
 
