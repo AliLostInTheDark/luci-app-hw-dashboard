@@ -848,17 +848,25 @@ return view.extend({
                             res.ubi_devs.forEach(function(u) {
                                 var peb_str = u.block_size > 0 ? fmtBytesS(u.block_size) + ' blocks' : '';
                                 var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (peb_str ? ' | ' + peb_str : ''));
-                                if (u.max_ec > 0) box.appendChild(makeRow('Erase Count (min / max)', u.min_ec + ' / ' + u.max_ec + ' cycles', null));
-                                box.appendChild(makeRow('PEB Status', 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs, u.bad_pebs > 0 ? '#ffb300' : null));
+                                if (u.max_ec > 0) {
+                                    var meanStr = u.mean_ec > 0 ? u.mean_ec : '?';
+                                    box.appendChild(makeRow('Erase Count (min / mean / max)', u.min_ec + ' / ' + meanStr + ' / ' + u.max_ec + ' cycles', null));
+                                }
+                                var rp = u.reserved_pebs || 0;
+                                var pebColor = u.bad_pebs > rp ? '#ff5252' : u.bad_pebs > 0 ? '#ffb300' : null;
+                                var pebStr = 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs + (rp > 0 ? '  Rsv: ' + rp : '');
+                                box.appendChild(makeRow('PEB Status', pebStr, pebColor));
                                 if (u.page_size > 0) {
                                     var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
+                                    var geoChips = [
+                                        geoChip('Page ' + fmtBytesS(u.page_size)),
+                                        geoChip('Block ' + fmtBytesS(u.block_size)),
+                                        geoChip('OOB ' + fmtBytesS(u.oob_size))
+                                    ];
+                                    if (u.ecc_strength > 0) geoChips.push(geoChip('ECC ' + u.ecc_strength + 'b'));
                                     box.appendChild(E('div', {style: 'margin-bottom: 8px;'}, [
                                         E('div', {style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;'}, 'NAND Geometry'),
-                                        E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, [
-                                            geoChip('Page ' + fmtBytesS(u.page_size)),
-                                            geoChip('Block ' + fmtBytesS(u.block_size)),
-                                            geoChip('OOB ' + fmtBytesS(u.oob_size))
-                                        ])
+                                        E('div', {style: 'display:flex; flex-wrap:wrap; gap: 4px;'}, geoChips)
                                     ]));
                                 }
                                 if (u.volumes && u.volumes.length > 0) {
@@ -868,17 +876,29 @@ return view.extend({
                                     u.volumes.forEach(function(vol) {
                                         var reservedBytes = (vol.reserved_ebs || 0) * (vol.eb_size || u.eb_size);
                                         var vsz;
+                                        var fillRatio = -1;
                                         if (vol.name === 'rootfs_data' && si.overlay_total > 0) {
                                             vsz = fmtBytesS(si.overlay_used) + ' used, ' + fmtBytesS(si.overlay_free) + ' free';
+                                            fillRatio = si.overlay_used / si.overlay_total;
                                         } else if (reservedBytes > 0 && vol.data_bytes !== reservedBytes) {
                                             vsz = fmtBytesS(vol.data_bytes) + ' / ' + fmtBytesS(reservedBytes);
+                                            fillRatio = vol.data_bytes / reservedBytes;
                                         } else {
                                             vsz = fmtBytesS(reservedBytes > 0 ? reservedBytes : vol.data_bytes);
                                         }
-                                        vd.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em; padding: 3px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07));'}, [
+                                        var volEntry = E('div', {style: 'border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07)); padding: 3px 0;'});
+                                        volEntry.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em;'}, [
                                             E('span', {style: 'color:#00bcd4;'}, vol.name),
                                             E('span', {style: 'opacity: 0.7;'}, vsz + ' | ' + vol.type)
                                         ]));
+                                        if (fillRatio >= 0) {
+                                            var fillPct = Math.max(0, Math.min(100, fillRatio * 100));
+                                            var fillColor = fillRatio > 0.9 ? '#ff5252' : fillRatio > 0.7 ? '#ffb300' : '#00bcd4';
+                                            volEntry.appendChild(E('div', {style: 'height: 2px; margin-top: 3px; background: rgba(128,128,128,0.12); border-radius: 1px; overflow: hidden;'}, [
+                                                E('div', {style: 'height: 100%; width: ' + fillPct.toFixed(0) + '%; background: ' + fillColor + '; border-radius: 1px;'})
+                                            ]));
+                                        }
+                                        vd.appendChild(volEntry);
                                     });
                                     box.appendChild(vd);
                                 }

@@ -12,7 +12,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.0.0.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.0-r1.apk
 ```
 
 The package post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -100,10 +100,10 @@ Below the filesystem bars, a summary section shows hardware-accurate storage siz
 
 **UBI / NAND Flash** sub-section:
 
-- Erase Count — minimum and maximum erase cycle counts read from `/sys/class/ubi/`
-- PEB Status — total / available / bad block counts
-- NAND Geometry — physical erase block size, page size, OOB size
-- Volumes — per-volume usage; `rootfs_data` shows JFFS2 overlay used/free from `df /overlay`
+- Erase Count — minimum / mean / maximum erase cycle counts read from `/sys/class/ubi/`
+- PEB Status — total / available / bad block counts, with bad count shown in amber when non-zero and red when bad blocks exceed the UBI-reserved PEB pool
+- NAND Geometry — page size, physical erase block size, OOB size, and ECC strength in bits (when the kernel exposes `/sys/class/mtd/mtdX/ecc_strength`)
+- Volumes — per-volume name, type, and size; `rootfs_data` shows JFFS2 overlay used/free from `df /overlay`; each volume with a known capacity shows a proportional fill bar
 
 **MTD Partition Table** — all MTD devices with their sizes and types in a compact table.
 

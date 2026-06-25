@@ -877,12 +877,15 @@ EOF
 					read_file u_bad "$ubi_dp/bad_peb_count" 0
 					read_file u_max_ec "$ubi_dp/max_ec" 0
 					read_file u_min_ec "$ubi_dp/min_ec" 0
+					read_file u_mean_ec "$ubi_dp/mean_ec" 0
+					read_file u_reserved_pebs "$ubi_dp/reserved_pebs" 0
 					read_file u_eb_sz "$ubi_dp/eraseblock_size" 0
 					read_file u_mtd_num "$ubi_dp/mtd_num" 0
-					nw=0; ne=0; no=0
+					nw=0; ne=0; no=0; _es=0
 					[ -f "/sys/class/mtd/mtd${u_mtd_num}/writesize" ] && read_file nw "/sys/class/mtd/mtd${u_mtd_num}/writesize" 0
 					[ -f "/sys/class/mtd/mtd${u_mtd_num}/erasesize" ] && read_file ne "/sys/class/mtd/mtd${u_mtd_num}/erasesize" 0
 					[ -f "/sys/class/mtd/mtd${u_mtd_num}/oobsize" ] && read_file no "/sys/class/mtd/mtd${u_mtd_num}/oobsize" 0
+					[ -f "/sys/class/mtd/mtd${u_mtd_num}/ecc_strength" ] && read_file _es "/sys/class/mtd/mtd${u_mtd_num}/ecc_strength" 0
 					VOLS="["
 					FV=1
 					for vp in /sys/class/ubi/${ubi_nm}_[0-9]*; do
@@ -899,7 +902,7 @@ EOF
 					done
 					VOLS="$VOLS]"
 					[ $FIRST_UBI_DEV -eq 0 ] && UBI_DEVS="$UBI_DEVS,"
-					UBI_DEVS="$UBI_DEVS{\"dev\":\"$ubi_nm\",\"total_ebs\":$u_total,\"avail_ebs\":$u_avail,\"bad_pebs\":$u_bad,\"max_ec\":$u_max_ec,\"min_ec\":$u_min_ec,\"eb_size\":$u_eb_sz,\"mtd_num\":$u_mtd_num,\"page_size\":$nw,\"block_size\":$ne,\"oob_size\":$no,\"volumes\":$VOLS}"
+					UBI_DEVS="$UBI_DEVS{\"dev\":\"$ubi_nm\",\"total_ebs\":$u_total,\"avail_ebs\":$u_avail,\"bad_pebs\":$u_bad,\"reserved_pebs\":$u_reserved_pebs,\"max_ec\":$u_max_ec,\"min_ec\":$u_min_ec,\"mean_ec\":$u_mean_ec,\"eb_size\":$u_eb_sz,\"mtd_num\":$u_mtd_num,\"page_size\":$nw,\"block_size\":$ne,\"oob_size\":$no,\"ecc_strength\":${_es},\"volumes\":$VOLS}"
 					FIRST_UBI_DEV=0
 				done
 				UBI_DEVS="$UBI_DEVS]"
@@ -917,13 +920,14 @@ EOF
 						mesz_b=$((0x${mesz})) 2>/dev/null || mesz_b=0
 						mtype="nand"
 						[ -f "/sys/class/mtd/mtd${mn}/type" ] && mtype=$(cat "/sys/class/mtd/mtd${mn}/type" 2>/dev/null)
-						_mecc_c=0; _mecc_f=0
+						_mecc_c=0; _mecc_f=0; _mecc_str=0
 						if [ -f "/sys/class/mtd/mtd${mn}/ecc_stats" ]; then
 							read _mecc_c _mecc_f _ 2>/dev/null < "/sys/class/mtd/mtd${mn}/ecc_stats"
 							: "${_mecc_c:=0}" "${_mecc_f:=0}"
 						fi
+						[ -f "/sys/class/mtd/mtd${mn}/ecc_strength" ] && read_file _mecc_str "/sys/class/mtd/mtd${mn}/ecc_strength" 0
 						[ $FM -eq 0 ] && MTD_PARTS="$MTD_PARTS,"
-						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\",\"ecc_corr\":${_mecc_c},\"ecc_fail\":${_mecc_f}}"
+						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\",\"ecc_corr\":${_mecc_c},\"ecc_fail\":${_mecc_f},\"ecc_strength\":${_mecc_str}}"
 						FM=0
 					done < /proc/mtd
 				fi
