@@ -849,7 +849,7 @@ return view.extend({
                                 var peb_str = u.block_size > 0 ? fmtBytesS(u.block_size) + ' blocks' : '';
                                 var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (peb_str ? ' | ' + peb_str : ''));
                                 if (u.max_ec > 0) {
-                                    var meanStr = u.mean_ec > 0 ? u.mean_ec : '?';
+                                    var meanStr = u.mean_ec > 0 ? u.mean_ec : '-';
                                     box.appendChild(makeRow('Erase Count (min / mean / max)', u.min_ec + ' / ' + meanStr + ' / ' + u.max_ec + ' cycles', null));
                                 }
                                 var rp = u.reserved_pebs || 0;
