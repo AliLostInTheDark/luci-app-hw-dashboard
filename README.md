@@ -188,7 +188,7 @@ The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advance
 
 ## Screenshots
 
-<p align="center">
+<p align="center" style="text-align: center;">
   <img width="1296" height="325" alt="Screenshot 2026-06-25 223409" src="https://github.com/user-attachments/assets/6756f8aa-0177-4e80-b8df-a3e5fc1ae81d" /><br />
   <img width="1299" height="890" alt="Screenshot 2026-06-25 223424" src="https://github.com/user-attachments/assets/8381dc23-6229-4712-a911-a345a0be567e" /><br />
   <img width="1299" height="859" alt="Screenshot 2026-06-25 223432" src="https://github.com/user-attachments/assets/b7f04214-3a0a-4189-a202-484ab40d491b" /><br />
