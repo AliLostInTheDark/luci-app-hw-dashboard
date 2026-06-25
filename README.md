@@ -40,7 +40,7 @@ The dashboard runs on any OpenWrt device. It has been developed and validated on
 |-------|----------|-----|-------|
 | JIDU6J11 | JIDU6111 to JIDU6911 | Qualcomm IPQ9554 | Primary development target |
 | JIDU6J01 | JIDU6101 to JIDU6801 | MediaTek MT7986a | Primary development target |
-| JIDU6700 | — | MediaTek MT7981BA | WiFi chip temperatures non-functional — calibration data absent from Factory partition |
+| JIDU6700 | JIDU6700 | MediaTek MT7981BA | Primary development tagret {WiFi chip temperatures non-functional — calibration data absent from Factory partition (Jio never bothered to check those and just shipped it in a broken state)} |
 
 On x86/x86\_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family, SoC ID, machine name) are silently omitted. All other functionality is platform-independent.
 
