@@ -188,7 +188,7 @@ The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advance
 
 ## Screenshots
 
-# JioRouter JIDU6J01 (Variant=JIDU6101):
+## JioRouter JIDU6J01 (Variant=JIDU6101):
 <p align="center" style="text-align: center;">
   <img width="1296" height="325" alt="Screenshot 2026-06-25 223409" src="https://github.com/user-attachments/assets/6756f8aa-0177-4e80-b8df-a3e5fc1ae81d" /><br />
   <img width="1299" height="890" alt="Screenshot 2026-06-25 223424" src="https://github.com/user-attachments/assets/8381dc23-6229-4712-a911-a345a0be567e" /><br />
@@ -197,7 +197,7 @@ The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advance
   <img width="1301" height="325" alt="Screenshot 2026-06-25 223447" src="https://github.com/user-attachments/assets/7f994977-52ac-4567-b7f1-586db27eed5b" />
 </p>
 
-# JioRouter JIDU6700:
+## JioRouter JIDU6700:
 <p align="center" style="text-align: center;">
   <img width="1444" height="366"  alt="Screenshot 2026-06-26 034001" src="https://github.com/user-attachments/assets/16d5faaa-dfbc-4145-b14f-d9cad36ec580" /><br />
   <img width="1439" height="1080" alt="Screenshot 2026-06-26 034013" src="https://github.com/user-attachments/assets/6fb62f4b-0006-42c8-9e67-d57459b5cfda" /><br />
