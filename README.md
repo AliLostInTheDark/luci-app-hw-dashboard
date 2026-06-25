@@ -188,8 +188,11 @@ The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advance
 
 ## Screenshots
 
-*(Update with current screenshots after installation)*
-
+<img width="1439" height="365" alt="Screenshot 2026-06-25 222801" src="https://github.com/user-attachments/assets/01e3a39b-8238-4f47-9fe1-d70485eb644f" />
+<img width="1444" height="985" alt="Screenshot 2026-06-25 222810" src="https://github.com/user-attachments/assets/99892f50-7137-41f9-91e0-4b8c11eba0ba" />
+<img width="1297" height="952" alt="Screenshot 2026-06-25 222823" src="https://github.com/user-attachments/assets/2fe91d7c-933e-4c57-9e8d-def41bf96abf" />
+<img width="1299" height="746" alt="Screenshot 2026-06-25 222831" src="https://github.com/user-attachments/assets/7df97a47-1c54-4c97-af26-98e2c730ca08" />
+<img width="1296" height="321" alt="Screenshot 2026-06-25 222838" src="https://github.com/user-attachments/assets/28c13fea-d17e-4af9-9eb5-77fca66532ab" />
 
 ## License
 
