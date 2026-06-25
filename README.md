@@ -100,11 +100,10 @@ Below the filesystem bars, a summary section shows hardware-accurate storage siz
 
 **UBI / NAND Flash** sub-section:
 
-- Chip ID — extracted from `dmesg` at first boot and persisted. Covers QPIC, SPI-NAND, and parallel NAND controllers
-- Wear Level — maximum erase cycle count vs. the 3000-cycle rated endurance, shown as a percentage bar
-- PEB Utilization — physical erase block usage
+- Erase Count — minimum and maximum erase cycle counts read from `/sys/class/ubi/`
 - PEB Status — total / available / bad block counts
-- NAND Geometry — erase block size, page size, OOB size
+- NAND Geometry — physical erase block size, page size, OOB size
+- Volumes — per-volume usage; `rootfs_data` shows JFFS2 overlay used/free from `df /overlay`
 
 **MTD Partition Table** — all MTD devices with their sizes and types in a compact table.
 
@@ -155,7 +154,6 @@ The dashboard is deliberately conservative about process spawning. Shell forks a
 |------|---------|-------------|
 | `wifi_cap_v4.json` | WiFi PHY hardware capabilities from `iw list` | On package upgrade |
 | `sys_static_v2.frag` | CPU cache sizes, SoC identity, kernel version, vulnerability status | On package upgrade |
-| `nand_chipid_v1.txt` | NAND chip ID from `dmesg` | On package upgrade |
 
 **Volatile cache** (`/tmp/`) — cleared on reboot; represents live data with a short TTL:
 
