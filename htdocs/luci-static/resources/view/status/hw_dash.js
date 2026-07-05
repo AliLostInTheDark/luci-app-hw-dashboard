@@ -227,6 +227,51 @@ return view.extend({
                 style: 'width: ' + pct + '%; background: ' + colorMem + ';'
             })])]);
         };
+        var makeSensorRow = function(s) {
+            // Color thresholds come from the sensor's own trip points
+            // when the hardware exposes them (per-architecture dynamic);
+            // the fixed 60/80 °C split is only the fallback.
+            var hot = s.crit ? s.crit * 0.9 : 80;
+            var warm = s.pass ? Math.min(s.pass, hot - 5) : (s.crit ? s.crit * 0.75 : 60);
+            var color = '#00bcd4', bgCol = 'rgba(0,188,212,0.1)';
+            if (s.temp >= hot) {
+                color = '#ff1744';
+                bgCol = 'rgba(255,23,68,0.1)';
+            } else if (s.temp > warm) {
+                color = '#ffea00';
+                bgCol = 'rgba(255,234,0,0.1)';
+            }
+            var tempDisplay = s.temp.toFixed(1) + ' °C';
+            if (s.temp >= (s.crit || 90)) tempDisplay += ' ⚠️';
+            var rowContent = [E('div', {
+                class: 'hw-stat-row',
+                style: 'border-bottom: none; padding-bottom: 0;'
+            }, [E('span', {
+                class: 'hw-stat-label'
+            }, s.name), E('span', {
+                class: 'hw-temp-badge',
+                style: 'color: ' + color + '; background: ' + bgCol + ';'
+            }, tempDisplay)])];
+            if (s.pass || s.crit) {
+                var tripsDiv = E('div', {
+                    style: 'display: flex; justify-content: flex-end; gap: 6px; font-size: 0.75em; padding-top: 6px;'
+                });
+                if (s.pass) {
+                    tripsDiv.appendChild(E('span', {
+                        style: 'color: #ffb300; background: rgba(255,179,0,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
+                    }, 'PASS ' + s.pass.toFixed(0) + '°'));
+                }
+                if (s.crit) {
+                    tripsDiv.appendChild(E('span', {
+                        style: 'color: #ff1744; background: rgba(255,23,68,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
+                    }, 'CRIT ' + s.crit.toFixed(0) + '°'));
+                }
+                rowContent.push(tripsDiv);
+            }
+            return E('div', {
+                style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));'
+            }, rowContent);
+        };
         var fmtSpeedDf = function(bytes) {
             if (bytes < 1024) return bytes + ' B/s';
             if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB/s';
@@ -370,43 +415,14 @@ return view.extend({
         
         
         
-        var thermCard = E('div', {
-            class: 'hw-card wide', style: 'display: none;'
-        }, [E('h3', {}, 'Thermal Sensors'), E('div', {
-            class: 'hw-thermals-container'
-        }, [E('div', {
-            class: 'hw-thermals-col hw-thermals-col-left'
-        }, [E('div', {
-            class: 'hw-thermals-title'
-        }, 'CPU'), E('div', {
-            id: 'hw-thermals-cpu',
-            class: 'hw-stats-list',
-            style: 'margin-top: 0; padding-top: 0;'
-        })]), E('div', {
-            id: 'hw-thermals-divider-wifi',
-            class: 'hw-thermals-divider'
-        }), E('div', {
-            id: 'hw-thermals-col-wifi',
-            class: 'hw-thermals-col hw-thermals-col-mid'
-        }, [E('div', {
-            class: 'hw-thermals-title'
-        }, 'Wi-Fi'), E('div', {
-            id: 'hw-thermals-wifi',
-            class: 'hw-stats-list',
-            style: 'margin-top: 0; padding-top: 0;'
-        })]), E('div', {
-            id: 'hw-thermals-divider-misc',
-            class: 'hw-thermals-divider'
-        }), E('div', {
-            id: 'hw-thermals-col-misc',
-            class: 'hw-thermals-col hw-thermals-col-right'
-        }, [E('div', {
-            class: 'hw-thermals-title'
-        }, 'MISCELLANEOUS'), E('div', {
-            id: 'hw-thermals-misc',
-            class: 'hw-stats-list',
-            style: 'margin-top: 0; padding-top: 0;'
-        })])])]);
+        // Thermal cards are built dynamically each poll: sensors are laid out
+        // naturally (no CPU/Wi-Fi/Misc grouping) across up to 3 columns, and
+        // when the platform exposes more sensors than fit one card, extra
+        // cards are appended automatically.
+        var thermWrapper = E('div', {
+            id: 'hw-therm-wrapper',
+            style: 'display: contents;'
+        });
         
         
         var ethCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Ethernet Switch Topology'), E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
@@ -438,9 +454,12 @@ return view.extend({
         container.appendChild(ethCard);
         container.appendChild(pcieUsbCard);
         container.appendChild(wifiCard);
-        container.appendChild(thermCard);
+        container.appendChild(thermWrapper);
         var self = this;
         poll.add(function() {
+            // Skip the RPC entirely while the tab is hidden — the router does
+            // no collection work for dashboards nobody is looking at.
+            if (document.hidden) return Promise.resolve();
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 var coresNode = document.getElementById('hw-cores');
@@ -1280,109 +1299,73 @@ return view.extend({
                         }
                     }
                 }
-                if (res.thermals && res.thermals.length > 0) {
-                    thermCard.style.display = 'flex';
+                var thermWrap = document.getElementById('hw-therm-wrapper');
+                if (thermWrap) thermWrap.innerHTML = '';
+                if (res.thermals && res.thermals.length > 0 && thermWrap) {
                     if (res.model) {
                         var title = res.model;
                         if (title.length > 30) title = title.substring(0, 30);
                         var tEl = document.getElementById('title-cpu');
                         if (tEl && tEl.textContent !== title) tEl.textContent = title;
                     }
-                    var cpuNode = document.getElementById('hw-thermals-cpu');
-                    var wifiNode = document.getElementById('hw-thermals-wifi');
-                    var miscNode = document.getElementById('hw-thermals-misc');
-                    if (cpuNode) cpuNode.innerHTML = '';
-                    if (wifiNode) wifiNode.innerHTML = '';
-                    if (miscNode) miscNode.innerHTML = '';
-                    var sortedThermals = res.thermals.sort(function(a, b) {
-                        return a.type.localeCompare(b.type);
-                    });
+                    // Normalize + de-duplicate sensors, sorted alphabetically.
+                    var sensors = [];
                     var seenSensors = {};
-                    sortedThermals.forEach(function(t) {
+                    res.thermals.slice().sort(function(a, b) {
+                        return a.type.localeCompare(b.type);
+                    }).forEach(function(t) {
                         var tempC = t.temp;
                         if (tempC > 1000) tempC = tempC / 1000;
                         var name = t.type.replace(/_/g, '-').toUpperCase();
                         if (seenSensors[name]) return;
                         seenSensors[name] = true;
                         if (name.length > 20) name = name.substring(0, 20);
-                        var color = '#ffea00';
-                        var bgCol = 'rgba(255,234,0,0.1)';
-                        if (tempC >= 80) {
-                            color = '#ff1744';
-                            bgCol = 'rgba(255,23,68,0.1)';
-                        } else if (tempC <= 60) {
-                            color = '#00bcd4';
-                            bgCol = 'rgba(0,188,212,0.1)';
-                        }
                         var crit = t.crit && t.crit !== 'null' ? parseInt(t.crit) : null;
                         var pass = t.pass && t.pass !== 'null' ? parseInt(t.pass) : null;
                         if (crit && crit > 1000) crit = crit / 1000;
                         if (pass && pass > 1000) pass = pass / 1000;
-                        var lowerName = name.toLowerCase();
-                        var targetCol = null;
-                        if (lowerName.indexOf('cpu') !== -1 || lowerName.indexOf('soc') !== -1 || lowerName.indexOf('cpu_ss') !== -1 || lowerName.indexOf('top-glue') !== -1) {
-                            targetCol = cpuNode;
-                        } else if (lowerName.indexOf('wifi') !== -1 || lowerName.indexOf('wlan') !== -1 || lowerName.indexOf('wcss') !== -1 || lowerName.indexOf('phy') !== -1 || lowerName.indexOf('radio') !== -1 || lowerName.indexOf('mt798') !== -1 || lowerName.indexOf('ath') !== -1) {
-                            targetCol = wifiNode;
-                        } else {
-                            targetCol = miscNode;
-                        }
-                        var tempDisplay = tempC.toFixed(1) + ' °C';
-                        if (tempC >= 90) tempDisplay += ' ⚠️';
-                        var badgeAttrs = {
-                            class: 'hw-temp-badge',
-                            style: 'color: ' + color + '; background: ' + bgCol + ';'
-                        };
-                        var rowContent = [E('div', {
-                            class: 'hw-stat-row',
-                            style: 'border-bottom: none; padding-bottom: 0;'
-                        }, [E('span', {
-                            class: 'hw-stat-label'
-                        }, name), E('span', badgeAttrs, tempDisplay)])];
-                        if (pass || crit) {
-                            var tripsDiv = E('div', {
-                                style: 'display: flex; justify-content: flex-end; gap: 6px; font-size: 0.75em; padding-top: 6px;'
-                            });
-                            if (pass) {
-                                tripsDiv.appendChild(E('span', {
-                                    style: 'color: #ffb300; background: rgba(255,179,0,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
-                                }, 'PASS ' + pass.toFixed(0) + '°'));
-                            }
-                            if (crit) {
-                                tripsDiv.appendChild(E('span', {
-                                    style: 'color: #ff1744; background: rgba(255,23,68,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
-                                }, 'CRIT ' + crit.toFixed(0) + '°'));
-                            }
-                            rowContent.push(tripsDiv);
-                        }
-                        var row = E('div', {
-                            style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));'
-                        }, rowContent);
-                        if (targetCol) targetCol.appendChild(row);
+                        // Some drivers report nonsense trip points (-274 °C, 65000 °C
+                        // …). Since trips now drive the badge colors, only keep
+                        // physically plausible values.
+                        if (crit !== null && (crit < 40 || crit > 150)) crit = null;
+                        if (pass !== null && (pass <= 0 || pass > 150)) pass = null;
+                        if (crit !== null && pass !== null && pass >= crit) pass = null;
+                        sensors.push({ name: name, temp: tempC, crit: crit, pass: pass });
                     });
-                    if (cpuNode && cpuNode.lastChild) cpuNode.lastChild.style.borderBottom = 'none';
-                    if (wifiNode && wifiNode.lastChild) wifiNode.lastChild.style.borderBottom = 'none';
-                    if (miscNode && miscNode.lastChild) miscNode.lastChild.style.borderBottom = 'none';
-                    var wifiColNode = document.getElementById('hw-thermals-col-wifi');
-                    var wifiDivNode = document.getElementById('hw-thermals-divider-wifi');
-                    if (wifiNode && wifiNode.children.length === 0) {
-                        if (wifiColNode) wifiColNode.style.display = 'none';
-                        if (wifiDivNode) wifiDivNode.style.display = 'none';
-                    } else {
-                        if (wifiColNode) wifiColNode.style.display = 'block';
-                        if (wifiDivNode) wifiDivNode.style.display = 'block';
+                    // Up to 3 columns per card, up to 4 sensors per column; when
+                    // the platform exposes more sensors, additional cards are added.
+                    var MAX_PER_CARD = 12;
+                    var cardCount = Math.ceil(sensors.length / MAX_PER_CARD);
+                    for (var off = 0; off < sensors.length; off += MAX_PER_CARD) {
+                        var chunk = sensors.slice(off, off + MAX_PER_CARD);
+                        var nCols = Math.min(3, chunk.length);
+                        var cols = [];
+                        for (var ci = 0; ci < nCols; ci++) cols.push([]);
+                        chunk.forEach(function(s, i) {
+                            cols[i % nCols].push(s);
+                        });
+                        var rowEl = E('div', { class: 'hw-thermals-container' });
+                        cols.forEach(function(colSensors, cidx) {
+                            if (cidx > 0) rowEl.appendChild(E('div', { class: 'hw-thermals-divider' }));
+                            var colCls = 'hw-thermals-col';
+                            if (nCols > 1) {
+                                colCls += cidx === 0 ? ' hw-thermals-col-left' : cidx === nCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                            }
+                            var list = E('div', {
+                                class: 'hw-stats-list',
+                                style: 'margin-top: 0; padding-top: 0;'
+                            });
+                            colSensors.forEach(function(s) {
+                                list.appendChild(makeSensorRow(s));
+                            });
+                            if (list.lastChild) list.lastChild.style.borderBottom = 'none';
+                            rowEl.appendChild(E('div', { class: colCls }, [list]));
+                        });
+                        var cardTitle = cardCount > 1 ? 'Thermal Sensors (' + (off / MAX_PER_CARD + 1) + '/' + cardCount + ')' : 'Thermal Sensors';
+                        thermWrap.appendChild(E('div', {
+                            class: 'hw-card wide'
+                        }, [E('h3', {}, cardTitle), rowEl]));
                     }
-                    var miscColNode = document.getElementById('hw-thermals-col-misc');
-                    var miscDivNode = document.getElementById('hw-thermals-divider-misc');
-                    if (miscNode && miscNode.children.length === 0) {
-                        if (miscColNode) miscColNode.style.display = 'none';
-                        if (miscDivNode) miscDivNode.style.display = 'none';
-                    } else {
-                        if (miscColNode) miscColNode.style.display = 'block';
-                        if (miscDivNode) miscDivNode.style.display = 'block';
-                    }
-                } else {
-                    thermCard.style.display = 'none';
                 }
                 if (res.eth_links && res.eth_links.length > 0) {
                     ethCard.style.display = 'flex';

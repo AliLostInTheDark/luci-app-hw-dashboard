@@ -1,6 +1,39 @@
 #!/bin/sh
 
-json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]//g'; }
+# Escape a string for embedding in JSON. Sysfs/proc values almost never
+# contain characters that need escaping, so the common case returns via the
+# printf builtin with zero exec()s; the sed pipeline (2 extra processes per
+# call, dozens of calls per poll) only runs for a string that actually
+# contains a quote, backslash or control character.
+_JS_TAB=$(printf '\t')
+# json_esc sets JSV to the escaped value with zero forks in the common case
+# — even a builtin-only $(json_str ...) still costs a subshell fork per call,
+# which adds up in the per-poll loops. json_str stays as a thin wrapper for
+# call sites inside TTL-cached blocks where the fork happens rarely.
+json_esc() {
+	case "$1" in
+		*[\"\\]*|*[[:cntrl:]]*)
+			JSV=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]//g') ;;
+		*)
+			JSV=$1 ;;
+	esac
+}
+json_str() { json_esc "$1"; printf '%s' "$JSV"; }
+
+# Strip leading/trailing spaces and tabs from the variable named $1 using
+# parameter expansion only — replaces the per-value `sed 's/[[:space:]]*$//'`
+# forks (sysfs model/serial strings are padded with trailing spaces).
+trim_ws() {
+	local __v
+	eval "__v=\$$1"
+	while [ "${__v% }" != "$__v" ] || [ "${__v%$_JS_TAB}" != "$__v" ]; do
+		__v=${__v% }; __v=${__v%$_JS_TAB}
+	done
+	while [ "${__v# }" != "$__v" ] || [ "${__v#$_JS_TAB}" != "$__v" ]; do
+		__v=${__v# }; __v=${__v#$_JS_TAB}
+	done
+	eval "$1=\$__v"
+}
 
 read_file() {
 	# Reads the first line of $2 into the variable named $1 (default $3).
@@ -15,18 +48,27 @@ read_file() {
 	eval "$__var=\$__val"
 }
 
-# Returns 0 if cache file $1 exists and is younger than $2 seconds.
-# Used to skip recomputing static/slow-changing data (wifi, cpu caches,
-# vulnerabilities) on every poll — the dominant CPU cost was forking
+# TTL caches skip recomputing static/slow-changing data (wifi, storage
+# inventory, fs types) on every poll — the dominant CPU cost was forking
 # dozens of iwinfo/iw/uci/awk subprocesses every 3s for data that rarely
-# changes. With caching, those forks happen at most once per TTL window.
-_cache_age_ok() {
+# changes. Cache file format: line 1 = absolute expiry epoch, line 2 =
+# single-line payload. Freshness is a builtin read + compare against
+# HWDASH_NOW (resolved once per invocation) — zero forks per check,
+# unlike the old mtime scheme which forked date -r on every check.
+_cache_read() {
+	# Sets C_VAL to the payload and returns 0 if cache file $1 is fresh.
+	C_VAL=""
 	[ -f "$1" ] || return 1
-	local _now _mt
-	_now=$(date +%s 2>/dev/null) || return 1
-	_mt=$(date -r "$1" +%s 2>/dev/null) || return 1
-	[ -n "$_mt" ] || return 1
-	[ $((_now - _mt)) -lt "$2" ]
+	case "$HWDASH_NOW" in ''|*[!0-9]*) return 1 ;; esac
+	local _exp=""
+	{ read -r _exp && read -r C_VAL; } < "$1" 2>/dev/null
+	case "$_exp" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$HWDASH_NOW" -lt "$_exp" ]
+}
+_cache_write() {
+	# $1=file $2=TTL seconds $3=single-line payload
+	printf '%s\n%s\n' "$((HWDASH_NOW + $2))" "$3" > "$1.$$" 2>/dev/null && \
+		mv "$1.$$" "$1" 2>/dev/null
 }
 
 
@@ -37,6 +79,7 @@ case "$1" in
 	call)
 		case "$2" in
 			info)
+				HWDASH_NOW=$(date +%s 2>/dev/null)
 				HWDASH_PERSIST_DIR=/etc/hwdash
 				if [ ! -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && command -v iw >/dev/null; then
 					mkdir -p "$HWDASH_PERSIST_DIR"
@@ -109,17 +152,33 @@ case "$1" in
 				fi
 
 
+				# Single pass over /proc/stat collects the per-CPU lines AND the
+				# aggregate ticks / context switches / interrupts — this used to
+				# be a second read of the file through a forked awk.
 				CPUS="["
 				FIRST=1
-				while read -r line; do
-					case "$line" in
-						cpu*)
+				CPU_TICKS=0; CTXT=0; INTR=0
+				while read -r key rest; do
+					case "$key" in
+						cpu)
+							set -- $rest
+							CPU_TICKS=$((${1:-0} + ${2:-0} + ${3:-0} + ${4:-0} + ${5:-0} + ${6:-0} + ${7:-0} + ${8:-0}))
 							if [ $FIRST -eq 0 ]; then CPUS="$CPUS,"; fi
-							CPUS="$CPUS\"$line\""
+							CPUS="$CPUS\"$key $rest\""
 							FIRST=0
 							;;
-						*)
-							break
+						cpu[0-9]*)
+							if [ $FIRST -eq 0 ]; then CPUS="$CPUS,"; fi
+							CPUS="$CPUS\"$key $rest\""
+							FIRST=0
+							;;
+						ctxt)
+							CTXT=${rest%% *}
+							;;
+						intr)
+							# intr's line is huge (one column per IRQ); take only the
+							# leading total without word-splitting the whole thing.
+							INTR=${rest%% *}
 							;;
 					esac
 				done < /proc/stat
@@ -177,7 +236,6 @@ case "$1" in
 					local psize=0
 					local model=""
 					local parent=""
-					local t="" sz="" rot="" rem=""
 
 					case "$dev" in
 						nvme*)
@@ -195,6 +253,7 @@ case "$1" in
 							mtd_num=${mtd_num#mtd}
 							parent=$dev
 							if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
+								local t
 								read_file t "/sys/class/mtd/mtd${mtd_num}/type" ""
 								if [ "$t" = "nand" ]; then dtype="NAND"
 								elif [ "$t" = "nor" ]; then dtype="NOR"
@@ -208,22 +267,21 @@ case "$1" in
 							local ubi_vol=${dev#ubiblock}
 							ubi_vol=${ubi_vol#ubi}
 							local ubi_dev=${ubi_vol%_*}
-							local mtd_num=""
+							local mtd_num
 							read_file mtd_num "/sys/class/ubi/ubi${ubi_dev}/mtd_num" ""
 							# Do NOT set parent=$dev — that would read the UBI volume size
 							# (e.g. 26 MB for rootfs), not the physical NAND chip size.
 							# Read the parent MTD device size directly here instead.
 							parent=""
 							if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
+								local t sz
 								read_file t "/sys/class/mtd/mtd${mtd_num}/type" ""
 								if [ "$t" = "nand" ]; then dtype="NAND"
 								elif [ "$t" = "nor" ]; then dtype="NOR"
 								else dtype="Flash"
 								fi
-								if [ -f "/sys/class/mtd/mtd${mtd_num}/size" ]; then
-									read_file sz "/sys/class/mtd/mtd${mtd_num}/size" ""
-									[ -n "$sz" ] && psize=$((sz / 1024))
-								fi
+								read_file sz "/sys/class/mtd/mtd${mtd_num}/size" ""
+								[ -n "$sz" ] && psize=$((sz / 1024))
 							else
 								dtype="NAND/NOR"
 							fi
@@ -245,6 +303,7 @@ case "$1" in
 							;;
 					esac
 
+					local sz
 					if [ -n "$parent" ] && [ -f "/sys/class/block/$parent/size" ]; then
 						read_file sz "/sys/class/block/$parent/size" ""
 						[ -n "$sz" ] && psize=$((sz * 512 / 1024))
@@ -253,15 +312,25 @@ case "$1" in
 						[ -n "$sz" ] && psize=$((sz / 1024))
 					fi
 
-					model=$(echo "$model" | sed 's/[[:space:]]*$//')
+					trim_ws model
 					echo "$dtype:$psize:$model"
 				}
 
 				DF_JSON="["
 				FIRST_DF=1
+				OV_TOTAL=0; OV_USED=0; OV_FREE=0
 				while read -r fs blocks used avail pct mountpoint; do
 					[ -z "$fs" ] && continue
-					
+
+					# Harvest overlay usage from this same df pass — this used to
+					# be a separate grep + df + awk fork trio later in the script.
+					if [ "$mountpoint" = "/overlay" ]; then
+						case "$blocks$used$avail" in
+							*[!0-9]*) ;;
+							*) OV_TOTAL=$((blocks * 1024)); OV_USED=$((used * 1024)); OV_FREE=$((avail * 1024)) ;;
+						esac
+						continue
+					fi
 					if [ "$mountpoint" != "/" ] && [ "${mountpoint#/mnt/}" = "$mountpoint" ] && [ "${mountpoint#/run/media/}" = "$mountpoint" ]; then
 						continue
 					fi
@@ -273,24 +342,50 @@ case "$1" in
 					realdev=""
 					if [ "$mountpoint" = "/" ]; then
 						devname="root"
-						ubiblk=$(ls /sys/class/block/ 2>/dev/null | grep "^ubiblock" | head -1)
+						# Glob + builtin read instead of ls|grep|head + mount|awk
+						# (4 forks per poll on NAND boards).
+						ubiblk=""
+						for _ub in /sys/class/block/ubiblock*; do
+							[ -e "$_ub" ] && ubiblk=${_ub##*/} && break
+						done
 						if [ -n "$ubiblk" ]; then
 							realdev="$ubiblk"
 						else
-							overlay_fs=$(mount | awk '$3=="/overlay" {print $1}')
-							[ -n "$overlay_fs" ] && realdev="${overlay_fs#/dev/}"
+							while read -r _odev _omp _; do
+								if [ "$_omp" = "/overlay" ]; then
+									realdev="${_odev#/dev/}"
+									break
+								fi
+							done < /proc/mounts
 						fi
 					fi
 
 					if [ -b "$fs" ] || [ -c "$fs" ]; then
-						# ls -ln prints "major," and "minor" in fields 5 and 6 for a
-						# device node; read once instead of two ls|awk pipelines.
-						read -r _ _ _ _ maj min _ <<EOF
+						_base=${fs##*/}
+						if [ -d "/sys/class/block/$_base" ]; then
+							# Canonical device node — the name IS the real device.
+							realdev=$_base
+						else
+							# Non-canonical node (/dev/root, mapper, …): resolve its
+							# major:minor against /proc/diskstats once per boot. The
+							# mapping is fixed until reboot and /tmp is tmpfs, so a
+							# plain no-TTL cache file is exactly right — the old code
+							# forked ls + awk for this on every poll.
+							_rd_cache="/tmp/hwdash_realdev_$_base"
+							if [ -f "$_rd_cache" ]; then
+								read -r realdev < "$_rd_cache" 2>/dev/null
+							else
+								read -r _ _ _ _ maj min _ <<EOF
 $(ls -ln "$fs" 2>/dev/null)
 EOF
-						maj=${maj%,}
-						if [ -n "$maj" ] && [ -n "$min" ]; then
-							realdev=$(awk -v maj="$maj" -v min="$min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
+								maj=${maj%,}
+								if [ -n "$maj" ] && [ -n "$min" ]; then
+									realdev=$(awk -v maj="$maj" -v min="$min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
+								fi
+								# Cache only successful lookups so a device that
+								# registers late still gets resolved eventually.
+								[ -n "$realdev" ] && printf '%s\n' "$realdev" > "$_rd_cache.$$" 2>/dev/null && mv "$_rd_cache.$$" "$_rd_cache" 2>/dev/null
+							fi
 						fi
 					fi
 					[ -z "$realdev" ] && realdev="${fs#/dev/}"
@@ -307,7 +402,8 @@ EOF
 					[ "$hw_size" -eq 0 ] && hw_size=$blocks
 
 					if [ $FIRST_DF -eq 0 ]; then DF_JSON="$DF_JSON,"; fi
-					DF_JSON="$DF_JSON{\"fs\":\"$fs\",\"mount\":\"$mountpoint\",\"total\":$blocks,\"used\":$used,\"avail\":$avail,\"pct\":\"$pct\",\"dev\":\"$devname\",\"hw_type\":\"$hw_type\",\"hw_size\":$hw_size,\"hw_model\":\"$(json_str "$hw_model")\"}"
+					json_esc "$hw_model"
+					DF_JSON="$DF_JSON{\"fs\":\"$fs\",\"mount\":\"$mountpoint\",\"total\":$blocks,\"used\":$used,\"avail\":$avail,\"pct\":\"$pct\",\"dev\":\"$devname\",\"hw_type\":\"$hw_type\",\"hw_size\":$hw_size,\"hw_model\":\"$JSV\"}"
 					FIRST_DF=0
 				done <<EOF
 $(df -k 2>/dev/null | tail -n +2)
@@ -344,10 +440,8 @@ EOF
 					case "$bname" in
 						*p[0-9]*|[shv]d[a-z][0-9]*) continue ;;
 					esac
-					if [ -f "$dev/size" ]; then
-						sz=$(cat "$dev/size" 2>/dev/null)
-						[ -n "$sz" ] && total_phys=$((total_phys + sz * 512))
-					fi
+					read_file sz "$dev/size" ""
+					[ -n "$sz" ] && total_phys=$((total_phys + sz * 512))
 				done
 
 				sum_mtd=0
@@ -357,12 +451,10 @@ EOF
 					[ ! -e "$dev" ] && continue
 					[ "${dev%ro}" != "$dev" ] && continue
 					mtd_count=$((mtd_count + 1))
-					if [ -f "$dev/size" ]; then
-						sz=$(cat "$dev/size" 2>/dev/null)
-						if [ -n "$sz" ]; then
-							sum_mtd=$((sum_mtd + sz))
-							[ "$sz" -gt "$max_mtd" ] && max_mtd=$sz
-						fi
+					read_file sz "$dev/size" ""
+					if [ -n "$sz" ]; then
+						sum_mtd=$((sum_mtd + sz))
+						[ "$sz" -gt "$max_mtd" ] && max_mtd=$sz
 					fi
 				done
 
@@ -411,30 +503,31 @@ EOF
 						PASS_TEMP="null"
 						for trip in "$t"/trip_point_*_type; do
 							[ -f "$trip" ] || continue
-							trip_type=$(cat "$trip" | tr -d '\r\n')
+							trip_type=""
+							read -r trip_type < "$trip" 2>/dev/null
 							trip_temp_file="${trip%_type}_temp"
 							if [ "$trip_type" = "critical" ] || [ "$trip_type" = "hot" ] || [ "$trip_type" = "emergency" ]; then
-								[ -f "$trip_temp_file" ] && CRIT_TEMP=$(cat "$trip_temp_file")
+								read_file CRIT_TEMP "$trip_temp_file" "$CRIT_TEMP"
 							elif [ "$trip_type" = "passive" ] || [ "$trip_type" = "active" ] || [ "$trip_type" = "max" ]; then
-								[ -f "$trip_temp_file" ] && PASS_TEMP=$(cat "$trip_temp_file")
+								read_file PASS_TEMP "$trip_temp_file" "$PASS_TEMP"
 							fi
 						done
 						SEEN_TYPES="${SEEN_TYPES}${TYPE} "
 						if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
-						THERMALS="$THERMALS{\"type\":\"$(json_str "$TYPE")\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
+						json_esc "$TYPE"
+						THERMALS="$THERMALS{\"type\":\"$JSV\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
 						FIRST=0
 					fi
 				done
 				for h in /sys/class/hwmon/hwmon*; do
 					[ -d "$h" ] || continue
-					TYPE_BASE=$(cat "$h/name" 2>/dev/null || echo "Unknown")
+					read_file TYPE_BASE "$h/name" "Unknown"
 					for tinput in "$h"/temp*_input; do
 						[ -f "$tinput" ] || continue
-						TEMP=$(cat "$tinput" 2>/dev/null)
+						read_file TEMP "$tinput" ""
 						[ -z "$TEMP" ] && continue
-						
-						LABEL=""
-						[ -f "${tinput%_input}_label" ] && LABEL=$(cat "${tinput%_input}_label" 2>/dev/null | tr -d '\r\n')
+
+						read_file LABEL "${tinput%_input}_label" ""
 						
 						if [ -n "$LABEL" ]; then
 							TYPE="${TYPE_BASE} ($LABEL)"
@@ -449,32 +542,32 @@ EOF
 						
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
-						
+
 						if [ -f "${tinput%_input}_crit" ]; then
-							CRIT_TEMP=$(cat "${tinput%_input}_crit" 2>/dev/null)
+							read_file CRIT_TEMP "${tinput%_input}_crit" "null"
 						elif [ -f "${tinput%_input}_emergency" ]; then
-							CRIT_TEMP=$(cat "${tinput%_input}_emergency" 2>/dev/null)
+							read_file CRIT_TEMP "${tinput%_input}_emergency" "null"
 						fi
-						
-						if [ -f "${tinput%_input}_max" ]; then
-							PASS_TEMP=$(cat "${tinput%_input}_max" 2>/dev/null)
-						fi
-						
+
+						read_file PASS_TEMP "${tinput%_input}_max" "null"
+
 						if [ "$CRIT_TEMP" = "null" ] && [ "$PASS_TEMP" = "null" ] && [ -d "$h/device" ]; then
 							for trip in "$h/device"/trip_point_*_type; do
 								[ -f "$trip" ] || continue
-								trip_type=$(cat "$trip" 2>/dev/null | tr -d '\r\n')
+								trip_type=""
+								read -r trip_type < "$trip" 2>/dev/null
 								trip_temp_file="${trip%_type}_temp"
 								if [ "$trip_type" = "critical" ] || [ "$trip_type" = "hot" ] || [ "$trip_type" = "emergency" ]; then
-									[ -f "$trip_temp_file" ] && CRIT_TEMP=$(cat "$trip_temp_file" 2>/dev/null)
+									read_file CRIT_TEMP "$trip_temp_file" "$CRIT_TEMP"
 								elif [ "$trip_type" = "passive" ] || [ "$trip_type" = "active" ] || [ "$trip_type" = "max" ]; then
-									[ -f "$trip_temp_file" ] && PASS_TEMP=$(cat "$trip_temp_file" 2>/dev/null)
+									read_file PASS_TEMP "$trip_temp_file" "$PASS_TEMP"
 								fi
 							done
 						fi
 						
 						if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
-						THERMALS="$THERMALS{\"type\":\"$(json_str "$TYPE")\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
+						json_esc "$TYPE"
+						THERMALS="$THERMALS{\"type\":\"$JSV\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
 						FIRST=0
 					done
 				done
@@ -493,19 +586,10 @@ EOF
 				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
 
 
-				CONN_COUNT=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-				CONN_MAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
-				[ -z "$CONN_COUNT" ] && CONN_COUNT=0
-				[ -z "$CONN_MAX" ] && CONN_MAX=0
-				# One pass over /proc/stat for aggregate CPU ticks, context switches
-				# and interrupts — previously three separate awk/while reads of the
-				# same file.
-				read CPU_TICKS CTXT INTR <<EOF
-$(awk '/^cpu /{t=$2+$3+$4+$5+$6+$7+$8+$9} /^ctxt /{c=$2} /^intr /{i=$2} END{print t" "c" "i}' /proc/stat 2>/dev/null)
-EOF
-				[ -z "$CPU_TICKS" ] && CPU_TICKS=0
-				[ -z "$CTXT" ] && CTXT=0
-				[ -z "$INTR" ] && INTR=0
+				read_file CONN_COUNT /proc/sys/net/netfilter/nf_conntrack_count 0
+				read_file CONN_MAX /proc/sys/net/netfilter/nf_conntrack_max 0
+				# CPU_TICKS / CTXT / INTR were collected in the single /proc/stat
+				# pass above.
 
 
 				ETH_LINKS="["
@@ -557,8 +641,8 @@ EOF
 					# covered by the dedicated EMMC_INFO block below with richer
 					# health data; ubi/zram have no meaningful "external storage"
 					# identity. hw_dash.js discards all of these from block_devs
-					# unconditionally, so skip them here rather than forking cat
-					# per field just to ship JSON the client throws away.
+					# unconditionally, so skip them here rather than shipping JSON
+					# the client throws away.
 					case "$devname" in
 						loop*|ram*|mtdblock*|mmcblk*|ubi*|zram*) continue ;;
 					esac
@@ -588,12 +672,9 @@ EOF
 					esac
 
 					# Get size
-					size_bytes=0
-					if [ -f "$dev/size" ]; then
-						read_file _sz_sectors "$dev/size" 0
-						size_bytes=$((_sz_sectors * 512))
-					fi
-
+					read_file _bsz "$dev/size" 0
+					size_bytes=$((_bsz * 512))
+					
 					# Get IO stats
 					read_bytes=0
 					write_bytes=0
@@ -610,23 +691,38 @@ EOF
 						write_bytes=$(( ${_wsec:-0} * 512 ))
 					fi
 					
-					# Find mount info
+					# Mount point + fs type straight from /proc/mounts with the
+					# builtin read — zero forks. `block info` (which exec()s blkid
+					# machinery) is only consulted for unmounted devices, and its
+					# result is cached for 60s since a device's fs type effectively
+					# never changes between polls. Previously this exec'd block info
+					# AND a full df -T pipeline per block device on every poll.
 					mount_point=""
-					fs_type="Unknown"
-					binfo=$(block info "/dev/$devname" 2>/dev/null)
-					if [ -n "$binfo" ]; then
-						fs_type=$(echo "$binfo" | grep -o 'TYPE="[^"]*"' | cut -d'"' -f2)
-						mount_point=$(echo "$binfo" | grep -o 'MOUNT="[^"]*"' | cut -d'"' -f2)
-					fi
-					if [ -z "$fs_type" ] || [ "$fs_type" = "Unknown" ]; then
-						mount_info=$(df -T | grep -w "/dev/$devname" | head -n 1)
-						if [ -n "$mount_info" ]; then
-							fs_type=$(echo "$mount_info" | awk '{print $2}')
-							mount_point=$(echo "$mount_info" | awk '{print $7}')
+					fs_type=""
+					while read -r _mdev _mp _mfs _; do
+						if [ "$_mdev" = "/dev/$devname" ]; then
+							mount_point=$_mp
+							fs_type=$_mfs
+							break
+						fi
+					done < /proc/mounts
+					if [ -z "$fs_type" ]; then
+						# A device's fs type only changes on reformat — 10 min TTL
+						# is still conservative, and /tmp clears it on reboot.
+						_fs_cache="/tmp/hwdash_fstype_${devname}"
+						if _cache_read "$_fs_cache"; then
+							fs_type=$C_VAL
+						else
+							fs_type=$(block info "/dev/$devname" 2>/dev/null | grep -o 'TYPE="[^"]*"' | cut -d'"' -f2)
+							_cache_write "$_fs_cache" 600 "$fs_type"
 						fi
 					fi
+					[ -z "$fs_type" ] && fs_type="Unknown"
 					
-					model=$(echo "$model" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+					# Trim + escape without the unconditional per-device sed fork.
+					trim_ws model
+					json_esc "$model"
+					model=$JSV
 					[ -z "$model" ] && model="Storage Device"
 					
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
@@ -642,7 +738,8 @@ EOF
 					read_file speed "$usb/speed" "0"
 					read_file product "$usb/product" "USB Host Controller"
 					if [ $FIRST_USB -eq 0 ]; then USB_PORTS="$USB_PORTS,"; fi
-					USB_PORTS="$USB_PORTS{\"speed\":\"$speed\",\"product\":\"$(json_str "$product")\"}"
+					json_esc "$product"
+					USB_PORTS="$USB_PORTS{\"speed\":\"$speed\",\"product\":\"$JSV\"}"
 					FIRST_USB=0
 				done
 				USB_PORTS="$USB_PORTS]"
@@ -669,7 +766,9 @@ EOF
 						dev_name="$product"
 					fi
 					if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
-					USB_DEVS="$USB_DEVS{\"name\":\"$(json_str "$dev_name")\",\"speed\":\"$speed\",\"version\":\"$(json_str "$version")\"}"
+					json_esc "$dev_name"; _n=$JSV
+					json_esc "$version"
+					USB_DEVS="$USB_DEVS{\"name\":\"$_n\",\"speed\":\"$speed\",\"version\":\"$JSV\"}"
 					FIRST_USB=0
 				done
 				USB_DEVS="$USB_DEVS]"
@@ -696,9 +795,9 @@ EOF
 				# WiFi radio info is the single biggest CPU cost (dozens of
 				# iwinfo/iw/uci/awk forks per radio). Channel/txpower/bitrate
 				# change slowly, so cache the whole block for 20s.
-				WIFI_CACHE=/tmp/hwdash_wifi_radios_v1.json
-				if _cache_age_ok "$WIFI_CACHE" 20; then
-					WIFI_RADIOS=$(cat "$WIFI_CACHE" 2>/dev/null)
+				WIFI_CACHE=/tmp/hwdash_wifi_radios_v2.cache
+				if _cache_read "$WIFI_CACHE"; then
+					WIFI_RADIOS=$C_VAL
 					[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
 				else
 				WIFI_RADIOS="["
@@ -810,7 +909,7 @@ EOF
 					done
 				fi
 				WIFI_RADIOS="$WIFI_RADIOS]"
-				printf '%s' "$WIFI_RADIOS" > "$WIFI_CACHE.$$" 2>/dev/null && mv "$WIFI_CACHE.$$" "$WIFI_CACHE" 2>/dev/null
+				_cache_write "$WIFI_CACHE" 20 "$WIFI_RADIOS"
 				fi
 
 
@@ -849,11 +948,14 @@ EOF
 				# the type, plus json_str). Cache the assembled JSON for 30s, the
 				# same volatile pattern used for the WiFi block. postinst clears
 				# /tmp/hwdash_* on upgrade so the schema can never go stale.
-				STORAGE_INV_CACHE=/tmp/hwdash_storage_inv_v1.sh
+				STORAGE_INV_CACHE=/tmp/hwdash_storage_inv_v2.sh
 				UBI_DEVS=""; MTD_PARTS=""; UBI_MAX_EC=0; UBI_BAD_PEB=0
-				if _cache_age_ok "$STORAGE_INV_CACHE" 30; then
-					. "$STORAGE_INV_CACHE" 2>/dev/null
-				fi
+				# Sourced cache carries its own expiry epoch (_SI_EXP); sourcing a
+				# stale file is harmless since the vars get recomputed below.
+				_SI_EXP=0
+				[ -f "$STORAGE_INV_CACHE" ] && . "$STORAGE_INV_CACHE" 2>/dev/null
+				case "$_SI_EXP" in ''|*[!0-9]*) _SI_EXP=0 ;; esac
+				[ "$_SI_EXP" -le "${HWDASH_NOW:-0}" ] && MTD_PARTS=""
 				if [ -z "$MTD_PARTS" ]; then
 				# Legacy UBI compat
 				UBI_MAX_EC=0
@@ -929,6 +1031,7 @@ EOF
 				fi
 				MTD_PARTS="$MTD_PARTS]"
 				{
+					printf "_SI_EXP=%s\n" "$((${HWDASH_NOW:-0} + 30))"
 					printf "UBI_MAX_EC=%s\n" "${UBI_MAX_EC:-0}"
 					printf "UBI_BAD_PEB=%s\n" "${UBI_BAD_PEB:-0}"
 					printf "UBI_DEVS='%s'\n" "$UBI_DEVS"
@@ -949,9 +1052,11 @@ EOF
 					read_file em_lt "$mmc/device/life_time" ""
 					read_file em_date "$mmc/device/date" ""
 					read_file em_type "$mmc/device/type" "MMC"
-					read lt_a lt_b _ <<EOF
-$em_lt
-EOF
+					# Word-split via set -- instead of two echo|awk pipelines. The
+					# outer "$1"/"$2" dispatch args are no longer needed by now.
+					set -- $em_lt
+					lt_a=${1:-}
+					lt_b=${2:-}
 					lt_a_i=0; lt_b_i=0; peo_i=0
 					[ -n "$lt_a" ] && lt_a_i=$((lt_a)) 2>/dev/null || lt_a_i=0
 					[ -n "$lt_b" ] && lt_b_i=$((lt_b)) 2>/dev/null || lt_b_i=0
@@ -968,7 +1073,9 @@ EOF
 						0x000031) em_vendor="Silicon Motion" ;;
 						*) em_vendor="$em_manfid" ;;
 					esac
-					EMMC_INFO="{\"dev\":\"${mmc##*/}\",\"name\":\"$(json_str "$em_name")\",\"vendor\":\"$(json_str "$em_vendor")\",\"type\":\"$em_type\",\"fwrev\":\"$em_fwrev\",\"hwrev\":\"$em_hwrev\",\"pre_eol\":$peo_i,\"life_a\":$lt_a_i,\"life_b\":$lt_b_i,\"date\":\"$em_date\"}"
+					json_esc "$em_name"; _n=$JSV
+					json_esc "$em_vendor"
+					EMMC_INFO="{\"dev\":\"${mmc##*/}\",\"name\":\"$_n\",\"vendor\":\"$JSV\",\"type\":\"$em_type\",\"fwrev\":\"$em_fwrev\",\"hwrev\":\"$em_hwrev\",\"pre_eol\":$peo_i,\"life_a\":$lt_a_i,\"life_b\":$lt_b_i,\"date\":\"$em_date\"}"
 					break
 				done
 
@@ -981,10 +1088,13 @@ EOF
 					read_file nv_serial "$nvme/device/serial" ""
 					read_file nv_fw "$nvme/device/firmware_rev" ""
 					read_file nv_transport "$nvme/device/transport" "PCIe"
-					nv_model=$(echo "$nv_model" | sed 's/[[:space:]]*$//')
-					nv_serial=$(echo "$nv_serial" | sed 's/[[:space:]]*$//')
-					nv_fw=$(echo "$nv_fw" | sed 's/[[:space:]]*$//')
-					NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$(json_str "$nv_model")\",\"serial\":\"$(json_str "$nv_serial")\",\"fw\":\"$(json_str "$nv_fw")\",\"transport\":\"$nv_transport\"}"
+					trim_ws nv_model
+					trim_ws nv_serial
+					trim_ws nv_fw
+					json_esc "$nv_model"; _m=$JSV
+					json_esc "$nv_serial"; _s=$JSV
+					json_esc "$nv_fw"
+					NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$_m\",\"serial\":\"$_s\",\"fw\":\"$JSV\",\"transport\":\"$nv_transport\"}"
 					break
 				done
 
@@ -1088,19 +1198,14 @@ EOF
 					mkdir -p "$HWDASH_PERSIST_DIR" 2>/dev/null
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi
-				SYS_HOSTNAME=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
-				OV_TOTAL=0; OV_USED=0; OV_FREE=0
-				if grep -qs ' /overlay ' /proc/mounts 2>/dev/null; then
-					# Force numeric in awk (×1024) so an empty/odd df result can never
-					# produce an empty $(( )) and break the JSON; one fork, not four.
-					read OV_TOTAL OV_USED OV_FREE <<EOF
-$(df -k /overlay 2>/dev/null | awk 'NR==2{print ($2+0)*1024, ($3+0)*1024, ($4+0)*1024}')
-EOF
-					: "${OV_TOTAL:=0}" "${OV_USED:=0}" "${OV_FREE:=0}"
-				fi
-				SYS_INFO_JSON="{\"hostname\":\"$(json_str "$SYS_HOSTNAME")\",$SYS_STATIC_FRAG,\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
+				read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
+				# OV_TOTAL/OV_USED/OV_FREE were harvested during the df -k pass.
+				json_esc "$SYS_HOSTNAME"
+				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
 
-				echo "{\"model\":\"$(json_str "$CPU_MODEL")\",\"board\":\"$(json_str "$BOARD_DETECT")\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				json_esc "$CPU_MODEL"; _jm=$JSV
+				json_esc "$BOARD_DETECT"; _jb=$JSV
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

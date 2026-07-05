@@ -116,7 +116,7 @@ USB mass storage devices are detected by scanning block devices for the `removab
 
 ### Thermal Sensors
 
-All thermal zones from `/sys/class/thermal/` and `hwmon` inputs are collected and sorted into three columns: CPU, WiFi, and Miscellaneous. Each reading is displayed as a color-coded badge that transitions from green through amber to red as it approaches the critical threshold. Columns that are empty on a given platform are suppressed entirely.
+All thermal zones from `/sys/class/thermal/` and `hwmon` inputs are collected, de-duplicated and laid out alphabetically across up to three columns — no artificial CPU/WiFi/Misc grouping. When a platform exposes more than 12 sensors, additional thermal cards are appended automatically. Each reading is displayed as a color-coded badge whose warning/critical thresholds come from the sensor's own trip points when the hardware exposes them (falling back to 60/80 °C otherwise), so the coloring adapts to each architecture rather than using a single fixed scale.
 
 ### Ethernet Status
 
