@@ -1494,7 +1494,10 @@ return view.extend({
                     if (wfNode) {
                         wfNode.innerHTML = '';
                         var wifiRendered = 0;
-                        var radioBoxes = [];
+                        // Group radios by band — one column per band, radios of
+                        // the same band stacked vertically inside it.
+                        var WIFI_BANDS = ['2.4 GHz', '5 GHz', '6 GHz'];
+                        var bandGroups = { '2.4 GHz': [], '5 GHz': [], '6 GHz': [], 'Other': [] };
                         if (!self.prevSurvey) self.prevSurvey = {};
                         res.wifi_radios.forEach(function(w) {
                             if ((!w.band || w.band === 'Unknown') && (!w.hwmode || w.hwmode === 'Unknown')) return;
@@ -1564,7 +1567,8 @@ return view.extend({
                             }
 
                             wifiRendered++;
-                            radioBoxes.push(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 8px;' }, [
+                            var bandKey = bandGroups[w.band] ? w.band : 'Other';
+                            bandGroups[bandKey].push(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 8px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
                                     chStr ? E('span', { style: 'color:#00bcd4; font-size: 0.9em;' }, 'Ch: ' + chStr) : E('span', {}, '')
@@ -1584,21 +1588,24 @@ return view.extend({
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
                         });
-                        // Full-width card; radios split evenly into up to 4 columns
-                        // so the space is used as more radios appear (1 radio =
-                        // full width, 2 = halves, 4 = quarters). Collapses to a
-                        // single column on mobile via the shared container CSS.
-                        if (radioBoxes.length > 0) {
-                            var wNCols = Math.min(radioBoxes.length, 4);
+                        // One column per band actually present (2.4 / 5 / 6 GHz,
+                        // plus Other for band-unknown radios); radios of a band
+                        // stack vertically inside their column. Missing bands are
+                        // simply not rendered. Collapses to a single column on
+                        // mobile via the shared container CSS.
+                        var presentBands = WIFI_BANDS.concat(['Other']).filter(function(b) { return bandGroups[b].length > 0; });
+                        if (presentBands.length > 0) {
+                            var wNCols = presentBands.length;
                             var wRow = E('div', { class: 'hw-thermals-container' });
-                            for (var wc = 0; wc < wNCols; wc++) {
+                            presentBands.forEach(function(b, wc) {
                                 if (wc > 0) wRow.appendChild(E('div', { class: 'hw-thermals-divider' }));
                                 var wCls = 'hw-thermals-col';
                                 if (wNCols > 1) wCls += wc === 0 ? ' hw-thermals-col-left' : wc === wNCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
                                 var wCol = E('div', { class: wCls, style: 'min-width: 0;' });
-                                for (var wb = wc; wb < radioBoxes.length; wb += wNCols) wCol.appendChild(radioBoxes[wb]);
+                                wCol.appendChild(E('div', { class: 'hw-thermals-title' }, b === 'Other' ? 'OTHER' : b.toUpperCase()));
+                                bandGroups[b].forEach(function(box) { wCol.appendChild(box); });
                                 wRow.appendChild(wCol);
-                            }
+                            });
                             wfNode.appendChild(wRow);
                         }
                         wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
