@@ -45,7 +45,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -231,15 +231,17 @@ return view.extend({
             // Color thresholds come from the sensor's own trip points
             // when the hardware exposes them (per-architecture dynamic);
             // the fixed 60/80 °C split is only the fallback.
-            var hot = s.crit ? s.crit * 0.9 : 80;
-            var warm = s.pass ? Math.min(s.pass, hot - 5) : (s.crit ? s.crit * 0.75 : 60);
-            var color = '#00bcd4', bgCol = 'rgba(0,188,212,0.1)';
+            var hot = s.crit ? s.crit * 0.85 : 80;
+            var warm = s.pass ? Math.min(s.pass, hot - 5) : (s.crit ? s.crit * 0.65 : 60);
+            var color = '#00bcd4', bgCol = 'rgba(0,188,212,0.14)';
+            var hotCls = '';
             if (s.temp >= hot) {
                 color = '#ff1744';
-                bgCol = 'rgba(255,23,68,0.1)';
+                bgCol = 'rgba(255,23,68,0.22)';
+                hotCls = ' hw-temp-crit';
             } else if (s.temp > warm) {
-                color = '#ffea00';
-                bgCol = 'rgba(255,234,0,0.1)';
+                color = '#ffb300';
+                bgCol = 'rgba(255,179,0,0.2)';
             }
             var tempDisplay = s.temp.toFixed(1) + ' °C';
             if (s.temp >= (s.crit || 90)) tempDisplay += ' ⚠️';
@@ -249,7 +251,7 @@ return view.extend({
             }, [E('span', {
                 class: 'hw-stat-label'
             }, s.name), E('span', {
-                class: 'hw-temp-badge',
+                class: 'hw-temp-badge' + hotCls,
                 style: 'color: ' + color + '; background: ' + bgCol + ';'
             }, tempDisplay)])];
             if (s.pass || s.crit) {
@@ -272,6 +274,7 @@ return view.extend({
                 style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));'
             }, rowContent);
         };
+        var fmtMbps = function(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' Gbps' : m >= 1 ? m.toFixed(1) + ' Mbps' : (m * 1000).toFixed(0) + ' Kbps'; };
         var fmtSpeedDf = function(bytes) {
             if (bytes < 1024) return bytes + ' B/s';
             if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB/s';
@@ -425,15 +428,15 @@ return view.extend({
         });
         
         
-        var ethCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Ethernet Switch Topology'), E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
+        var ethCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Ports Topology'), E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
 
         
         
-        var pcieUsbCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'PCI-e & USB Bus Topology'), E('div', { id: 'hw-pcie-usb', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
+        var pcieCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'PCI-e Topology'), E('div', { id: 'hw-pcie', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
 
         
         
-        var wifiCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
+        var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
 
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
@@ -452,7 +455,7 @@ return view.extend({
         });
         container.appendChild(myExtWrapper);
         container.appendChild(ethCard);
-        container.appendChild(pcieUsbCard);
+        container.appendChild(pcieCard);
         container.appendChild(wifiCard);
         container.appendChild(thermWrapper);
         var self = this;
@@ -1367,11 +1370,31 @@ return view.extend({
                         }, [E('h3', {}, cardTitle), rowEl]));
                     }
                 }
-                if (res.eth_links && res.eth_links.length > 0) {
+                // Ports Topology: ethernet links and the USB bus share one card.
+                var portsNode = document.getElementById('hw-eth-links');
+                var validPcie = [];
+                if (res.pcie_devs) {
+                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
+                }
+                var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
+                // Physical USB port wiring can't be read reliably from the controller:
+                // a USB 3.0 controller often exposes a 2.0-only port. So the port spec
+                // is hardcoded per known JioRouter board and omitted for everything else.
+                var boardId = res.board || '';
+                var hwPortStr = '';
+                if (/JIDU6[J0-9]11/.test(boardId)) hwPortStr = 'USB 3.0 (1 Physical Port)';
+                else if (/JIDU6[J0-9]01/.test(boardId)) hwPortStr = 'USB 2.0 (1 Physical Port)';
+                else if (boardId.indexOf('JIDU6700') !== -1) hwPortStr = 'USB 2.0 (1 Physical Port)';
+                var hasUsb = hwPortStr !== '' || usbDevs.length > 0;
+                var hasEth = res.eth_links && res.eth_links.length > 0;
+                var portsSubH = function(txt, mt) {
+                    return E('h4', { style: 'margin: ' + (mt ? '10px' : '0') + ' 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, txt);
+                };
+                if ((hasEth || hasUsb) && portsNode) {
                     ethCard.style.display = 'flex';
-                    var elNode = document.getElementById('hw-eth-links');
-                    if (elNode) {
-                        elNode.innerHTML = '';
+                    portsNode.innerHTML = '';
+                    if (hasEth) {
+                        portsNode.appendChild(portsSubH('Ethernet', false));
                         if (!self.prevEth) self.prevEth = {};
                         res.eth_links.forEach(function(l) {
                             var st = l.speed;
@@ -1392,7 +1415,6 @@ return view.extend({
                                 ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
                             }
                             self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
-                            var fmtMbps = function(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' Gbps' : m >= 1 ? m.toFixed(1) + ' Mbps' : (m * 1000).toFixed(0) + ' Kbps'; };
 
                             var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
@@ -1403,7 +1425,7 @@ return view.extend({
                                     E('span', { style: 'color:' + col + ';' }, st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')')
                                 ])
                             ]);
-                            
+
                             if (st !== 'Down') {
                                 if (dlMbps !== null) {
                                     box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [
@@ -1417,71 +1439,54 @@ return view.extend({
                                     E('span', { style: 'color:' + errColor + ';' }, 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop)
                                 ]));
                             }
-                            elNode.appendChild(box);
+                            portsNode.appendChild(box);
+                        });
+                    }
+                    if (hasUsb) {
+                        portsNode.appendChild(portsSubH('USB', hasEth));
+                        if (hwPortStr) {
+                            portsNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
+                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [
+                                    E('span', {}, 'Physical Port:'),
+                                    E('span', { style: 'color:#00bcd4; font-weight: bold;' }, hwPortStr)
+                                ])
+                            ]));
+                        }
+                        usbDevs.forEach(function(u) {
+                            var spd = parseInt(u.speed) || 0;
+                            var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
+                            var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
+                            var rows = [E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name)];
+                            if (spdLabel) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), E('span', { style: 'color:' + col + ';' }, spdLabel)]));
+                            var ver = u.version ? u.version.trim() : '';
+                            if (ver) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), E('span', {}, ver)]));
+                            portsNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, rows));
                         });
                     }
                 } else {
                     ethCard.style.display = 'none';
                 }
 
-                var validPcie = [];
-                if (res.pcie_devs) {
-                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
-                }
-                var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
-                // Physical USB port wiring can't be read reliably from the controller:
-                // a USB 3.0 controller often exposes a 2.0-only port. So the port spec
-                // is hardcoded per known JioRouter board and omitted for everything else.
-                var boardId = res.board || '';
-                var hwPortStr = '';
-                if (/JIDU6[J0-9]11/.test(boardId)) hwPortStr = 'USB 3.0 (1 Physical Port)';
-                else if (/JIDU6[J0-9]01/.test(boardId)) hwPortStr = 'USB 2.0 (1 Physical Port)';
-                else if (boardId.indexOf('JIDU6700') !== -1) hwPortStr = 'USB 2.0 (1 Physical Port)';
-                var hasUsb = hwPortStr !== '' || usbDevs.length > 0;
-
-                if (validPcie.length > 0 || hasUsb) {
-                    pcieUsbCard.style.display = 'flex';
-                    var puNode = document.getElementById('hw-pcie-usb');
-                    if (puNode) {
-                        puNode.innerHTML = '';
-                        if (validPcie.length > 0) {
-                            puNode.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'PCI-e Bus'));
-                            validPcie.forEach(function(p) {
-                                var speedStr = p.speed + ' ' + p.width;
-                                if (p.max_speed && p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
-                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                    E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name),
-                                    E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
-                                        E('span', {}, 'Link Speed:'),
-                                        E('span', { style: p.speed !== p.max_speed ? 'color:#ffea00;' : '' }, speedStr)
-                                    ])
-                                ]));
-                            });
-                        }
-                        if (hasUsb) {
-                            puNode.appendChild(E('h4', { style: 'margin: ' + (validPcie.length > 0 ? '8px' : '0') + ' 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'USB Bus'));
-                            if (hwPortStr) {
-                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                    E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [
-                                        E('span', {}, 'Physical Port:'),
-                                        E('span', { style: 'color:#00bcd4; font-weight: bold;' }, hwPortStr)
-                                    ])
-                                ]));
-                            }
-                            usbDevs.forEach(function(u) {
-                                var spd = parseInt(u.speed) || 0;
-                                var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
-                                var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
-                                var rows = [E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name)];
-                                if (spdLabel) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), E('span', { style: 'color:' + col + ';' }, spdLabel)]));
-                                var ver = u.version ? u.version.trim() : '';
-                                if (ver) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), E('span', {}, ver)]));
-                                puNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, rows));
-                            });
-                        }
+                // PCI-e gets its own card, hidden entirely when nothing to show.
+                if (validPcie.length > 0) {
+                    pcieCard.style.display = 'flex';
+                    var pcNode = document.getElementById('hw-pcie');
+                    if (pcNode) {
+                        pcNode.innerHTML = '';
+                        validPcie.forEach(function(p) {
+                            var speedStr = p.speed + ' ' + p.width;
+                            if (p.max_speed && p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
+                            pcNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
+                                E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name),
+                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
+                                    E('span', {}, 'Link Speed:'),
+                                    E('span', { style: p.speed !== p.max_speed ? 'color:#ffea00;' : '' }, speedStr)
+                                ])
+                            ]));
+                        });
                     }
                 } else {
-                    pcieUsbCard.style.display = 'none';
+                    pcieCard.style.display = 'none';
                 }
 
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
@@ -1489,6 +1494,7 @@ return view.extend({
                     if (wfNode) {
                         wfNode.innerHTML = '';
                         var wifiRendered = 0;
+                        var radioBoxes = [];
                         if (!self.prevSurvey) self.prevSurvey = {};
                         res.wifi_radios.forEach(function(w) {
                             if ((!w.band || w.band === 'Unknown') && (!w.hwmode || w.hwmode === 'Unknown')) return;
@@ -1558,7 +1564,7 @@ return view.extend({
                             }
 
                             wifiRendered++;
-                            wfNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
+                            radioBoxes.push(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 8px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
                                     E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
                                     chStr ? E('span', { style: 'color:#00bcd4; font-size: 0.9em;' }, 'Ch: ' + chStr) : E('span', {}, '')
@@ -1578,6 +1584,23 @@ return view.extend({
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
                         });
+                        // Full-width card; radios split evenly into up to 4 columns
+                        // so the space is used as more radios appear (1 radio =
+                        // full width, 2 = halves, 4 = quarters). Collapses to a
+                        // single column on mobile via the shared container CSS.
+                        if (radioBoxes.length > 0) {
+                            var wNCols = Math.min(radioBoxes.length, 4);
+                            var wRow = E('div', { class: 'hw-thermals-container' });
+                            for (var wc = 0; wc < wNCols; wc++) {
+                                if (wc > 0) wRow.appendChild(E('div', { class: 'hw-thermals-divider' }));
+                                var wCls = 'hw-thermals-col';
+                                if (wNCols > 1) wCls += wc === 0 ? ' hw-thermals-col-left' : wc === wNCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                                var wCol = E('div', { class: wCls, style: 'min-width: 0;' });
+                                for (var wb = wc; wb < radioBoxes.length; wb += wNCols) wCol.appendChild(radioBoxes[wb]);
+                                wRow.appendChild(wCol);
+                            }
+                            wfNode.appendChild(wRow);
+                        }
                         wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
                     }
                 } else {

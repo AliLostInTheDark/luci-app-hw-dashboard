@@ -586,8 +586,17 @@ EOF
 				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
 
 
-				read_file CONN_COUNT /proc/sys/net/netfilter/nf_conntrack_count 0
-				read_file CONN_MAX /proc/sys/net/netfilter/nf_conntrack_max 0
+				# Do NOT use read_file here: busybox ash's read builtin fetches
+				# one byte per read(2), and /proc/sys/net/* sysctl handlers
+				# return EOF for reads at offset > 0 — so a builtin read sees
+				# only the FIRST DIGIT of the value (83 -> "8"). cat reads the
+				# whole value in one syscall; one fork covers both files.
+				CONN_COUNT=0; CONN_MAX=0
+				if [ -f /proc/sys/net/netfilter/nf_conntrack_count ]; then
+					set -- $(cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
+					CONN_COUNT=${1:-0}
+					CONN_MAX=${2:-0}
+				fi
 				# CPU_TICKS / CTXT / INTR were collected in the single /proc/stat
 				# pass above.
 
