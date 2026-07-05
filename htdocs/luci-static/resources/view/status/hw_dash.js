@@ -291,10 +291,12 @@ return view.extend({
             if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
             return b + ' B';
         };
-        var makeRow = function(label, val, color) {
-            return E('div', {class: 'hw-stat-row', style: 'margin-bottom: 3px;'}, [
-                E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;'}, label),
-                E('span', {class: 'hw-stat-value', style: 'font-size: 0.9em;' + (color ? ' color:' + color + ';' : '')}, val)
+        var makeRow = function(label, val, color, wrap) {
+            // wrap: let long label/value pairs break onto two lines instead of
+            // the default nowrap+ellipsis truncation (needed on mobile widths).
+            return E('div', {class: 'hw-stat-row', style: 'margin-bottom: 3px;' + (wrap ? ' flex-wrap: wrap; row-gap: 2px;' : '')}, [
+                E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;' + (wrap ? ' white-space: normal; overflow: visible;' : '')}, label),
+                E('span', {class: 'hw-stat-value', style: 'font-size: 0.9em; margin-left: auto;' + (color ? ' color:' + color + ';' : '')}, val)
             ]);
         };
         var makeBar2 = function(label, pct, valStr, color) {
@@ -912,12 +914,12 @@ return view.extend({
                                 var box = makeDevBox(u.dev.toUpperCase(), 'MTD' + u.mtd_num + (peb_str ? ' | ' + peb_str : ''));
                                 if (u.max_ec > 0) {
                                     var meanStr = u.mean_ec > 0 ? u.mean_ec : '-';
-                                    box.appendChild(makeRow('Erase Count (min / mean / max)', u.min_ec + ' / ' + meanStr + ' / ' + u.max_ec + ' cycles', null));
+                                    box.appendChild(makeRow('Erase Count (min / mean / max)', u.min_ec + ' / ' + meanStr + ' / ' + u.max_ec + ' cycles', null, true));
                                 }
                                 var rp = u.reserved_pebs || 0;
                                 var pebColor = u.bad_pebs > rp ? '#ff5252' : u.bad_pebs > 0 ? '#ffb300' : null;
                                 var pebStr = 'Total: ' + u.total_ebs + '  Avail: ' + u.avail_ebs + '  Bad: ' + u.bad_pebs + (rp > 0 ? '  Rsv: ' + rp : '');
-                                box.appendChild(makeRow('PEB Status', pebStr, pebColor));
+                                box.appendChild(makeRow('PEB Status', pebStr, pebColor, true));
                                 if (u.page_size > 0) {
                                     var geoChip = function(lbl) { return E('span', {style: 'font-size: 0.78em; padding: 2px 7px; border-radius: 4px; background: rgba(128,128,128,0.1); border: 1px solid rgba(128,128,128,0.2); white-space: nowrap;'}, lbl); };
                                     var geoChips = [
