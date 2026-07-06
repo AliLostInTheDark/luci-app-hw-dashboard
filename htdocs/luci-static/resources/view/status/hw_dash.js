@@ -418,9 +418,9 @@ return view.extend({
             var tip = E('div', { style: 'position: absolute; top: 6px; font-size: 0.72em; background: rgba(20,22,26,0.92); border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 6px 9px; display: none; pointer-events: none; z-index: 5; white-space: nowrap;' });
             plot.appendChild(xline);
             plot.appendChild(tip);
-            plot.addEventListener('mousemove', function(ev) {
+            var applyHover = function(frac) {
                 var rect = plot.getBoundingClientRect();
-                var frac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                if (!rect.width) return;
                 var idx = Math.round(frac * (vw.pts - 1));
                 var stepS = vw.raw ? 1 : vw.group * 10;
                 var px = (idx / (vw.pts - 1)) * rect.width;
@@ -442,12 +442,21 @@ return view.extend({
                 });
                 tip.style.display = 'block';
                 tip.style.left = (px < rect.width / 2 ? px + 12 : px - tip.offsetWidth - 12) + 'px';
+            };
+            plot.addEventListener('mousemove', function(ev) {
+                var rect = plot.getBoundingClientRect();
+                pingUI.hoverFrac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                applyHover(pingUI.hoverFrac);
             });
             plot.addEventListener('mouseleave', function() {
+                pingUI.hoverFrac = null;
                 xline.style.display = 'none';
                 tip.style.display = 'none';
             });
             node.appendChild(plot);
+            // Re-apply the crosshair after every 1s repaint, so the tooltip no
+            // longer vanishes under the cursor while the graph refreshes.
+            if (pingUI.hoverFrac != null) applyHover(pingUI.hoverFrac);
             node.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
                 E('span', {}, vw.label),
                 E('span', {}, 'now')
@@ -539,26 +548,13 @@ return view.extend({
             }
             var tempDisplay = s.temp.toFixed(1) + ' °C';
             if (s.temp >= (s.crit || 90)) tempDisplay += ' ⚠️';
-            // Inline history sparkline (last ~60 samples, kept client-side).
-            var spark = '';
-            if (s.hist && s.hist.length >= 2) {
-                var W = 64, H = 18, P = 2;
-                var mn = Math.min.apply(null, s.hist), mx = Math.max.apply(null, s.hist);
-                var span = (mx - mn) || 1;
-                var pts = s.hist.map(function(v, i) {
-                    var x = P + i * (W - 2 * P) / (s.hist.length - 1);
-                    var y = H - P - (v - mn) * (H - 2 * P) / span;
-                    return x.toFixed(1) + ',' + y.toFixed(1);
-                }).join(' ');
-                spark = E('span', { style: 'flex-shrink: 0; margin-left: auto; margin-right: 8px; opacity: 0.75; line-height: 0;' });
-                spark.innerHTML = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + pts + '"/></svg>';
-            }
             var rowContent = [E('div', {
                 class: 'hw-stat-row',
                 style: 'border-bottom: none; padding-bottom: 0;'
             }, [E('span', {
-                class: 'hw-stat-label'
-            }, s.name), spark, E('span', {
+                class: 'hw-stat-label',
+                style: 'display: inline-flex; align-items: center; gap: 7px;'
+            }, [E('span', { style: 'width: 8px; height: 8px; border-radius: 50%; background: ' + (s.color || color) + '; flex-shrink: 0;' }), s.name]), E('span', {
                 class: 'hw-temp-badge' + hotCls,
                 style: 'color: ' + color + '; background: ' + bgCol + ';'
             }, tempDisplay)])];
@@ -772,6 +768,8 @@ return view.extend({
 
         var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
 
+        var irqCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Interrupts'), E('div', { id: 'hw-irq', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
+
         var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
 
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
@@ -783,6 +781,7 @@ return view.extend({
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
+        container.appendChild(irqCard);
         container.appendChild(hwmonCard);
         container.appendChild(offloadCard);
         container.appendChild(dskCard.node);
@@ -853,6 +852,7 @@ return view.extend({
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
             offload: { nodes: [offloadCard], label: 'Offload Engines', show: null },
+            irq: { nodes: [irqCard], label: 'Interrupts', show: null },
             events: { nodes: [eventsCard], label: 'Hardware Events', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
             ext: { nodes: [extCard, myExtWrapper], label: 'External Storage', show: null },
@@ -1314,78 +1314,6 @@ return view.extend({
                                 class: 'hw-bar-fill',
                                 style: 'width: ' + connPct + '%; background: ' + colorConn + ';'
                             })])]));
-                        }
-                        // Top interrupt sources by rate, with per-core split —
-                        // shows which core services the NIC/Wi-Fi and whether
-                        // packet steering spreads the load.
-                        if (res.irqs && res.irqs.length > 0) {
-                            if (!self.prevIrqs) self.prevIrqs = {};
-                            var CORE_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
-                            var irqRates = [];
-                            res.irqs.forEach(function(q) {
-                                var pk = q.n + '|' + q.d;
-                                var prev = self.prevIrqs[pk];
-                                if (prev) {
-                                    var rate = (q.t - prev.t) / 3;
-                                    if (rate >= 1) {
-                                        var coreD = q.c.map(function(v, ci) { return Math.max(0, v - (prev.c[ci] || 0)); });
-                                        var parts = q.d.split(/\s+/);
-                                        var iname = parts[parts.length - 1] || q.d;
-                                        // ARM IPI rows all end in "interrupts"
-                                        // ("Rescheduling interrupts", ...) — keep
-                                        // the qualifier so rows stay distinct.
-                                        if (/^interrupts?$/i.test(iname)) iname = q.d.length > 24 ? q.d.slice(0, 23) + '\u2026' : q.d;
-                                        irqRates.push({ name: iname, rate: rate, cores: coreD });
-                                    }
-                                }
-                                self.prevIrqs[pk] = q;
-                            });
-                            irqRates.sort(function(a, b) { return b.rate - a.rate; });
-                            if (irqRates.length > 0) {
-                                advNode.appendChild(E('div', { style: 'font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-top: 12px; margin-bottom: 6px;' }, 'Top IRQs (per-core split)'));
-                                irqRates.slice(0, 5).forEach(function(q) {
-                                    var total = q.cores.reduce(function(a, b) { return a + b; }, 0) || 1;
-                                    var segs = [];
-                                    q.cores.forEach(function(cv, ci) {
-                                        if (cv <= 0) return;
-                                        segs.push(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
-                                    });
-                                    advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [
-                                        E('div', { class: 'hw-progress-header' }, [
-                                            E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name),
-                                            E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, Math.round(q.rate) + ' /s')
-                                        ]),
-                                        E('div', { class: 'hw-bar-bg', style: 'height: 4px; display: flex;' }, segs)
-                                    ]));
-                                });
-                                var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin-bottom: 4px; flex-wrap: wrap;' });
-                                for (var lc = 0; lc < Math.min(res.cpus.length - 1, 8); lc++) {
-                                    legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
-                                        E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
-                                        'C' + lc
-                                    ]));
-                                }
-                                advNode.appendChild(legendCores);
-                            }
-                        }
-                        // softnet backlog: drops mean the CPU can't keep up
-                        // with packet input — the earliest overload warning.
-                        if (res.softnet && res.softnet.length > 0) {
-                            var snD = 0, snS = 0;
-                            if (self.prevSoftnet) {
-                                res.softnet.forEach(function(sn, si) {
-                                    var p = self.prevSoftnet[si];
-                                    if (p) { snD += Math.max(0, sn.d - p.d); snS += Math.max(0, sn.s - p.s); }
-                                });
-                                var snColor = snD > 0 ? '#ff5252' : snS > 0 ? '#ffb300' : 'currentColor';
-                                advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 5px;' }, [
-                                    E('div', { class: 'hw-progress-header' }, [
-                                        E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
-                                        E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em; color: ' + snColor + ';' }, snD + ' / ' + snS + ' per 3s')
-                                    ])
-                                ]));
-                            }
-                            self.prevSoftnet = res.softnet;
                         }
                         // Cumulative frequency residency (time in each OPP since
                         // boot) — shows whether the CPU ever leaves its min/max
@@ -2095,11 +2023,60 @@ return view.extend({
                         if (crit !== null && (crit < 40 || crit > 150)) crit = null;
                         if (pass !== null && (pass <= 0 || pass > 150)) pass = null;
                         if (crit !== null && pass !== null && pass >= crit) pass = null;
-                        var hist = self.tempHist[name] || (self.tempHist[name] = []);
-                        hist.push(tempC);
-                        if (hist.length > 60) hist.shift();
-                        sensors.push({ name: name, temp: tempC, crit: crit, pass: pass, hist: hist });
+                        var th = self.tempHist[name];
+                        if (!th || Array.isArray(th)) th = self.tempHist[name] = { data: [], color: PING_COLORS[Object.keys(self.tempHist).length % PING_COLORS.length] };
+                        th.data.push(tempC);
+                        if (th.data.length > 200) th.data.shift();
+                        sensors.push({ name: name, temp: tempC, crit: crit, pass: pass, color: th.color, hist: th.data });
                     });
+                    // Realtime multi-line temperature graph (last ~10 min at the
+                    // 3s poll), drawn above the sensor rows in the first card.
+                    // Minimal on purpose: lines, three labeled gridlines, nothing
+                    // else — the rows below carry the exact values and trips.
+                    var tGraph = null;
+                    var gSensors = sensors.filter(function(sn) { return sn.hist && sn.hist.length >= 2; });
+                    if (gSensors.length > 0) {
+                        var TW = 600, TH = 150, TTOP = 6, TBOT = 4;
+                        var tmin = Infinity, tmax = -Infinity;
+                        gSensors.forEach(function(sn) {
+                            sn.hist.forEach(function(v) { if (v < tmin) tmin = v; if (v > tmax) tmax = v; });
+                        });
+                        var ylo = Math.floor((tmin - 3) / 5) * 5;
+                        var yhi = Math.ceil((tmax + 3) / 5) * 5;
+                        if (yhi - ylo < 10) yhi = ylo + 10;
+                        var tPlotH = TH - TTOP - TBOT;
+                        var tStep = TW / (200 - 1);
+                        var tSvg = '';
+                        [0.25, 0.5, 0.75].forEach(function(g) {
+                            var gy = (TTOP + tPlotH * (1 - g)).toFixed(1);
+                            tSvg += '<line x1="0" y1="' + gy + '" x2="' + TW + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
+                        });
+                        gSensors.forEach(function(sn) {
+                            var pts = [];
+                            for (var ti = 0; ti < sn.hist.length; ti++) {
+                                var x = TW - (sn.hist.length - 1 - ti) * tStep;
+                                var y = TTOP + tPlotH * (1 - (sn.hist[ti] - ylo) / (yhi - ylo));
+                                pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+                            }
+                            tSvg += '<polyline fill="none" stroke="' + sn.color + '" stroke-width="1.8" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
+                            var lp = pts[pts.length - 1].split(',');
+                            tSvg += '<circle cx="' + lp[0] + '" cy="' + lp[1] + '" r="2.5" fill="' + sn.color + '"/>';
+                        });
+                        tGraph = E('div', { style: 'width: 100%; margin-bottom: 16px;' });
+                        var tPlot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
+                        var tWrap = E('div', { style: 'width: 100%; line-height: 0;' });
+                        tWrap.innerHTML = '<svg width="100%" height="' + TH + '" viewBox="0 0 ' + TW + ' ' + TH + '" preserveAspectRatio="none">' + tSvg + '</svg>';
+                        tPlot.appendChild(tWrap);
+                        [0.25, 0.5, 0.75].forEach(function(g) {
+                            var topPct = ((TTOP + tPlotH * (1 - g)) / TH * 100).toFixed(1);
+                            tPlot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, Math.round(ylo + (yhi - ylo) * g) + ' \u00b0C'));
+                        });
+                        tGraph.appendChild(tPlot);
+                        tGraph.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
+                            E('span', {}, '\u221210 min'),
+                            E('span', {}, 'now')
+                        ]));
+                    }
                     // Up to 3 columns per card, up to 4 sensors per column; when
                     // the platform exposes more sensors, additional cards are added.
                     var MAX_PER_CARD = 12;
@@ -2130,9 +2107,12 @@ return view.extend({
                             rowEl.appendChild(E('div', { class: colCls }, [list]));
                         });
                         var cardTitle = cardCount > 1 ? 'Thermal Sensors (' + (off / MAX_PER_CARD + 1) + '/' + cardCount + ')' : 'Thermal Sensors';
+                        var cardKids = [E('h3', {}, cardTitle)];
+                        if (off === 0 && tGraph) cardKids.push(tGraph);
+                        cardKids.push(rowEl);
                         thermWrap.appendChild(E('div', {
                             class: 'hw-card wide'
-                        }, [E('h3', {}, cardTitle), rowEl]));
+                        }, cardKids));
                     }
                     // Cooling device states (cpufreq throttling, fans, ...) as a
                     // chip row under the first thermal card. cur > 0 = the kernel
@@ -2437,6 +2417,74 @@ return view.extend({
                     wifiCard.style.display = 'none';
                 }
 
+                // Interrupts card: top IRQ sources with per-core split + softnet backlog.
+                if (res.irqs && res.irqs.length > 0) {
+                    var irqNode = document.getElementById('hw-irq');
+                    if (!self.prevIrqs) self.prevIrqs = {};
+                    var CORE_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
+                    var irqRates = [];
+                    res.irqs.forEach(function(q) {
+                        var pk = q.n + '|' + q.d;
+                        var prev = self.prevIrqs[pk];
+                        if (prev) {
+                            var rate = (q.t - prev.t) / 3;
+                            if (rate >= 1) {
+                                var coreD = q.c.map(function(v, ci) { return Math.max(0, v - (prev.c[ci] || 0)); });
+                                var parts = q.d.split(/\s+/);
+                                var iname = parts[parts.length - 1] || q.d;
+                                if (/^interrupts?$/i.test(iname)) iname = q.d.length > 24 ? q.d.slice(0, 23) + '\u2026' : q.d;
+                                irqRates.push({ name: iname, rate: rate, cores: coreD });
+                            }
+                        }
+                        self.prevIrqs[pk] = q;
+                    });
+                    irqRates.sort(function(a, b) { return b.rate - a.rate; });
+                    if (irqNode && irqRates.length > 0) {
+                        irqNode.innerHTML = '';
+                        irqRates.slice(0, 6).forEach(function(q) {
+                            var total = q.cores.reduce(function(a, b) { return a + b; }, 0) || 1;
+                            var segs = [];
+                            q.cores.forEach(function(cv, ci) {
+                                if (cv <= 0) return;
+                                segs.push(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
+                            });
+                            irqNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
+                                E('div', { class: 'hw-progress-header' }, [
+                                    E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name),
+                                    E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, Math.round(q.rate) + ' /s')
+                                ]),
+                                E('div', { class: 'hw-bar-bg', style: 'height: 5px; display: flex;' }, segs)
+                            ]));
+                        });
+                        var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin: 4px 0 8px 0; flex-wrap: wrap;' });
+                        for (var lc = 0; lc < Math.min(res.cpus.length - 1, 8); lc++) {
+                            legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
+                                E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
+                                'C' + lc
+                            ]));
+                        }
+                        irqNode.appendChild(legendCores);
+                        if (res.softnet && res.softnet.length > 0) {
+                            var snD = 0, snS = 0;
+                            if (self.prevSoftnet) {
+                                res.softnet.forEach(function(sn, si) {
+                                    var p = self.prevSoftnet[si];
+                                    if (p) { snD += Math.max(0, sn.d - p.d); snS += Math.max(0, sn.s - p.s); }
+                                });
+                                var snColor = snD > 0 ? '#ff5252' : snS > 0 ? '#ffb300' : 'currentColor';
+                                irqNode.appendChild(E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); padding-top: 8px;' }, [
+                                    E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
+                                    E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em; color: ' + snColor + ';' }, snD + ' / ' + snS + ' per 3s')
+                                ]));
+                            }
+                            self.prevSoftnet = res.softnet;
+                        }
+                        irqCard.style.display = 'flex';
+                    }
+                } else {
+                    irqCard.style.display = 'none';
+                }
+
                 // Offload Engines — flowtable / PPE hardware NAT / WED status.
                 if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0)) {
                     var off = res.offload;
@@ -2451,12 +2499,22 @@ return view.extend({
                         };
                         addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
                         addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
-                        if (off.sw_flows >= 0) addOff('Offloaded Flows (conntrack)', String(off.sw_flows), off.sw_flows > 0 ? '#00bcd4' : null);
-                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', String(off.ppe_flows), off.ppe_flows > 0 ? '#8bc34a' : null);
-                        if (res.peaks && res.peaks.ppe > 0 && off.ppe_flows >= 0) {
-                            var lastOffRow = offNode.lastChild.querySelector('.hw-stat-value');
-                            if (lastOffRow) lastOffRow.appendChild(E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal; color: var(--text-color, inherit);', title: 'Highest count since boot' }, ' \u00b7 peak ' + res.peaks.ppe));
-                        }
+                        // turboacc-style current/total bars
+                        var mkOffBar = function(lbl, cur, tot, color, peakN) {
+                            var pctB = tot > 0 ? Math.min(100, cur / tot * 100) : 0;
+                            var valSpan = E('span', { class: 'hw-stat-value', style: 'color:' + color + ';' }, cur + ' / ' + tot);
+                            if (peakN > 0) valSpan.appendChild(E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal; color: var(--text-color, inherit);', title: 'Highest count since boot' }, ' \u00b7 peak ' + peakN));
+                            offNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
+                                E('div', { class: 'hw-progress-header' }, [
+                                    E('span', { class: 'hw-stat-label' }, lbl),
+                                    valSpan
+                                ]),
+                                E('div', { class: 'hw-bar-bg' }, [E('div', { class: 'hw-bar-fill', style: 'width: ' + pctB + '%; background: ' + color + ';' })])
+                            ]));
+                        };
+                        var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
+                        if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4', 0);
+                        if (off.ppe_flows >= 0) mkOffBar('PPE HW-Bound / Offloaded', off.ppe_flows, off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows, '#8bc34a', (res.peaks && res.peaks.ppe) || 0);
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }
