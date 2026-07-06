@@ -245,12 +245,26 @@ return view.extend({
             }
             var tempDisplay = s.temp.toFixed(1) + ' °C';
             if (s.temp >= (s.crit || 90)) tempDisplay += ' ⚠️';
+            // Inline history sparkline (last ~60 samples, kept client-side).
+            var spark = '';
+            if (s.hist && s.hist.length >= 2) {
+                var W = 64, H = 18, P = 2;
+                var mn = Math.min.apply(null, s.hist), mx = Math.max.apply(null, s.hist);
+                var span = (mx - mn) || 1;
+                var pts = s.hist.map(function(v, i) {
+                    var x = P + i * (W - 2 * P) / (s.hist.length - 1);
+                    var y = H - P - (v - mn) * (H - 2 * P) / span;
+                    return x.toFixed(1) + ',' + y.toFixed(1);
+                }).join(' ');
+                spark = E('span', { style: 'flex-shrink: 0; margin-left: auto; margin-right: 8px; opacity: 0.75; line-height: 0;' });
+                spark.innerHTML = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + pts + '"/></svg>';
+            }
             var rowContent = [E('div', {
                 class: 'hw-stat-row',
                 style: 'border-bottom: none; padding-bottom: 0;'
             }, [E('span', {
                 class: 'hw-stat-label'
-            }, s.name), E('span', {
+            }, s.name), spark, E('span', {
                 class: 'hw-temp-badge' + hotCls,
                 style: 'color: ' + color + '; background: ' + bgCol + ';'
             }, tempDisplay)])];
@@ -680,6 +694,35 @@ return view.extend({
                                 class: 'hw-bar-fill',
                                 style: 'width: ' + connPct + '%; background: ' + colorConn + ';'
                             })])]));
+                        }
+                        // Cumulative frequency residency (time in each OPP since
+                        // boot) — shows whether the CPU ever leaves its min/max
+                        // state. Hidden when the kernel doesn't expose the stats
+                        // or the policy has a single OPP.
+                        if (res.freq_stats && res.freq_stats.length > 1) {
+                            var fsTotal = 0;
+                            res.freq_stats.forEach(function(p) { fsTotal += p[1]; });
+                            if (fsTotal > 0) {
+                                advNode.appendChild(E('div', { style: 'font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-top: 12px; margin-bottom: 6px;' }, 'Freq Residency (since boot)'));
+                                var fsList = res.freq_stats;
+                                if (fsList.length > 10) {
+                                    fsList = fsList.slice().sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10)
+                                        .sort(function(a, b) { return a[0] - b[0]; });
+                                }
+                                fsList.forEach(function(p) {
+                                    var pctF = p[1] / fsTotal * 100;
+                                    var fLbl = p[0] >= 1000000 ? (p[0] / 1000000).toFixed(2) + ' GHz' : Math.round(p[0] / 1000) + ' MHz';
+                                    advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [
+                                        E('div', { class: 'hw-progress-header' }, [
+                                            E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, fLbl),
+                                            E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, pctF.toFixed(1) + '%')
+                                        ]),
+                                        E('div', { class: 'hw-bar-bg', style: 'height: 4px;' }, [
+                                            E('div', { class: 'hw-bar-fill', style: 'width: ' + pctF + '%; background: #00bcd4;' })
+                                        ])
+                                    ]));
+                                });
+                            }
                         }
                     }
                 }
@@ -1316,6 +1359,7 @@ return view.extend({
                     // Normalize + de-duplicate sensors, sorted alphabetically.
                     var sensors = [];
                     var seenSensors = {};
+                    if (!self.tempHist) self.tempHist = {};
                     res.thermals.slice().sort(function(a, b) {
                         return a.type.localeCompare(b.type);
                     }).forEach(function(t) {
@@ -1335,7 +1379,10 @@ return view.extend({
                         if (crit !== null && (crit < 40 || crit > 150)) crit = null;
                         if (pass !== null && (pass <= 0 || pass > 150)) pass = null;
                         if (crit !== null && pass !== null && pass >= crit) pass = null;
-                        sensors.push({ name: name, temp: tempC, crit: crit, pass: pass });
+                        var hist = self.tempHist[name] || (self.tempHist[name] = []);
+                        hist.push(tempC);
+                        if (hist.length > 60) hist.shift();
+                        sensors.push({ name: name, temp: tempC, crit: crit, pass: pass, hist: hist });
                     });
                     // Up to 3 columns per card, up to 4 sensors per column; when
                     // the platform exposes more sensors, additional cards are added.
@@ -1370,6 +1417,24 @@ return view.extend({
                         thermWrap.appendChild(E('div', {
                             class: 'hw-card wide'
                         }, [E('h3', {}, cardTitle), rowEl]));
+                    }
+                    // Cooling device states (cpufreq throttling, fans, ...) as a
+                    // chip row under the first thermal card. cur > 0 = the kernel
+                    // is actively limiting that device right now.
+                    if (res.cooling && res.cooling.length > 0 && thermWrap.firstChild) {
+                        var coolRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.15));' });
+                        var coolShown = 0;
+                        res.cooling.forEach(function(c) {
+                            if (!c.max) return;
+                            var cc = c.cur >= c.max ? '#ff1744' : c.cur > 0 ? '#ffb300' : '#00bcd4';
+                            var lbl = c.type + ': ' + (c.cur > 0 ? c.cur + '/' + c.max : 'idle');
+                            coolRow.appendChild(E('span', { style: 'font-size: 0.75em; padding: 3px 8px; border-radius: 4px; border: 1px solid ' + cc + '44; color: ' + cc + '; background: ' + cc + '18; white-space: nowrap;' }, lbl));
+                            coolShown++;
+                        });
+                        if (coolShown > 0) {
+                            coolRow.insertBefore(E('span', { style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; align-self: center;' }, 'Cooling'), coolRow.firstChild);
+                            thermWrap.firstChild.appendChild(coolRow);
+                        }
                     }
                 }
                 // Ports Topology: ethernet links and the USB bus share one card.

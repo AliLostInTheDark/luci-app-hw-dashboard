@@ -202,6 +202,22 @@ case "$1" in
 				done
 				CPU_FREQS="$CPU_FREQS]"
 
+				# Cumulative time spent in each OPP (cpufreq policy 0). Shows
+				# whether the CPU ever boosts or sits pinned. Absent when the
+				# kernel lacks CONFIG_CPU_FREQ_STAT — the UI hides the section.
+				FREQ_STATS="["
+				_FS_FIRST=1
+				if [ -f /sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state ]; then
+					while read -r _f _t; do
+						case "$_f" in ''|*[!0-9]*) continue ;; esac
+						case "$_t" in ''|*[!0-9]*) _t=0 ;; esac
+						[ $_FS_FIRST -eq 0 ] && FREQ_STATS="$FREQ_STATS,"
+						FREQ_STATS="$FREQ_STATS[$_f,$_t]"
+						_FS_FIRST=0
+					done < /sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state
+				fi
+				FREQ_STATS="$FREQ_STATS]"
+
 
 				MEM_TOTAL=0; MEM_FREE=0; MEM_AVAIL=0; MEM_BUFF=0; MEM_CACH=0; SWAP_TOTAL=0; SWAP_FREE=0; MEM_SLAB=0; MEM_PAGETABLES=0
 				while read -r key val _; do
@@ -572,6 +588,24 @@ EOF
 					done
 				done
 				THERMALS="$THERMALS]"
+
+				# Cooling device states (cpufreq throttling, fans, ...). cur > 0
+				# means the kernel is actively limiting something right now.
+				COOLING="["
+				_CD_FIRST=1
+				for _cd in /sys/class/thermal/cooling_device*; do
+					[ -f "$_cd/cur_state" ] || continue
+					read_file _cdt "$_cd/type" "Unknown"
+					read_file _cdc "$_cd/cur_state" 0
+					read_file _cdm "$_cd/max_state" 0
+					case "$_cdc" in ''|*[!0-9]*) _cdc=0 ;; esac
+					case "$_cdm" in ''|*[!0-9]*) _cdm=0 ;; esac
+					json_esc "$_cdt"
+					[ $_CD_FIRST -eq 0 ] && COOLING="$COOLING,"
+					COOLING="$COOLING{\"type\":\"$JSV\",\"cur\":$_cdc,\"max\":$_cdm}"
+					_CD_FIRST=0
+				done
+				COOLING="$COOLING]"
 
 				# LOGICAL_CPUS / PHYSICAL_CORES / MAX_FREQ_KHZ are resolved once and
 				# cached together with the board identity above (hw_identity_v1.sh).
@@ -1214,7 +1248,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
