@@ -207,7 +207,7 @@ EOF
 				# re-run on every poll; resolve it once and persist. postinst clears
 				# /etc/hwdash on upgrade so a new package always re-detects.
 				HW_ID_CACHE="$HWDASH_PERSIST_DIR/hw_identity_v1.sh"
-				BOARD_DETECT=""; CPU_MODEL=""; LOGICAL_CPUS=""; PHYSICAL_CORES=""; MAX_FREQ_KHZ=""
+				BOARD_DETECT=""; CPU_MODEL=""; LOGICAL_CPUS=""; PHYSICAL_CORES=""; MAX_FREQ_KHZ=""; MEM_PHYS_MB=0
 				[ -f "$HW_ID_CACHE" ] && . "$HW_ID_CACHE" 2>/dev/null
 				if [ -z "$CPU_MODEL" ]; then
 				BOARD_DETECT=$(cat /tmp/sysinfo/model 2>/dev/null)
@@ -256,6 +256,25 @@ EOF
 				[ "${PHYSICAL_CORES:-0}" -eq 0 ] && PHYSICAL_CORES=$LOGICAL_CPUS
 				MAX_FREQ_KHZ=$(cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq 2>/dev/null | sort -nr | head -n 1)
 				[ -z "$MAX_FREQ_KHZ" ] && MAX_FREQ_KHZ=0
+				# Exact physical DRAM from the devicetree memory node(s): reg is
+				# big-endian (addr,size) pairs — 8+8 bytes on arm64 (2/2 cells),
+				# 4+4 on arm32. One od fork, once ever (persisted with identity).
+				MEM_PHYS_MB=0
+				for _mr in /proc/device-tree/memory/reg /proc/device-tree/memory@*/reg; do
+					[ -f "$_mr" ] || continue
+					set -- $(od -A n -t x1 "$_mr" 2>/dev/null)
+					if [ $(( $# % 16 )) -eq 0 ]; then _cw=8; else _cw=4; fi
+					while [ $# -ge $((_cw * 2)) ]; do
+						_sk=0
+						while [ $_sk -lt $_cw ]; do shift; _sk=$((_sk + 1)); done
+						_sz=0; _sk=0
+						while [ $_sk -lt $_cw ]; do
+							_sz=$(( (_sz << 8) + 0x$1 ))
+							shift; _sk=$((_sk + 1))
+						done
+						MEM_PHYS_MB=$((MEM_PHYS_MB + _sz / 1048576))
+					done
+				done
 				mkdir -p "$HWDASH_PERSIST_DIR" 2>/dev/null
 				{
 					printf "BOARD_DETECT='%s'\n" "$BOARD_DETECT"
@@ -263,6 +282,7 @@ EOF
 					printf "LOGICAL_CPUS=%s\n" "${LOGICAL_CPUS:-1}"
 					printf "PHYSICAL_CORES=%s\n" "${PHYSICAL_CORES:-1}"
 					printf "MAX_FREQ_KHZ=%s\n" "${MAX_FREQ_KHZ:-0}"
+					printf "MEM_PHYS_MB=%s\n" "${MEM_PHYS_MB:-0}"
 				} > "$HW_ID_CACHE.$$" 2>/dev/null && mv "$HW_ID_CACHE.$$" "$HW_ID_CACHE" 2>/dev/null
 				fi
 
@@ -924,10 +944,7 @@ EOF
 				# ethtool 6.15 prints EEE state as two bare enabled/disabled
 				# lines instead of "EEE status:" — handle both.
 				ETHTOOL_JSON="{}"
-				if command -v ethtool >/dev/null; then
-					if _cache_read /tmp/hwdash_ethtool.cache; then
-						ETHTOOL_JSON=$C_VAL
-					else
+				_ethtool_refresh() {
 						ETHTOOL_JSON="{"
 						_ETF=1
 						for netdev in /sys/class/net/*; do
@@ -977,14 +994,38 @@ EOF
 								fi
 							fi
 							_pause="rx ${_prxn:-${_prx:-?}} / tx ${_ptxn:-${_ptx:-?}}"
+							_drv=""; _fw=""
+							while read -r _k _v _; do
+								case "$_k" in
+									driver:) _drv=$_v ;;
+									firmware-version:) _fw=$_v ;;
+								esac
+							done <<EOF
+$(ethtool -i "$eth" 2>/dev/null)
+EOF
+							json_esc "$_drv"; _drvj=$JSV
+							json_esc "$_fw"
 							[ $_ETF -eq 0 ] && ETHTOOL_JSON="$ETHTOOL_JSON,"
-							ETHTOOL_JSON="$ETHTOOL_JSON\"$eth\":{\"an\":\"${_an:-?}\",\"pause\":\"$_pause\",\"eee\":\"$_eee\"}"
+							ETHTOOL_JSON="$ETHTOOL_JSON\"$eth\":{\"an\":\"${_an:-?}\",\"pause\":\"$_pause\",\"eee\":\"$_eee\",\"drv\":\"$_drvj\",\"fw\":\"$JSV\"}"
 							_ETF=0
 						done
 						ETHTOOL_JSON="$ETHTOOL_JSON}"
 						_cache_write /tmp/hwdash_ethtool.cache 30 "$ETHTOOL_JSON"
+				}
+				if command -v ethtool >/dev/null; then
+					if _cache_read /tmp/hwdash_ethtool.cache; then
+						ETHTOOL_JSON=$C_VAL
+					elif [ -n "$C_VAL" ]; then
+						ETHTOOL_JSON=$C_VAL
+						if ! _cache_read /tmp/hwdash_ethtool.cache.lock; then
+							_cache_write /tmp/hwdash_ethtool.cache.lock 60 refreshing
+							( _ethtool_refresh ) >/dev/null 2>&1 &
+						fi
+					else
+						_ethtool_refresh
 					fi
 				fi
+				[ -z "$ETHTOOL_JSON" ] && ETHTOOL_JSON="{}"
 
 				ETH_LINKS="["
 				FIRST_ETH=1
@@ -1156,6 +1197,7 @@ EOF
 					read_file manufacturer "$usb/manufacturer" ""
 					read_file speed "$usb/speed" "Unknown"
 					read_file version "$usb/version" ""
+					read_file maxpower "$usb/bMaxPower" ""
 					[ -z "$product" ] && [ -z "$manufacturer" ] && continue
 					if [ -n "$manufacturer" ]; then
 						dev_name="$manufacturer $product"
@@ -1165,7 +1207,7 @@ EOF
 					if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
 					json_esc "$dev_name"; _n=$JSV
 					json_esc "$version"
-					USB_DEVS="$USB_DEVS{\"name\":\"$_n\",\"speed\":\"$speed\",\"version\":\"$JSV\"}"
+					USB_DEVS="$USB_DEVS{\"name\":\"$_n\",\"speed\":\"$speed\",\"version\":\"$JSV\",\"max_power\":\"$maxpower\"}"
 					FIRST_USB=0
 				done
 				USB_DEVS="$USB_DEVS]"
@@ -1193,10 +1235,7 @@ EOF
 				# iwinfo/iw/uci/awk forks per radio). Channel/txpower/bitrate
 				# change slowly, so cache the whole block for 20s.
 				WIFI_CACHE=/tmp/hwdash_wifi_radios_v2.cache
-				if _cache_read "$WIFI_CACHE"; then
-					WIFI_RADIOS=$C_VAL
-					[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
-				else
+				_wifi_refresh() {
 				WIFI_RADIOS="["
 				FIRST_WIFI=1
 				# Active regulatory domain (country + DFS regime). Usually global to
@@ -1307,7 +1346,25 @@ EOF
 				fi
 				WIFI_RADIOS="$WIFI_RADIOS]"
 				_cache_write "$WIFI_CACHE" 20 "$WIFI_RADIOS"
+				}
+				# Stale-while-revalidate: an expired cache is served instantly
+				# and refreshed by a detached child (stdout closed so rpcd is
+				# never kept waiting) — the cold-cache fork burst no longer
+				# lands on the poll that a freshly opened dashboard is waiting
+				# on. The lock is itself a TTL cache so a crashed refresh can
+				# never wedge it. Only the very first call ever builds inline.
+				if _cache_read "$WIFI_CACHE"; then
+					WIFI_RADIOS=$C_VAL
+				elif [ -n "$C_VAL" ]; then
+					WIFI_RADIOS=$C_VAL
+					if ! _cache_read "$WIFI_CACHE.lock"; then
+						_cache_write "$WIFI_CACHE.lock" 60 refreshing
+						( _wifi_refresh ) >/dev/null 2>&1 &
+					fi
+				else
+					_wifi_refresh
 				fi
+				[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
 
 
 
@@ -1633,9 +1690,11 @@ EOF
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi
 				read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
+				read_file WD_BOOTSTATUS /sys/class/watchdog/watchdog0/bootstatus "-1"
+				case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
 				# OV_TOTAL/OV_USED/OV_FREE were harvested during the df -k pass.
 				json_esc "$SYS_HOSTNAME"
-				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
+				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV

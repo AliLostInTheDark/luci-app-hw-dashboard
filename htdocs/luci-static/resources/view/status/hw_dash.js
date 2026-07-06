@@ -1198,7 +1198,8 @@ return view.extend({
                     var pct = Math.round((used / mem.total) * 100);
                     updateDial('ram', pct, ramCard.circ);
                     document.getElementById('dial-sub-ram').textContent = (used / 1024).toFixed(0) + ' MB';
-                    var physRamKB = getPhysicalRamTotal(mem.total);
+                    var _dtMb = res.sys_info && res.sys_info.mem_phys_mb;
+                    var physRamKB = (_dtMb > 0) ? _dtMb * 1024 : getPhysicalRamTotal(mem.total);
                     var ramStats = document.getElementById('stats-ram');
                     ramStats.innerHTML = '';
                     ramStats.appendChild(E('div', {
@@ -1994,7 +1995,7 @@ return view.extend({
                             var et = res.ethtool && res.ethtool[l.iface];
                             if (et && st !== 'Down') {
                                 var eeeCol = et.eee === 'active' ? '#ffb300' : '';
-                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '');
+                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '') + (et.drv ? ' \u00b7 ' + et.drv + (et.fw ? ' fw ' + et.fw : '') : '');
                                 box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;' }, [
                                     E('span', {}, 'PHY:'),
                                     E('span', { style: eeeCol ? 'color:' + eeeCol + ';' : '' }, etStr)
@@ -2031,6 +2032,7 @@ return view.extend({
                             if (spdLabel) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), E('span', { style: 'color:' + col + ';' }, spdLabel)]));
                             var ver = u.version ? u.version.trim() : '';
                             if (ver) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), E('span', {}, ver)]));
+                            if (u.max_power && u.max_power !== '0mA') rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Max Power Draw:'), E('span', {}, u.max_power)]));
                             portsNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, rows));
                         });
                     }
@@ -2292,6 +2294,18 @@ return view.extend({
                     if (si.hostname) addSi('Hostname', si.hostname);
                     if (si.kver) addSi('Kernel', si.kver);
                     if (si.arch) addSi('Architecture', si.arch);
+                    if (typeof si.wd_bootstatus === 'number' && si.wd_bootstatus >= 0) {
+                        var wb = si.wd_bootstatus;
+                        var wbTxt = 'Normal (power-on)';
+                        var wbCol = '';
+                        if (wb & 0x20) { wbTxt = 'Watchdog reset'; wbCol = ' color:#ff5252;'; }
+                        else if (wb & 0x02) { wbTxt = 'Overheat reset'; wbCol = ' color:#ff5252;'; }
+                        else if (wb !== 0) { wbTxt = 'Code 0x' + wb.toString(16); wbCol = ' color:#ffb300;'; }
+                        siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;'}, [
+                            E('span', {class:'hw-stat-label', style:'font-size:0.88em;'}, 'Last Boot'),
+                            E('span', {class:'hw-stat-value', style:'font-size:0.88em;' + wbCol}, wbTxt)
+                        ]));
+                    }
                     if (si.soc_family) addSi('SoC Family', si.soc_family);
                     if (si.soc_machine) addSi('Machine', si.soc_machine);
                     if (si.soc_id) addSi('SoC ID', si.soc_id);
