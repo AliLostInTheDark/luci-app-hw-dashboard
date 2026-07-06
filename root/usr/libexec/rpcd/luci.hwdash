@@ -626,10 +626,15 @@ EOF
 				THERMALS="["
 				FIRST=1
 				SEEN_TYPES=" "
+				_TMAX=0; _TMAX_NAME=""
 				for t in /sys/class/thermal/thermal_zone*; do
 					if [ -f "$t/type" ] && [ -f "$t/temp" ]; then
 						read_file TYPE "$t/type" "Unknown"
 						read_file TEMP "$t/temp" "0"
+						_tn=$TEMP
+						case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
+						[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
+						if [ "$_tn" -gt "$_TMAX" ] && [ "$_tn" -lt 150 ]; then _TMAX=$_tn; _TMAX_NAME=$TYPE; fi
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
 						for trip in "$t"/trip_point_*_type; do
@@ -670,6 +675,10 @@ EOF
 							*" $TYPE "*) continue ;;
 						esac
 						SEEN_TYPES="${SEEN_TYPES}${TYPE} "
+						_tn=$TEMP
+						case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
+						[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
+						if [ "$_tn" -gt "$_TMAX" ] && [ "$_tn" -lt 150 ]; then _TMAX=$_tn; _TMAX_NAME=$TYPE; fi
 						
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
@@ -860,6 +869,30 @@ EOF
 					[ -d "$_wd" ] && WED_CNT=$((WED_CNT + 1))
 				done
 				OFFLOAD_JSON="{\"ft\":$OFF_FT,\"sw_cfg\":$OFF_SWCFG,\"hw_cfg\":$OFF_HWCFG,\"ppe_flows\":$PPE_FLOWS,\"sw_flows\":$SW_FLOWS,\"wed\":$WED_CNT}"
+
+				# --- since-boot watermarks (peak temp / conntrack / PPE flows).
+				# Sourced from a /tmp file (clears on reboot); rewritten only
+				# when a record is actually broken, so steady state costs one
+				# builtin source per poll and zero writes.
+				PK_TEMP=0; PK_TEMP_NAME=""; PK_TEMP_TS=0; PK_CT=0; PK_PPE=0
+				[ -f /tmp/hwdash_peaks.sh ] && . /tmp/hwdash_peaks.sh 2>/dev/null
+				_PK_DIRTY=0
+				if [ "${_TMAX:-0}" -gt "${PK_TEMP:-0}" ]; then
+					PK_TEMP=$_TMAX; PK_TEMP_NAME=$_TMAX_NAME; PK_TEMP_TS=${HWDASH_NOW:-0}; _PK_DIRTY=1
+				fi
+				if [ "${CONN_COUNT:-0}" -gt "${PK_CT:-0}" ]; then PK_CT=$CONN_COUNT; _PK_DIRTY=1; fi
+				if [ "${PPE_FLOWS:--1}" -gt "${PK_PPE:-0}" ]; then PK_PPE=$PPE_FLOWS; _PK_DIRTY=1; fi
+				if [ "$_PK_DIRTY" = "1" ]; then
+					{
+						printf 'PK_TEMP=%s\n' "$PK_TEMP"
+						printf "PK_TEMP_NAME='%s'\n" "$PK_TEMP_NAME"
+						printf 'PK_TEMP_TS=%s\n' "$PK_TEMP_TS"
+						printf 'PK_CT=%s\n' "$PK_CT"
+						printf 'PK_PPE=%s\n' "$PK_PPE"
+					} > /tmp/hwdash_peaks.sh.$$ 2>/dev/null && mv /tmp/hwdash_peaks.sh.$$ /tmp/hwdash_peaks.sh 2>/dev/null
+				fi
+				json_esc "$PK_TEMP_NAME"
+				PEAKS_JSON="{\"temp\":$PK_TEMP,\"temp_sensor\":\"$JSV\",\"temp_ts\":$PK_TEMP_TS,\"conntrack\":$PK_CT,\"ppe\":$PK_PPE}"
 
 				# --- hardware events: interesting dmesg lines (thermal, ECC,
 				# link flaps, USB, OOM, voltage). dmesg+grep forks only run
@@ -1606,7 +1639,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

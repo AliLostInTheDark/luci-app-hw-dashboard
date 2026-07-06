@@ -13,10 +13,10 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.0-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.0-r16.apk
 ```
 
-The package post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
+The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
 
 ### From source
 
@@ -60,7 +60,11 @@ An SVG arc dial shows aggregate CPU utilization at a glance. Below it:
 - **Uptime** — formatted as days, hours, minutes
 - **Per-core bars** — individual utilization bar and frequency for every logical CPU
 
-The advanced CPU panel (shown alongside) breaks down aggregate time into: Idle, User, Nice, System, I/O Wait, IRQ, Soft IRQ, and tracks Context Switches/s, Hardware Interrupts/s, System Tasks (running / total), and Active Connections against the conntrack limit.
+The advanced CPU panel (shown alongside) breaks down aggregate time into: Idle, User, Nice, System, I/O Wait, IRQ, Soft IRQ, and tracks Context Switches/s, Hardware Interrupts/s, System Tasks (running / total), and Active Connections against the conntrack limit (with the since-boot peak). It also shows:
+
+- **Top IRQs** — the five hottest interrupt sources by rate with a per-core stacked split, so you can see at a glance which core services the NIC/Wi-Fi interrupts and whether packet steering spreads the load
+- **Backlog Drops / Squeezed** — softnet counters; drops mean a CPU could not keep up with packet input
+- **Freq Residency** — cumulative time spent at each frequency step since boot (hidden when the kernel lacks `CONFIG_CPU_FREQ_STAT`)
 
 ### Memory
 
@@ -116,23 +120,41 @@ USB mass storage devices are detected by scanning block devices for the `removab
 
 ### Thermal Sensors
 
-All thermal zones from `/sys/class/thermal/` and `hwmon` inputs are collected, de-duplicated and laid out alphabetically across up to three columns — no artificial CPU/WiFi/Misc grouping. When a platform exposes more than 12 sensors, additional thermal cards are appended automatically. Each reading is displayed as a color-coded badge whose warning/critical thresholds come from the sensor's own trip points when the hardware exposes them (falling back to 60/80 °C otherwise), so the coloring adapts to each architecture rather than using a single fixed scale.
+All thermal zones from `/sys/class/thermal/` and `hwmon` inputs are collected, de-duplicated and laid out alphabetically across up to three columns — no artificial CPU/WiFi/Misc grouping. When a platform exposes more than 12 sensors, additional thermal cards are appended automatically. Each reading is displayed as a color-coded badge whose warning/critical thresholds come from the sensor's own trip points when the hardware exposes them (falling back to 60/80 °C otherwise), so the coloring adapts to each architecture rather than using a single fixed scale. Critical readings get a pulsing glow.
 
-### Ethernet Status
+Each sensor row carries an inline sparkline of the last ~60 samples, kept client-side at zero backend cost. Below the sensors, a chip row shows every cooling device (`/sys/class/thermal/cooling_device*`) — cyan when idle, amber with `cur/max` while the kernel is actively throttling, red when saturated — and the peak temperature seen since boot with the sensor name and when it happened.
 
-Each physical ethernet interface (`eth*`, `lan*`, `wan*`) is queried via `ethtool` for link speed, duplex mode, and error counters. The card shows RX/TX drop and error rates color-coded by severity.
+### Ports Topology
 
-### PCIe Topology
+Ethernet and USB share one card. Each physical ethernet interface shows link speed and duplex, live throughput from byte-counter deltas, RX/TX error and drop counters, MAC address, MTU, and the carrier-change counter (highlighted amber when the port flapped after its initial link-up). When `ethtool` is installed, a PHY row adds auto-negotiation state, the **negotiated** flow-control result (often different from the configured one), and EEE status — amber when EEE is actively idling the link, since that causes latency on some PHYs.
 
-PCIe devices are enumerated from `/sys/bus/pci/devices/`. For each device, the card shows the negotiated link speed and width alongside the controller maximum, making it immediately visible if a device is running below its rated capability.
+The USB section lists host controllers and connected devices by name, negotiated speed (USB 2.0 / 3.0 / 3.2) and protocol version.
 
-### USB Bus
+### PCI-e Topology
 
-USB host controllers are read from `/sys/bus/usb/devices/`. The card shows each root hub's negotiated speed (USB 2.0 / 3.0 / 3.1 / 3.2) and lists connected devices by name and protocol version.
+PCIe devices are enumerated from `/sys/bus/pci/devices/` in their own card, hidden entirely when there is nothing meaningful to show. Each device shows the negotiated link speed and width alongside the controller maximum, making it immediately visible if a device is running below its rated capability.
 
-### WiFi PHY
+### Offload Engines
 
-Each wireless radio is queried via `iwinfo` and `iw`. Per-radio data includes:
+Shows whether the packet fast path is actually working, not just configured: nftables flowtable state, the software/hardware offload switches from the firewall config, the live count of conntrack-offloaded flows, the number of flows currently **bound to the MTK PPE** (routed fully in hardware, never touching the CPU — with the since-boot peak), and WED (Wireless Ethernet Dispatch) engine presence. Hidden on platforms with none of it.
+
+### Ping Latency
+
+A full-width realtime graph (1-second cadence, 120-sample window) of router-side ping latency to dns.google, one.one.one.one, google.com and youtube.com — all dual-stack v4+v6 by default. All probes run in parallel with a 1s timeout, so the RPC returns in roughly the RTT of the slowest target. Timeouts spike to the top of the plot (no gaps) and the legend shows current latency, window average and packet-loss percentage per target; a target with no successful reply at all (e.g. IPv6 without a v6 uplink) draws no line and shows N/A. A bufferbloat grade (A+ through F) compares median latency under sustained WAN load against idle, reusing the live WAN throughput — zero extra probes.
+
+Custom targets can be added from the settings panel with an IPv4 / IPv6 / both selector (duplicates are rejected), or via `/etc/hwdash-ping.targets` on the router (one `host 4|6` per line).
+
+### Hardware Events
+
+A filtered `dmesg` view (10-second TTL) showing thermal, ECC, link-flap, USB, OOM and voltage events with relative timestamps — the dashboard's "what happened while you weren't looking" card. Hidden when there is nothing to report.
+
+### Settings
+
+The gear button (top right) opens a panel styled with standard LuCI `cbi` classes: per-card show/hide checkboxes, the ping-target editor, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in `/etc/hwdash-settings.json` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers.
+
+### WiFi PHY & Spectrum
+
+A full-width card with one labeled column per band (2.4 / 5 / 6 GHz) — radios of the same band stack vertically at equal heights, and bands the hardware doesn't have are hidden. Each radio is queried via `iwinfo` and `iw`; per-radio data includes:
 
 - Band and channel (with width)
 - TX power
@@ -155,22 +177,33 @@ The dashboard is deliberately conservative about process spawning. Shell forks a
 |------|---------|-------------|
 | `wifi_cap_v4.json` | WiFi PHY hardware capabilities from `iw list` | On package upgrade |
 | `sys_static_v2.frag` | CPU cache sizes, SoC identity, kernel version, vulnerability status | On package upgrade |
+| `hw_identity_v1.sh` | Board name, CPU model, core/thread counts, max frequency | On package upgrade |
+
+Two files live outside `/etc/hwdash/` so they survive package upgrades: `/etc/hwdash-settings.json` (dashboard settings) and `/etc/hwdash-ecc.baseline` (the first-seen NAND ECC counter snapshot that powers the "+N since date" wear trend; auto-rebuilt if the counters reset after a reflash).
 
 **Volatile cache** (`/tmp/`) — cleared on reboot; represents live data with a short TTL:
 
 | File | Content | TTL |
 |------|---------|-----|
-| `hwdash_wifi_radios_v1.json` | Live WiFi radio state (channel, clients, bitrate, noise) | 20 seconds |
-| `hwdash_storage_inv_v1.sh` | MTD partition table + UBI device tree (layout fixed at flash time; wear/ECC move slowly) | 30 seconds |
+| `hwdash_wifi_radios_v2.cache` | Live WiFi radio state (channel, bitrate, txpower, noise) | 20 seconds |
+| `hwdash_storage_inv_v2.sh` | MTD partition table + UBI device tree (layout fixed at flash time; wear/ECC move slowly) | 30 seconds |
+| `hwdash_offload.cache` | Flowtable / firewall offload configuration (nft + uci) | 30 seconds |
+| `hwdash_ethtool.cache` | Per-port autoneg / flow control / EEE from ethtool | 30 seconds |
+| `hwdash_events.cache` | Filtered dmesg hardware events | 10 seconds |
+| `hwdash_fstype_*` | fs type of unmounted block devices (`block info`) | 10 minutes |
+| `hwdash_realdev_*` | `/dev/root` → physical device mapping | per boot |
+| `hwdash_peaks.sh` | Since-boot watermarks (peak temperature, conntrack, PPE flows) | per boot, rewritten only on a new record |
+
+Cache freshness is checked with an expiry epoch embedded in each file — a builtin read plus an integer compare, with no `date -r` or `stat` fork per check.
 
 On package upgrade or reinstall, all caches are cleared by the postinst script so that updated parsing logic always runs against fresh data.
 
 
 ## Backend
 
-The backend is a single POSIX shell script registered as an `rpcd` call object at `/usr/libexec/rpcd/luci.hwdash`. It responds to `luci.hwdash info` and returns a single JSON object containing all dashboard data in one round-trip.
+The backend is a single POSIX shell script registered as an `rpcd` call object at `/usr/libexec/rpcd/luci.hwdash` with four methods: `info` (the full hardware readout in one round-trip), `ping` (parallel latency probes, accepting a target list as arguments with hosts validated against a character whitelist before they reach a command line), and `get_config`/`set_config` (router-side settings persistence, size-capped and re-serialized through `jsonfilter` so only valid JSON is ever written).
 
-Data collection covers: CPU statistics from `/proc/stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones from `/sys/class/thermal/` and `hwmon`, ethernet link state from `ethtool`, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw`, eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/`, and F2FS statistics from `/sys/fs/f2fs/`.
+Data collection covers: CPU statistics, context switches and interrupts from a single pass over `/proc/stat`, per-IRQ per-core counters from `/proc/interrupts`, softnet backlog from `/proc/net/softnet_stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout and ECC counters from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones and cooling devices from `/sys/class/thermal/`, temperatures plus voltage/fan/power/current rails from `hwmon`, cpufreq residency from `time_in_state`, ethernet link state from sysfs plus `ethtool`, offload state from `nft`/`uci`/PPE debugfs, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw` (including per-channel airtime survey), eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/`, F2FS statistics from `/sys/fs/f2fs/`, and hardware events from `dmesg`.
 
 The script is written to minimize process spawning on embedded hardware: `/proc/stat` is parsed in a single pass for all CPU-tick, context-switch and interrupt counters; per-device `/sys` stat files are read with shell builtins rather than `cat`/`awk` pipelines; and the slow-changing storage inventory is served from cache (see Caching Architecture above) so the per-poll fork count stays low.
 
@@ -179,7 +212,7 @@ The AWK-based WiFi capability parser (`luci.hwdash_wifi_cap.awk`) handles the st
 
 ## Frontend
 
-The frontend is a single LuCI JavaScript view (`hw_dash.js`) that polls `/ubus/call` once per second. All DOM updates are incremental — only the values that change are touched, not the whole card. SVG dials use `stroke-dasharray` transitions for smooth animation.
+The frontend is a single LuCI JavaScript view (`hw_dash.js`) with two poll loops: the main hardware readout every 3 seconds and the ping probes every second. Both stop entirely while the browser tab is hidden — the router does no collection work for a dashboard nobody is looking at — and resume on return. Hot fixed-shape sections (the per-core usage rows, the SVG dials) update in place rather than rebuilding their DOM subtree each tick.
 
 Dynamic color scaling (`getDynColor`) maps utilization percentages to a green → amber → red gradient without hardcoded thresholds that would be wrong for different metric types. The inversion flag is used for metrics like Free memory and CPU Idle where high values are good.
 

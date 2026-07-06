@@ -771,6 +771,27 @@ return view.extend({
                 }
             }, 'Reset to defaults')
         ]));
+        settingsPanel.appendChild(E('div', { style: 'margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2));' }, [
+            E('button', {
+                class: 'cbi-button cbi-button-action',
+                click: function() {
+                    // Full info payload as a downloadable file — handy for bug
+                    // reports and before/after firmware comparisons.
+                    if (!self.lastInfo) return;
+                    var host = (self.lastInfo.sys_info && self.lastInfo.sys_info.hostname) || 'router';
+                    var blob = new Blob([JSON.stringify(self.lastInfo, null, 2)], { type: 'application/json' });
+                    var a = E('a', {
+                        href: URL.createObjectURL(blob),
+                        download: 'hwdash-' + host + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json'
+                    });
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+                }
+            }, '\u2913 Download diagnostics snapshot'),
+            E('span', { style: 'font-size: 0.78em; opacity: 0.5; margin-left: 10px;' }, 'Saves the latest full hardware readout as JSON')
+        ]));
 
         var settingsBtn = E('button', {
             class: 'cbi-button',
@@ -847,6 +868,7 @@ return view.extend({
             if (document.hidden) return Promise.resolve();
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
+                self.lastInfo = res;
                 var coresNode = document.getElementById('hw-cores');
                 // Per-core rows are fixed-shape: build once, update text/width
                 // in place on subsequent polls instead of rebuilding the DOM
@@ -1065,7 +1087,7 @@ return view.extend({
                             }, 'Active Connections'), E('span', {
                                 class: 'hw-stat-value',
                                 style: 'color: ' + colorConn + ';'
-                            }, connCount + ' / ' + connMax)]), E('div', {
+                            }, connCount + ' / ' + connMax + (res.peaks && res.peaks.conntrack > 0 ? ' \u00b7 peak ' + res.peaks.conntrack : ''))]), E('div', {
                                 class: 'hw-bar-bg'
                             }, [E('div', {
                                 class: 'hw-bar-fill',
@@ -1884,6 +1906,17 @@ return view.extend({
                             thermWrap.firstChild.appendChild(coolRow);
                         }
                     }
+                    // since-boot peak watermark
+                    if (res.peaks && res.peaks.temp > 0 && thermWrap.firstChild) {
+                        var pkAgo = '';
+                        if (res.peaks.temp_ts > 0) {
+                            var nowEp = Math.floor(Date.now() / 1000);
+                            var agoS = Math.max(0, nowEp - res.peaks.temp_ts);
+                            pkAgo = agoS < 60 ? 'just now' : agoS < 3600 ? Math.floor(agoS / 60) + 'm ago' : agoS < 86400 ? Math.floor(agoS / 3600) + 'h ago' : Math.floor(agoS / 86400) + 'd ago';
+                        }
+                        thermWrap.firstChild.appendChild(E('div', { style: 'text-align: center; font-size: 0.78em; opacity: 0.6; margin-top: 8px;' },
+                            'Peak since boot: ' + res.peaks.temp + ' \u00b0C (' + res.peaks.temp_sensor.replace(/_/g, '-').toUpperCase() + (pkAgo ? ', ' + pkAgo : '') + ')'));
+                    }
                 }
                 // Ports Topology: ethernet links and the USB bus share one card.
                 var portsNode = document.getElementById('hw-eth-links');
@@ -2172,7 +2205,7 @@ return view.extend({
                         addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
                         addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
                         if (off.sw_flows >= 0) addOff('Offloaded Flows (conntrack)', String(off.sw_flows), off.sw_flows > 0 ? '#00bcd4' : null);
-                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', String(off.ppe_flows), off.ppe_flows > 0 ? '#8bc34a' : null);
+                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', off.ppe_flows + (res.peaks && res.peaks.ppe > 0 ? ' \u00b7 peak ' + res.peaks.ppe : ''), off.ppe_flows > 0 ? '#8bc34a' : null);
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }
