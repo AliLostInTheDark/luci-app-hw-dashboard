@@ -147,6 +147,31 @@ google.com 6
 youtube.com 4
 youtube.com 6
 "
+				# Auto-prepend the default IPv4 gateway (first hop) — the most
+				# diagnostic target there is: spikes here mean the local link,
+				# flat here + spiking internet targets means the ISP/beyond.
+				# /proc/net/route: dst 00000000 row, gateway hex little-endian.
+				_GW=""
+				while read -r _rif _rdst _rgw _rflg _; do
+					[ "$_rdst" = "00000000" ] || continue
+					case "$_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
+					[ "$_rgw" = "00000000" ] && continue
+					_b1=${_rgw#??????}
+					_b2=${_rgw#????}; _b2=${_b2%??}
+					_b3=${_rgw#??}; _b3=${_b3%????}
+					_b4=${_rgw%??????}
+					_GW="$((0x$_b1)).$((0x$_b2)).$((0x$_b3)).$((0x$_b4))"
+					break
+				done < /proc/net/route
+				if [ -n "$_GW" ]; then
+					case "$_PT_LIST" in
+						"$_GW 4"*) ;;
+						*"
+$_GW 4"*) ;;
+						*) _PT_LIST="$_GW 4
+$_PT_LIST" ;;
+					esac
+				fi
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
 				while read -r _pt_h _pt_f; do
@@ -191,7 +216,7 @@ EOF
 $_PT_LIST
 EOF
 				PINGS="$PINGS]"
-				echo "{\"targets\":$PINGS}"
+				echo "{\"gateway\":\"$_GW\",\"targets\":$PINGS}"
 				;;
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)

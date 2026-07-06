@@ -248,104 +248,257 @@ return view.extend({
             })])]);
         };
         // PING_GRAPH_START (marker used by the test harness)
-        var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
-        var PING_WINDOW = 120;
+        var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
+        var PING_WINDOW = 120;          // raw 1s samples kept (2 min)
+        var PING_AGG_KEEP = 1080;       // 10s buckets kept (3 h)
+        // view: [bucket size in raw agg entries (10s each), points shown, axis label]
+        var PING_VIEWS = {
+            '2m':  { raw: true,  pts: 120, label: '−2 min' },
+            '15m': { group: 1,   pts: 90,  label: '−15 min' },
+            '1h':  { group: 3,   pts: 120, label: '−1 h' },
+            '3h':  { group: 9,   pts: 120, label: '−3 h' }
+        };
+        var pingUI = { view: '2m', lastNode: null, lastHist: null, series: null, plotRect: null };
+        var repaintPing = function() {
+            if (pingUI.lastNode && pingUI.lastHist) renderPingGraph(pingUI.lastNode, pingUI.lastHist);
+        };
+        var pingPct = function(sorted, p) {
+            if (!sorted.length) return null;
+            return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+        };
+        // Build the plotted series for a target in the selected view.
+        // Raw view: 1s values, null = timeout. Decimated views: 10s-bucket
+        // averages grouped further; a bucket with zero successful samples is
+        // null (drawn as a spike), partial loss sets the loss flag (tick).
+        var pingSeries = function(t, viewKey) {
+            var vw = PING_VIEWS[viewKey];
+            if (vw.raw) {
+                return t.data.map(function(v) { return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1 }; });
+            }
+            var per = vw.group;
+            var src = t.agg.slice(-(vw.pts * per));
+            var out = [];
+            for (var i = 0; i < src.length; i += per) {
+                var sum = 0, n = 0, loss = 0;
+                for (var k = i; k < Math.min(i + per, src.length); k++) {
+                    var b = src[k];
+                    if (b.a !== null) { sum += b.a * b.n; n += b.n; }
+                    loss += b.loss;
+                }
+                var cnt = n + loss;
+                // tick flag: >=2% of the bucket's samples lost, so a single
+                // stray drop in a 90s bucket doesn't paint the whole axis red
+                out.push({ v: n > 0 ? sum / n : null, loss: loss > 0 && cnt > 0 && loss / cnt >= 0.02, lostN: loss, cnt: cnt });
+            }
+            return out;
+        };
         var renderPingGraph = function(node, hist) {
+            pingUI.lastNode = node;
+            pingUI.lastHist = hist;
             var keys = Object.keys(hist);
             if (keys.length === 0) return;
-            var W = 600, H = 190, TOP = 6, BOT = 4;
-            // Y scale: 95th percentile * 1.5 (20 ms floor) so isolated spikes
-            // clip at the top instead of squashing the baseline detail.
+            var vw = PING_VIEWS[pingUI.view];
+            var W = 600, H = 190, TOP = 6, BOT = 8;
+            var series = {};
+            keys.forEach(function(k) { series[k] = pingSeries(hist[k], pingUI.view); });
+            pingUI.series = series;
+            // Y scale from VISIBLE lines: p95 * 1.5 with 20ms floor
             var all = [];
             keys.forEach(function(k) {
-                hist[k].data.forEach(function(v) { if (v !== null) all.push(v); });
+                if (hist[k].hidden) return;
+                series[k].forEach(function(p) { if (p.v !== null) all.push(p.v); });
             });
             var ymax = 20;
             if (all.length) {
                 all.sort(function(a, b) { return a - b; });
-                var p95 = all[Math.min(all.length - 1, Math.floor(all.length * 0.95))];
-                ymax = Math.max(20, Math.min(all[all.length - 1], p95 * 1.5));
+                ymax = Math.max(20, Math.min(all[all.length - 1], pingPct(all, 0.95) * 1.5));
             }
             ymax = Math.ceil(ymax / 10) * 10;
             var plotH = H - TOP - BOT;
-            var step = W / (PING_WINDOW - 1);
-            var svg = '';
+            var step = W / (vw.pts - 1);
             var yFor = function(v) { return TOP + plotH * (1 - Math.min(v, ymax) / ymax); };
-            // labeled gridlines every 25%
+            var svg = '';
             var gridFracs = [0.25, 0.5, 0.75];
             gridFracs.forEach(function(g) {
                 var gy = (TOP + plotH * (1 - g)).toFixed(1);
                 svg += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
             });
+            var lossXs = {};
             keys.forEach(function(k) {
                 var t = hist[k];
-                // A target with no successful sample at all (e.g. no IPv6
-                // uplink) gets no line — the legend shows N/A instead of a
-                // flatline pinned to the ceiling.
-                var anyOk = t.data.some(function(v) { return v !== null; });
-                if (!anyOk) return;
-                // Timeouts spike to the top of the plot (prosumer-router
-                // style) so packet loss is unmissable — no gaps in the line.
+                if (t.hidden) return;
+                var sr = series[k];
+                var anyOk = sr.some(function(p) { return p.v !== null; });
+                if (!anyOk) return; // fully dead target: no line, no loss ticks — legend shows N/A
                 var pts = [];
-                var lastPt = null;
-                var lastNull = false;
-                for (var i = 0; i < t.data.length; i++) {
-                    var v = t.data[i];
-                    var x = W - (t.data.length - 1 - i) * step;
-                    var y = v === null ? TOP : yFor(v);
+                var lastPt = null, lastNull = false;
+                for (var i = 0; i < sr.length; i++) {
+                    var x = W - (sr.length - 1 - i) * step;
+                    if (sr[i].loss) lossXs[x.toFixed(1)] = 1;
+                    var y = sr[i].v === null ? TOP : yFor(sr[i].v);
                     pts.push(x.toFixed(1) + ',' + y.toFixed(1));
                     lastPt = [x, y];
-                    lastNull = (v === null);
+                    lastNull = (sr[i].v === null);
                 }
                 if (pts.length === 1) {
                     var xy = pts[0].split(',');
                     svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
-                } else {
+                } else if (pts.length > 1) {
                     svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
                 }
-                // live dot on the newest sample — red when currently timing out
                 if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + (lastNull ? '#ff1744' : t.color) + '"/>';
             });
+            // packet-loss tick marks along the bottom edge
+            Object.keys(lossXs).forEach(function(x) {
+                svg += '<line x1="' + x + '" y1="' + (H - 6) + '" x2="' + x + '" y2="' + H + '" stroke="#ff1744" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
+            });
             node.innerHTML = '';
+            // window selector + CSV export
+            var ctlRow = E('div', { style: 'display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-bottom: 6px;' });
+            Object.keys(PING_VIEWS).forEach(function(vk) {
+                var sel = vk === pingUI.view;
+                ctlRow.appendChild(E('button', {
+                    style: 'font-size: 0.72em; padding: 2px 9px; border-radius: 4px; cursor: pointer; border: 1px solid ' + (sel ? '#00bcd4' : 'var(--border-color, rgba(128,128,128,0.3))') + '; background: ' + (sel ? 'rgba(0,188,212,0.15)' : 'transparent') + '; color: ' + (sel ? '#00bcd4' : 'inherit') + ';',
+                    click: function() { pingUI.view = vk; repaintPing(); }
+                }, vk));
+            });
+            ctlRow.appendChild(E('button', {
+                style: 'font-size: 0.72em; padding: 2px 9px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: transparent; color: inherit; margin-left: 8px;',
+                click: function() {
+                    var head = ['offset_s'];
+                    var cols = [];
+                    keys.forEach(function(k) { head.push('"' + hist[k].label + '"'); cols.push(series[k]); });
+                    var maxLen = 0;
+                    cols.forEach(function(c) { maxLen = Math.max(maxLen, c.length); });
+                    var stepS = vw.raw ? 1 : vw.group * 10;
+                    var lines = [head.join(',')];
+                    for (var r = 0; r < maxLen; r++) {
+                        var row = [String(-(maxLen - 1 - r) * stepS)];
+                        cols.forEach(function(c) {
+                            var idx = r - (maxLen - c.length);
+                            var p = idx >= 0 ? c[idx] : null;
+                            row.push(p && p.v !== null ? p.v.toFixed(1) : '');
+                        });
+                        lines.push(row.join(','));
+                    }
+                    var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+                    var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-ping-' + pingUI.view + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+                }
+            }, '⤓ CSV'));
+            node.appendChild(ctlRow);
             var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
             var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
             svgWrap.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
             plot.appendChild(svgWrap);
-            // HTML overlays: ms labels on every gridline + scale bounds
             gridFracs.forEach(function(g) {
                 var topPct = ((TOP + plotH * (1 - g)) / H * 100).toFixed(1);
-                plot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55;' }, Math.round(ymax * g) + ' ms'));
+                plot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, Math.round(ymax * g) + ' ms'));
             });
-            plot.appendChild(E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55;' }, ymax + ' ms'));
+            plot.appendChild(E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, ymax + ' ms'));
+            // hover crosshair + tooltip
+            var xline = E('div', { style: 'position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); display: none; pointer-events: none;' });
+            var tip = E('div', { style: 'position: absolute; top: 6px; font-size: 0.72em; background: rgba(20,22,26,0.92); border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 6px 9px; display: none; pointer-events: none; z-index: 5; white-space: nowrap;' });
+            plot.appendChild(xline);
+            plot.appendChild(tip);
+            plot.addEventListener('mousemove', function(ev) {
+                var rect = plot.getBoundingClientRect();
+                var frac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                var idx = Math.round(frac * (vw.pts - 1));
+                var stepS = vw.raw ? 1 : vw.group * 10;
+                var px = (idx / (vw.pts - 1)) * rect.width;
+                xline.style.left = px + 'px';
+                xline.style.display = 'block';
+                tip.innerHTML = '';
+                tip.appendChild(E('div', { style: 'opacity: 0.6; margin-bottom: 3px;' }, '−' + ((vw.pts - 1 - idx) * stepS) + ' s'));
+                keys.forEach(function(k) {
+                    if (hist[k].hidden) return;
+                    var sr = series[k];
+                    var si = idx - (vw.pts - sr.length);
+                    var p = si >= 0 && si < sr.length ? sr[si] : null;
+                    var val = !p ? '—' : (p.v === null ? 'timeout' : p.v.toFixed(1) + ' ms');
+                    tip.appendChild(E('div', { style: 'display: flex; align-items: center; gap: 5px;' }, [
+                        E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; background: ' + hist[k].color + ';' }),
+                        E('span', { style: 'opacity: 0.75;' }, hist[k].label),
+                        E('span', { style: 'font-weight: 600; color: ' + (p && p.v === null ? '#ff5252' : hist[k].color) + '; margin-left: auto; padding-left: 8px;' }, val)
+                    ]));
+                });
+                tip.style.display = 'block';
+                tip.style.left = (px < rect.width / 2 ? px + 12 : px - tip.offsetWidth - 12) + 'px';
+            });
+            plot.addEventListener('mouseleave', function() {
+                xline.style.display = 'none';
+                tip.style.display = 'none';
+            });
             node.appendChild(plot);
-            // time axis
             node.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
-                E('span', {}, '\u2212' + PING_WINDOW + ' s'),
+                E('span', {}, vw.label),
                 E('span', {}, 'now')
             ]));
+            // legend — click an entry to hide/show its line
             var legend = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 10px;' });
             keys.forEach(function(k) {
                 var t = hist[k];
                 var last = t.data.length ? t.data[t.data.length - 1] : null;
-                var sum = 0, n = 0, lost = 0;
-                t.data.forEach(function(v) { if (v !== null) { sum += v; n++; } else { lost++; } });
-                var avg = n ? (sum / n) : null;
-                var dead = n === 0 && t.data.length >= 3;
+                var okCnt = 0;
+                t.data.forEach(function(v) { if (v !== null) okCnt++; });
+                var dead = okCnt === 0 && t.data.length >= 3;
                 var valTxt = dead ? 'N/A' : (last === null ? 'timeout' : last.toFixed(1) + ' ms');
                 var valColor = dead ? '#9e9e9e' : (last === null ? '#ff5252' : t.color);
-                var extra = '';
-                if (!dead && avg !== null) {
-                    extra = 'avg ' + avg.toFixed(0);
-                    if (lost > 0) extra += ' \u00b7 ' + Math.round(lost / t.data.length * 100) + '% loss';
-                }
-                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em;' + (dead ? ' opacity: 0.55;' : '') }, [
+                legend.appendChild(E('span', {
+                    style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em; cursor: pointer; user-select: none;' + (t.hidden ? ' opacity: 0.35;' : (dead ? ' opacity: 0.55;' : '')),
+                    title: 'Click to ' + (t.hidden ? 'show' : 'hide'),
+                    click: function() { t.hidden = !t.hidden; repaintPing(); }
+                }, [
                     E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + (dead ? '#9e9e9e' : t.color) + '; flex-shrink: 0;' }),
-                    E('span', { style: 'opacity: 0.8;' }, t.label),
-                    E('span', { style: 'font-weight: 600; color: ' + valColor + ';' }, valTxt),
-                    extra ? E('span', { style: 'opacity: 0.5; font-size: 0.9em;' }, extra) : ''
+                    E('span', { style: 'opacity: 0.8;' + (t.hidden ? ' text-decoration: line-through;' : '') }, t.label),
+                    E('span', { style: 'font-weight: 600; color: ' + valColor + ';' }, valTxt)
                 ]));
             });
             node.appendChild(legend);
+            // per-target stats table over the displayed window
+            var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
+            var tbl = E('table', { style: 'width: 100%; min-width: 480px; border-collapse: collapse; font-size: 0.78em;' });
+            var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
+            tbl.appendChild(E('tr', {}, [
+                E('th', { style: thStyle + 'text-align: left;' }, 'Target'),
+                E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
+                E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
+                E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
+                E('th', { style: thStyle }, 'loss')
+            ]));
+            keys.forEach(function(k) {
+                var t = hist[k];
+                var sr = series[k];
+                var vals = [], lostSamples = 0, totSamples = 0;
+                sr.forEach(function(p) { if (p.v !== null) vals.push(p.v); lostSamples += p.lostN; totSamples += p.cnt; });
+                vals.sort(function(a, b) { return a - b; });
+                var sum = 0;
+                vals.forEach(function(v) { sum += v; });
+                // jitter: mean absolute successive difference over the RAW window
+                var jit = null, jn = 0, prevV = null;
+                t.data.forEach(function(v) {
+                    if (v !== null && prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
+                    if (v !== null) prevV = v;
+                });
+                var last = t.data.length ? t.data[t.data.length - 1] : null;
+                var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
+                var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
+                var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
+                tbl.appendChild(E('tr', { style: (t.hidden ? 'opacity: 0.35;' : '') }, [
+                    E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap;' }, t.label),
+                    E('td', { style: tdS }, last === null ? 'TO' : fmt(last)),
+                    E('td', { style: tdS }, fmt(vals.length ? vals[0] : null)),
+                    E('td', { style: tdS }, fmt(vals.length ? sum / vals.length : null)),
+                    E('td', { style: tdS }, fmt(pingPct(vals, 0.95))),
+                    E('td', { style: tdS }, fmt(vals.length ? vals[vals.length - 1] : null)),
+                    E('td', { style: tdS }, jn > 0 ? (jit / jn).toFixed(1) : '—'),
+                    E('td', { style: tdS + (lossPct > 0 ? ' color: #ff5252;' : '') }, lossPct + '%')
+                ]));
+            });
+            tblWrap.appendChild(tbl);
+            node.appendChild(tblWrap);
         };
         // PING_GRAPH_END
 
@@ -817,13 +970,27 @@ return view.extend({
                     var key = t.host + '/v' + t.fam;
                     if (!hist[key]) {
                         hist[key] = {
-                            label: t.host + ' (v' + t.fam + ')',
+                            label: (res.gateway && t.host === res.gateway) ? 'Gateway (' + t.host + ')' : t.host + ' (v' + t.fam + ')',
                             color: PING_COLORS[Object.keys(hist).length % PING_COLORS.length],
-                            data: []
+                            hidden: false,
+                            data: [],
+                            agg: [],
+                            acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
                         };
                     }
-                    hist[key].data.push(typeof t.ms === 'number' ? t.ms : null);
-                    if (hist[key].data.length > PING_WINDOW) hist[key].data.shift();
+                    var h = hist[key];
+                    var v = typeof t.ms === 'number' ? t.ms : null;
+                    h.data.push(v);
+                    if (h.data.length > PING_WINDOW) h.data.shift();
+                    // 10s aggregation buckets feed the 15m/1h/3h views
+                    h.acc.cnt++;
+                    if (v === null) h.acc.loss++;
+                    else { h.acc.sum += v; h.acc.n++; }
+                    if (h.acc.cnt >= 10) {
+                        h.agg.push({ a: h.acc.n > 0 ? h.acc.sum / h.acc.n : null, n: h.acc.n, loss: h.acc.loss });
+                        if (h.agg.length > PING_AGG_KEEP) h.agg.shift();
+                        h.acc = { sum: 0, n: 0, loss: 0, cnt: 0 };
+                    }
                 });
                 // Bufferbloat: compare median latency while the WAN is under
                 // sustained load vs idle. Zero extra probes — reuses the ping
@@ -845,10 +1012,14 @@ return view.extend({
                     var med = function(a) { a = a.slice().sort(function(x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
                     var bbTxt, bbColor;
                     if (idleV.length >= 10 && loadV.length >= 5) {
-                        var delta = Math.max(0, med(loadV) - med(idleV));
+                        // p95 under load vs idle median — jitter-aware, closer to
+                        // how Waveform grades it than a median-vs-median compare.
+                        var lSorted = loadV.slice().sort(function(x, y) { return x - y; });
+                        var p95Load = lSorted[Math.min(lSorted.length - 1, Math.floor(lSorted.length * 0.95))];
+                        var delta = Math.max(0, p95Load - med(idleV));
                         var grade = delta < 5 ? 'A+' : delta < 30 ? 'A' : delta < 60 ? 'B' : delta < 100 ? 'C' : delta < 200 ? 'D' : 'F';
                         bbColor = delta < 30 ? '#00bcd4' : delta < 60 ? '#8bc34a' : delta < 100 ? '#ffb300' : '#ff5252';
-                        bbTxt = 'Bufferbloat: ' + grade + ' (+' + delta.toFixed(0) + ' ms under load)';
+                        bbTxt = 'Bufferbloat: ' + grade + ' (+' + delta.toFixed(0) + ' ms p95 under load)';
                     } else {
                         bbColor = '#9e9e9e';
                         bbTxt = 'Bufferbloat: measuring \u2014 needs sustained WAN load';
