@@ -11,6 +11,7 @@ var callHwInfo = rpc.declare({
 var callHwPing = rpc.declare({
     object: 'luci.hwdash',
     method: 'ping',
+    params: ['targets'],
     expect: {}
 });
 var parseCpu = function(line) {
@@ -234,11 +235,11 @@ return view.extend({
         };
         // PING_GRAPH_START (marker used by the test harness)
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
-        var PING_WINDOW = 90;
+        var PING_WINDOW = 120;
         var renderPingGraph = function(node, hist) {
             var keys = Object.keys(hist);
             if (keys.length === 0) return;
-            var W = 600, H = 150, TOP = 8, BOT = 4;
+            var W = 600, H = 190, TOP = 6, BOT = 4;
             // Y scale: 95th percentile * 1.5 (20 ms floor) so isolated spikes
             // clip at the top instead of squashing the baseline detail.
             var all = [];
@@ -255,52 +256,71 @@ return view.extend({
             var plotH = H - TOP - BOT;
             var step = W / (PING_WINDOW - 1);
             var svg = '';
-            // gridlines at 25/50/75%
-            [0.25, 0.5, 0.75].forEach(function(g) {
+            var yFor = function(v) { return TOP + plotH * (1 - Math.min(v, ymax) / ymax); };
+            // labeled gridlines every 25%
+            var gridFracs = [0.25, 0.5, 0.75];
+            gridFracs.forEach(function(g) {
                 var gy = (TOP + plotH * (1 - g)).toFixed(1);
-                svg += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="rgba(128,128,128,0.15)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+                svg += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
             });
             keys.forEach(function(k) {
                 var t = hist[k];
                 var runs = [];
                 var run = [];
+                var lastPt = null;
                 for (var i = 0; i < t.data.length; i++) {
                     var v = t.data[i];
                     var x = W - (t.data.length - 1 - i) * step;
                     if (v === null) {
                         if (run.length) { runs.push(run); run = []; }
                     } else {
-                        var y = TOP + plotH * (1 - Math.min(v, ymax) / ymax);
+                        var y = yFor(v);
                         run.push(x.toFixed(1) + ',' + y.toFixed(1));
+                        lastPt = [x, y];
                     }
                 }
                 if (run.length) runs.push(run);
                 runs.forEach(function(r) {
                     if (r.length === 1) {
                         var xy = r[0].split(',');
-                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2" fill="' + t.color + '"/>';
+                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
                     } else {
-                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + r.join(' ') + '"/>';
+                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + r.join(' ') + '"/>';
                     }
                 });
+                // live dot on the newest sample
+                if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + t.color + '"/>';
             });
             node.innerHTML = '';
-            var plot = E('div', { style: 'position: relative; width: 100%;' });
+            var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
             var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
             svgWrap.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
             plot.appendChild(svgWrap);
-            plot.appendChild(E('span', { style: 'position: absolute; top: 0; left: 4px; font-size: 0.7em; opacity: 0.5;' }, ymax + ' ms'));
-            plot.appendChild(E('span', { style: 'position: absolute; bottom: 0; left: 4px; font-size: 0.7em; opacity: 0.5;' }, '0'));
+            // HTML overlays: ms labels on every gridline + scale bounds
+            gridFracs.forEach(function(g) {
+                var topPct = ((TOP + plotH * (1 - g)) / H * 100).toFixed(1);
+                plot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55;' }, Math.round(ymax * g) + ' ms'));
+            });
+            plot.appendChild(E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55;' }, ymax + ' ms'));
             node.appendChild(plot);
-            var legend = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin-top: 10px;' });
+            // time axis
+            node.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
+                E('span', {}, '\u2212' + PING_WINDOW + ' s'),
+                E('span', {}, 'now')
+            ]));
+            var legend = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 10px;' });
             keys.forEach(function(k) {
                 var t = hist[k];
                 var last = t.data.length ? t.data[t.data.length - 1] : null;
+                var sum = 0, n = 0;
+                t.data.forEach(function(v) { if (v !== null) { sum += v; n++; } });
+                var avg = n ? (sum / n) : null;
                 var valTxt = last === null ? 'timeout' : last.toFixed(1) + ' ms';
-                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.8em;' }, [
-                    E('span', { style: 'width: 9px; height: 9px; border-radius: 50%; background: ' + t.color + '; flex-shrink: 0;' }),
+                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em;' }, [
+                    E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + t.color + '; flex-shrink: 0;' }),
                     E('span', { style: 'opacity: 0.8;' }, t.label),
-                    E('span', { style: 'font-weight: 600; color: ' + (last === null ? '#ff5252' : t.color) + ';' }, valTxt)
+                    E('span', { style: 'font-weight: 600; color: ' + (last === null ? '#ff5252' : t.color) + ';' }, valTxt),
+                    avg !== null ? E('span', { style: 'opacity: 0.5; font-size: 0.9em;' }, 'avg ' + avg.toFixed(0)) : ''
                 ]));
             });
             node.appendChild(legend);
@@ -535,7 +555,7 @@ return view.extend({
         var pingCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('h3', {}, 'Ping Latency'),
             E('div', { id: 'hw-ping', style: 'width: 100%;' }),
-            E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Custom targets: /etc/hwdash-ping.targets — one "host 4|6" per line')
+            E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
 
@@ -564,11 +584,145 @@ return view.extend({
         container.appendChild(wifiCard);
         container.appendChild(thermWrapper);
         var self = this;
+
+        // ---------- Settings (persisted per-browser in localStorage) ----------
+        var loadLS = function(key, dflt) {
+            try {
+                var v = JSON.parse(localStorage.getItem(key));
+                return v == null ? dflt : v;
+            } catch (e) { return dflt; }
+        };
+        var saveLS = function(key, val) {
+            try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+        };
+        self.hiddenCards = loadLS('hwdash.hiddenCards', []);
+        self.pingTargets = loadLS('hwdash.pingTargets', []);
+
+        // Card registry: which container node(s) a settings checkbox controls.
+        // "show" is the display value to restore on unhide for cards that are
+        // unconditionally visible; conditional cards are re-shown by their own
+        // poll logic on the next tick.
+        var cardRegistry = {
+            sysinfo: { nodes: [sysCard], label: 'System Info', show: 'flex' },
+            cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
+            ram: { nodes: [ramCard.node], label: 'Memory', show: 'flex' },
+            load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
+            hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
+            storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
+            ext: { nodes: [extCard, myExtWrapper], label: 'External Storage', show: null },
+            ports: { nodes: [ethCard], label: 'Ports Topology', show: null },
+            pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
+            ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
+            wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
+            thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' }
+        };
+        var applyCardVisibility = function() {
+            for (var key in cardRegistry) {
+                var c = cardRegistry[key];
+                var hidden = self.hiddenCards.indexOf(key) !== -1;
+                c.nodes.forEach(function(n) {
+                    if (hidden) n.style.display = 'none';
+                    else if (c.show) n.style.display = c.show;
+                });
+            }
+        };
+
+        var settingsPanel = E('div', {
+            class: 'cbi-section',
+            style: 'display: none; width: 100%; padding: 14px 18px; border: 1px solid var(--border-color, rgba(128,128,128,0.25)); border-radius: 8px; background: var(--background-color-high, rgba(128,128,128,0.05));'
+        });
+        settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Visible Cards'));
+        var cardChecks = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' });
+        Object.keys(cardRegistry).forEach(function(key) {
+            var cb = E('input', {
+                type: 'checkbox',
+                change: function(ev) {
+                    var idx = self.hiddenCards.indexOf(key);
+                    if (ev.target.checked && idx !== -1) self.hiddenCards.splice(idx, 1);
+                    else if (!ev.target.checked && idx === -1) self.hiddenCards.push(key);
+                    saveLS('hwdash.hiddenCards', self.hiddenCards);
+                    applyCardVisibility();
+                }
+            });
+            cb.checked = self.hiddenCards.indexOf(key) === -1;
+            cardChecks.appendChild(E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, cardRegistry[key].label]));
+        });
+        settingsPanel.appendChild(cardChecks);
+
+        settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Ping Targets'));
+        var targetList = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;' });
+        var renderTargetList = function() {
+            targetList.innerHTML = '';
+            if (self.pingTargets.length === 0) {
+                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'Using defaults: dns.google (v4+v6), one.one.one.one (v4+v6), google.com, youtube.com'));
+                return;
+            }
+            self.pingTargets.forEach(function(t, i) {
+                targetList.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: rgba(128,128,128,0.08);' }, [
+                    E('span', {}, t.host + ' (IPv' + t.fam + ')'),
+                    E('a', {
+                        style: 'cursor: pointer; color: #ff5252; font-weight: bold; text-decoration: none;',
+                        click: function() {
+                            self.pingTargets.splice(i, 1);
+                            saveLS('hwdash.pingTargets', self.pingTargets);
+                            self.pingHist = {};
+                            renderTargetList();
+                        }
+                    }, '\u00d7')
+                ]));
+            });
+        };
+        renderTargetList();
+        settingsPanel.appendChild(targetList);
+        var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'host or IP (e.g. quad9.net)', style: 'width: 220px; max-width: 60%;' });
+        var tgtFam = E('select', { class: 'cbi-input-select' }, [
+            E('option', { value: '4' }, 'IPv4'),
+            E('option', { value: '6' }, 'IPv6')
+        ]);
+        var addTarget = function() {
+            var h = tgtInput.value.trim();
+            if (!h || !/^[A-Za-z0-9.:-]+$/.test(h)) { tgtInput.style.borderColor = '#ff5252'; return; }
+            tgtInput.style.borderColor = '';
+            self.pingTargets.push({ host: h, fam: parseInt(tgtFam.value) });
+            saveLS('hwdash.pingTargets', self.pingTargets);
+            self.pingHist = {};
+            tgtInput.value = '';
+            renderTargetList();
+        };
+        settingsPanel.appendChild(E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
+            tgtInput, tgtFam,
+            E('button', { class: 'cbi-button cbi-button-add', click: addTarget }, 'Add'),
+            E('button', {
+                class: 'cbi-button cbi-button-reset',
+                click: function() {
+                    self.pingTargets = [];
+                    saveLS('hwdash.pingTargets', self.pingTargets);
+                    self.pingHist = {};
+                    renderTargetList();
+                }
+            }, 'Reset to defaults')
+        ]));
+
+        var settingsBtn = E('button', {
+            class: 'cbi-button',
+            style: 'padding: 4px 14px;',
+            click: function() {
+                settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
+            }
+        }, '\u2699 Settings');
+        var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
+        container.insertBefore(settingsPanel, sysCard);
+        container.insertBefore(settingsRow, settingsPanel);
+        applyCardVisibility();
+
         poll.add(function() {
             // Same hidden-tab rule as the main poll: no pings for a dashboard
             // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
-            return callHwPing().then(function(res) {
+            var custom = (self.pingTargets && self.pingTargets.length > 0)
+                ? self.pingTargets.map(function(t) { return t.host + ' ' + t.fam; })
+                : undefined;
+            return callHwPing(custom).then(function(res) {
                 if (!res || !res.targets || res.targets.length === 0) return;
                 if (!self.pingHist) self.pingHist = {};
                 var hist = self.pingHist;
@@ -589,8 +743,9 @@ return view.extend({
                     renderPingGraph(pgNode, hist);
                     pingCard.style.display = 'flex';
                 }
+                applyCardVisibility();
             }).catch(function() {});
-        }, 3);
+        }, 1);
 
         poll.add(function() {
             // Skip the RPC entirely while the tab is hidden — the router does
@@ -1800,9 +1955,14 @@ return view.extend({
                                 if (wc > 0) wRow.appendChild(E('div', { class: 'hw-thermals-divider' }));
                                 var wCls = 'hw-thermals-col';
                                 if (wNCols > 1) wCls += wc === 0 ? ' hw-thermals-col-left' : wc === wNCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
-                                var wCol = E('div', { class: wCls, style: 'min-width: 0;' });
+                                var wCol = E('div', { class: wCls, style: 'min-width: 0; display: flex; flex-direction: column;' });
                                 wCol.appendChild(E('div', { class: 'hw-thermals-title' }, b === 'Other' ? 'OTHER' : b.toUpperCase()));
-                                bandGroups[b].forEach(function(box) { wCol.appendChild(box); });
+                                bandGroups[b].forEach(function(box) {
+                                    // equal-height boxes: each radio stretches to share
+                                    // the column, so side-by-side bands line up.
+                                    box.style.flex = '1 1 0';
+                                    wCol.appendChild(box);
+                                });
                                 wRow.appendChild(wCol);
                             });
                             wfNode.appendChild(wRow);
@@ -1901,6 +2061,7 @@ return view.extend({
                     }
                 }
 
+                applyCardVisibility();
             }).catch(function(err) {
                 console.error(err);
             });

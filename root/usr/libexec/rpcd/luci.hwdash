@@ -79,16 +79,33 @@ case "$1" in
 	call)
 		case "$2" in
 			ping)
-				# Router-side latency probes. Default targets below; the user
-				# can override them with /etc/hwdash-ping.targets — one
-				# "<host> <4|6>" pair per line (file survives upgrades).
+				# Router-side latency probes. Target list priority:
+				#   1. "targets" array in the RPC args (set from the dashboard
+				#      settings panel, stored per-browser) — "<host> <4|6>"
+				#   2. /etc/hwdash-ping.targets, one "<host> <4|6>" per line
+				#   3. built-in defaults
 				# All pings run in parallel with a 1s timeout, so the call
 				# returns in ~RTT of the slowest target, never serially.
-				_PT_FILE=/etc/hwdash-ping.targets
 				_PT_LIST=""
-				if [ -f "$_PT_FILE" ]; then
+				_IN=""
+				IFS= read -r _IN 2>/dev/null
+				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
+					while read -r _pt_h _pt_f _; do
+						[ -z "$_pt_h" ] && continue
+						# hosts feed a command line — allow hostname/IP chars only
+						case "$_pt_h" in *[!A-Za-z0-9.:-]*) continue ;; esac
+						case "$_pt_f" in 4|6) ;; *) _pt_f=4 ;; esac
+						_PT_LIST="$_PT_LIST$_pt_h $_pt_f
+"
+					done <<EOF
+$(printf '%s' "$_IN" | jsonfilter -e '@.targets[*]' 2>/dev/null)
+EOF
+				fi
+				_PT_FILE=/etc/hwdash-ping.targets
+				if [ -z "$_PT_LIST" ] && [ -f "$_PT_FILE" ]; then
 					while read -r _pt_h _pt_f _; do
 						case "$_pt_h" in ''|'#'*) continue ;; esac
+						case "$_pt_h" in *[!A-Za-z0-9.:-]*) continue ;; esac
 						case "$_pt_f" in 4|6) ;; *) _pt_f=4 ;; esac
 						_PT_LIST="$_PT_LIST$_pt_h $_pt_f
 "
