@@ -8,6 +8,11 @@ var callHwInfo = rpc.declare({
     method: 'info',
     expect: {}
 });
+var callHwPing = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'ping',
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -227,6 +232,81 @@ return view.extend({
                 style: 'width: ' + pct + '%; background: ' + colorMem + ';'
             })])]);
         };
+        // PING_GRAPH_START (marker used by the test harness)
+        var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
+        var PING_WINDOW = 90;
+        var renderPingGraph = function(node, hist) {
+            var keys = Object.keys(hist);
+            if (keys.length === 0) return;
+            var W = 600, H = 150, TOP = 8, BOT = 4;
+            // Y scale: 95th percentile * 1.5 (20 ms floor) so isolated spikes
+            // clip at the top instead of squashing the baseline detail.
+            var all = [];
+            keys.forEach(function(k) {
+                hist[k].data.forEach(function(v) { if (v !== null) all.push(v); });
+            });
+            var ymax = 20;
+            if (all.length) {
+                all.sort(function(a, b) { return a - b; });
+                var p95 = all[Math.min(all.length - 1, Math.floor(all.length * 0.95))];
+                ymax = Math.max(20, Math.min(all[all.length - 1], p95 * 1.5));
+            }
+            ymax = Math.ceil(ymax / 10) * 10;
+            var plotH = H - TOP - BOT;
+            var step = W / (PING_WINDOW - 1);
+            var svg = '';
+            // gridlines at 25/50/75%
+            [0.25, 0.5, 0.75].forEach(function(g) {
+                var gy = (TOP + plotH * (1 - g)).toFixed(1);
+                svg += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="rgba(128,128,128,0.15)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+            });
+            keys.forEach(function(k) {
+                var t = hist[k];
+                var runs = [];
+                var run = [];
+                for (var i = 0; i < t.data.length; i++) {
+                    var v = t.data[i];
+                    var x = W - (t.data.length - 1 - i) * step;
+                    if (v === null) {
+                        if (run.length) { runs.push(run); run = []; }
+                    } else {
+                        var y = TOP + plotH * (1 - Math.min(v, ymax) / ymax);
+                        run.push(x.toFixed(1) + ',' + y.toFixed(1));
+                    }
+                }
+                if (run.length) runs.push(run);
+                runs.forEach(function(r) {
+                    if (r.length === 1) {
+                        var xy = r[0].split(',');
+                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2" fill="' + t.color + '"/>';
+                    } else {
+                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + r.join(' ') + '"/>';
+                    }
+                });
+            });
+            node.innerHTML = '';
+            var plot = E('div', { style: 'position: relative; width: 100%;' });
+            var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
+            svgWrap.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
+            plot.appendChild(svgWrap);
+            plot.appendChild(E('span', { style: 'position: absolute; top: 0; left: 4px; font-size: 0.7em; opacity: 0.5;' }, ymax + ' ms'));
+            plot.appendChild(E('span', { style: 'position: absolute; bottom: 0; left: 4px; font-size: 0.7em; opacity: 0.5;' }, '0'));
+            node.appendChild(plot);
+            var legend = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin-top: 10px;' });
+            keys.forEach(function(k) {
+                var t = hist[k];
+                var last = t.data.length ? t.data[t.data.length - 1] : null;
+                var valTxt = last === null ? 'timeout' : last.toFixed(1) + ' ms';
+                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.8em;' }, [
+                    E('span', { style: 'width: 9px; height: 9px; border-radius: 50%; background: ' + t.color + '; flex-shrink: 0;' }),
+                    E('span', { style: 'opacity: 0.8;' }, t.label),
+                    E('span', { style: 'font-weight: 600; color: ' + (last === null ? '#ff5252' : t.color) + ';' }, valTxt)
+                ]));
+            });
+            node.appendChild(legend);
+        };
+        // PING_GRAPH_END
+
         var makeSensorRow = function(s) {
             // Color thresholds come from the sensor's own trip points
             // when the hardware exposes them (per-architecture dynamic);
@@ -452,6 +532,11 @@ return view.extend({
 
         
         
+        var pingCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'Ping Latency'),
+            E('div', { id: 'hw-ping', style: 'width: 100%;' }),
+            E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Custom targets: /etc/hwdash-ping.targets — one "host 4|6" per line')
+        ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
 
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
@@ -475,9 +560,38 @@ return view.extend({
         container.appendChild(myExtWrapper);
         container.appendChild(ethCard);
         container.appendChild(pcieCard);
+        container.appendChild(pingCard);
         container.appendChild(wifiCard);
         container.appendChild(thermWrapper);
         var self = this;
+        poll.add(function() {
+            // Same hidden-tab rule as the main poll: no pings for a dashboard
+            // nobody is looking at. History simply resumes on return.
+            if (document.hidden) return Promise.resolve();
+            return callHwPing().then(function(res) {
+                if (!res || !res.targets || res.targets.length === 0) return;
+                if (!self.pingHist) self.pingHist = {};
+                var hist = self.pingHist;
+                res.targets.forEach(function(t, i) {
+                    var key = t.host + '/v' + t.fam;
+                    if (!hist[key]) {
+                        hist[key] = {
+                            label: t.host + ' (v' + t.fam + ')',
+                            color: PING_COLORS[Object.keys(hist).length % PING_COLORS.length],
+                            data: []
+                        };
+                    }
+                    hist[key].data.push(typeof t.ms === 'number' ? t.ms : null);
+                    if (hist[key].data.length > PING_WINDOW) hist[key].data.shift();
+                });
+                var pgNode = document.getElementById('hw-ping');
+                if (pgNode) {
+                    renderPingGraph(pgNode, hist);
+                    pingCard.style.display = 'flex';
+                }
+            }).catch(function() {});
+        }, 3);
+
         poll.add(function() {
             // Skip the RPC entirely while the tab is hidden — the router does
             // no collection work for dashboards nobody is looking at.
