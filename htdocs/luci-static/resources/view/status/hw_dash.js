@@ -1995,7 +1995,7 @@ return view.extend({
                             var et = res.ethtool && res.ethtool[l.iface];
                             if (et && st !== 'Down') {
                                 var eeeCol = et.eee === 'active' ? '#ffb300' : '';
-                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '') + (et.drv ? ' \u00b7 ' + et.drv + (et.fw ? ' fw ' + et.fw : '') : '');
+                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '') + (et.drv ? ' \u00b7 ' + et.drv + (et.fw && et.fw !== 'N/A' ? ' fw ' + et.fw : '') : '');
                                 box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;' }, [
                                     E('span', {}, 'PHY:'),
                                     E('span', { style: eeeCol ? 'color:' + eeeCol + ';' : '' }, etStr)

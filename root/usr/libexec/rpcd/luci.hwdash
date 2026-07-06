@@ -262,7 +262,8 @@ EOF
 				MEM_PHYS_MB=0
 				for _mr in /proc/device-tree/memory/reg /proc/device-tree/memory@*/reg; do
 					[ -f "$_mr" ] || continue
-					set -- $(od -A n -t x1 "$_mr" 2>/dev/null)
+					# busybox on OpenWrt ships hexdump but not od; prefer it
+					set -- $(hexdump -v -e '1/1 " %02x"' "$_mr" 2>/dev/null || od -A n -t x1 "$_mr" 2>/dev/null)
 					if [ $(( $# % 16 )) -eq 0 ]; then _cw=8; else _cw=4; fi
 					while [ $# -ge $((_cw * 2)) ]; do
 						_sk=0
