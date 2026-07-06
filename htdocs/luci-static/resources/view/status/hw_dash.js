@@ -14,6 +14,17 @@ var callHwPing = rpc.declare({
     params: ['targets'],
     expect: {}
 });
+var callHwGetConfig = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'get_config',
+    expect: {}
+});
+var callHwSetConfig = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'set_config',
+    params: ['config'],
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -36,14 +47,17 @@ return view.extend({
     load: function() {
         var self = this;
         self.prevCpu = {};
-        return L.resolveDefault(fs.lines('/proc/stat'), []).then(function(lines) {
-            lines.forEach(function(line) {
+        return Promise.all([
+            L.resolveDefault(fs.lines('/proc/stat'), []),
+            L.resolveDefault(callHwGetConfig(), {})
+        ]).then(function(res) {
+            res[0].forEach(function(line) {
                 if (line.indexOf('cpu') === 0) {
                     var stat = parseCpu(line);
                     self.prevCpu[stat.name] = stat;
                 }
             });
-            return Promise.resolve();
+            self.savedConfig = res[1] || {};
         });
     },
     render: function() {
@@ -265,31 +279,32 @@ return view.extend({
             });
             keys.forEach(function(k) {
                 var t = hist[k];
-                var runs = [];
-                var run = [];
+                // A target with no successful sample at all (e.g. no IPv6
+                // uplink) gets no line — the legend shows N/A instead of a
+                // flatline pinned to the ceiling.
+                var anyOk = t.data.some(function(v) { return v !== null; });
+                if (!anyOk) return;
+                // Timeouts spike to the top of the plot (prosumer-router
+                // style) so packet loss is unmissable — no gaps in the line.
+                var pts = [];
                 var lastPt = null;
+                var lastNull = false;
                 for (var i = 0; i < t.data.length; i++) {
                     var v = t.data[i];
                     var x = W - (t.data.length - 1 - i) * step;
-                    if (v === null) {
-                        if (run.length) { runs.push(run); run = []; }
-                    } else {
-                        var y = yFor(v);
-                        run.push(x.toFixed(1) + ',' + y.toFixed(1));
-                        lastPt = [x, y];
-                    }
+                    var y = v === null ? TOP : yFor(v);
+                    pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+                    lastPt = [x, y];
+                    lastNull = (v === null);
                 }
-                if (run.length) runs.push(run);
-                runs.forEach(function(r) {
-                    if (r.length === 1) {
-                        var xy = r[0].split(',');
-                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
-                    } else {
-                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + r.join(' ') + '"/>';
-                    }
-                });
-                // live dot on the newest sample
-                if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + t.color + '"/>';
+                if (pts.length === 1) {
+                    var xy = pts[0].split(',');
+                    svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
+                } else {
+                    svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
+                }
+                // live dot on the newest sample — red when currently timing out
+                if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + (lastNull ? '#ff1744' : t.color) + '"/>';
             });
             node.innerHTML = '';
             var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
@@ -312,15 +327,22 @@ return view.extend({
             keys.forEach(function(k) {
                 var t = hist[k];
                 var last = t.data.length ? t.data[t.data.length - 1] : null;
-                var sum = 0, n = 0;
-                t.data.forEach(function(v) { if (v !== null) { sum += v; n++; } });
+                var sum = 0, n = 0, lost = 0;
+                t.data.forEach(function(v) { if (v !== null) { sum += v; n++; } else { lost++; } });
                 var avg = n ? (sum / n) : null;
-                var valTxt = last === null ? 'timeout' : last.toFixed(1) + ' ms';
-                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em;' }, [
-                    E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + t.color + '; flex-shrink: 0;' }),
+                var dead = n === 0 && t.data.length >= 3;
+                var valTxt = dead ? 'N/A' : (last === null ? 'timeout' : last.toFixed(1) + ' ms');
+                var valColor = dead ? '#9e9e9e' : (last === null ? '#ff5252' : t.color);
+                var extra = '';
+                if (!dead && avg !== null) {
+                    extra = 'avg ' + avg.toFixed(0);
+                    if (lost > 0) extra += ' \u00b7 ' + Math.round(lost / t.data.length * 100) + '% loss';
+                }
+                legend.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em;' + (dead ? ' opacity: 0.55;' : '') }, [
+                    E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + (dead ? '#9e9e9e' : t.color) + '; flex-shrink: 0;' }),
                     E('span', { style: 'opacity: 0.8;' }, t.label),
-                    E('span', { style: 'font-weight: 600; color: ' + (last === null ? '#ff5252' : t.color) + ';' }, valTxt),
-                    avg !== null ? E('span', { style: 'opacity: 0.5; font-size: 0.9em;' }, 'avg ' + avg.toFixed(0)) : ''
+                    E('span', { style: 'font-weight: 600; color: ' + valColor + ';' }, valTxt),
+                    extra ? E('span', { style: 'opacity: 0.5; font-size: 0.9em;' }, extra) : ''
                 ]));
             });
             node.appendChild(legend);
@@ -592,11 +614,39 @@ return view.extend({
                 return v == null ? dflt : v;
             } catch (e) { return dflt; }
         };
-        var saveLS = function(key, val) {
-            try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+        // Settings live on the ROUTER (set_config -> /etc/hwdash-settings.json)
+        // so they follow the device like normal LuCI config. localStorage is
+        // only read once to migrate pre-existing browser-side settings.
+        var savedCfg = self.savedConfig || {};
+        self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
+        self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
+        var saveConfig = function() {
+            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets }).catch(function() {});
         };
-        self.hiddenCards = loadLS('hwdash.hiddenCards', []);
-        self.pingTargets = loadLS('hwdash.pingTargets', []);
+        if (!Array.isArray(savedCfg.hidden) && (self.hiddenCards.length > 0 || self.pingTargets.length > 0)) {
+            saveConfig(); // one-time migration of old browser-side settings
+        }
+        // Defaults are ALWAYS pinged; user targets are added on top of them.
+        var DEFAULT_PING_TARGETS = [
+            { host: 'dns.google', fam: 4 }, { host: 'dns.google', fam: 6 },
+            { host: 'one.one.one.one', fam: 4 }, { host: 'one.one.one.one', fam: 6 },
+            { host: 'google.com', fam: 4 }, { host: 'youtube.com', fam: 4 }
+        ];
+        var expandFams = function(t) { return String(t.fam) === 'both' ? [4, 6] : [parseInt(t.fam) === 6 ? 6 : 4]; };
+        var pingTargetPairs = function() {
+            // defaults + customs, de-duplicated by host+family
+            var seen = {};
+            var pairs = [];
+            DEFAULT_PING_TARGETS.concat(self.pingTargets).forEach(function(t) {
+                expandFams(t).forEach(function(fam) {
+                    var key = t.host + '|' + fam;
+                    if (seen[key]) return;
+                    seen[key] = true;
+                    pairs.push(t.host + ' ' + fam);
+                });
+            });
+            return pairs;
+        };
 
         // Card registry: which container node(s) a settings checkbox controls.
         // "show" is the display value to restore on unhide for cards that are
@@ -640,7 +690,7 @@ return view.extend({
                     var idx = self.hiddenCards.indexOf(key);
                     if (ev.target.checked && idx !== -1) self.hiddenCards.splice(idx, 1);
                     else if (!ev.target.checked && idx === -1) self.hiddenCards.push(key);
-                    saveLS('hwdash.hiddenCards', self.hiddenCards);
+                    saveConfig();
                     applyCardVisibility();
                 }
             });
@@ -654,17 +704,18 @@ return view.extend({
         var renderTargetList = function() {
             targetList.innerHTML = '';
             if (self.pingTargets.length === 0) {
-                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'Using defaults: dns.google (v4+v6), one.one.one.one (v4+v6), google.com, youtube.com'));
+                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'No extra targets. Defaults (always pinged): dns.google (v4+v6), one.one.one.one (v4+v6), google.com, youtube.com'));
                 return;
             }
             self.pingTargets.forEach(function(t, i) {
+                var famLbl = String(t.fam) === 'both' ? 'IPv4+IPv6' : 'IPv' + t.fam;
                 targetList.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: rgba(128,128,128,0.08);' }, [
-                    E('span', {}, t.host + ' (IPv' + t.fam + ')'),
+                    E('span', {}, t.host + ' (' + famLbl + ')'),
                     E('a', {
                         style: 'cursor: pointer; color: #ff5252; font-weight: bold; text-decoration: none;',
                         click: function() {
                             self.pingTargets.splice(i, 1);
-                            saveLS('hwdash.pingTargets', self.pingTargets);
+                            saveConfig();
                             self.pingHist = {};
                             renderTargetList();
                         }
@@ -677,14 +728,23 @@ return view.extend({
         var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'host or IP (e.g. quad9.net)', style: 'width: 220px; max-width: 60%;' });
         var tgtFam = E('select', { class: 'cbi-input-select' }, [
             E('option', { value: '4' }, 'IPv4'),
-            E('option', { value: '6' }, 'IPv6')
+            E('option', { value: '6' }, 'IPv6'),
+            E('option', { value: 'both' }, 'IPv4 + IPv6')
         ]);
         var addTarget = function() {
             var h = tgtInput.value.trim();
             if (!h || !/^[A-Za-z0-9.:-]+$/.test(h)) { tgtInput.style.borderColor = '#ff5252'; return; }
+            // reject duplicates against defaults AND existing custom targets
+            var existing = {};
+            DEFAULT_PING_TARGETS.concat(self.pingTargets).forEach(function(t) {
+                expandFams(t).forEach(function(fam) { existing[t.host + '|' + fam] = true; });
+            });
+            var want = tgtFam.value === 'both' ? [4, 6] : [parseInt(tgtFam.value)];
+            var missing = want.filter(function(fam) { return !existing[h + '|' + fam]; });
+            if (missing.length === 0) { tgtInput.style.borderColor = '#ff5252'; return; }
             tgtInput.style.borderColor = '';
-            self.pingTargets.push({ host: h, fam: parseInt(tgtFam.value) });
-            saveLS('hwdash.pingTargets', self.pingTargets);
+            self.pingTargets.push({ host: h, fam: missing.length === 2 ? 'both' : missing[0] });
+            saveConfig();
             self.pingHist = {};
             tgtInput.value = '';
             renderTargetList();
@@ -696,7 +756,7 @@ return view.extend({
                 class: 'cbi-button cbi-button-reset',
                 click: function() {
                     self.pingTargets = [];
-                    saveLS('hwdash.pingTargets', self.pingTargets);
+                    saveConfig();
                     self.pingHist = {};
                     renderTargetList();
                 }
@@ -719,10 +779,7 @@ return view.extend({
             // Same hidden-tab rule as the main poll: no pings for a dashboard
             // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
-            var custom = (self.pingTargets && self.pingTargets.length > 0)
-                ? self.pingTargets.map(function(t) { return t.host + ' ' + t.fam; })
-                : undefined;
-            return callHwPing(custom).then(function(res) {
+            return callHwPing(pingTargetPairs()).then(function(res) {
                 if (!res || !res.targets || res.targets.length === 0) return;
                 if (!self.pingHist) self.pingHist = {};
                 var hist = self.pingHist;

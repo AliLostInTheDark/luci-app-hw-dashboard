@@ -74,10 +74,37 @@ _cache_write() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { } }'
+		echo '{ "info": { }, "ping": { }, "get_config": { }, "set_config": { "config": {} } }'
 		;;
 	call)
 		case "$2" in
+			get_config)
+				# Dashboard settings (hidden cards, ping targets) persist on
+				# the router — LuCI-style — so they follow the device, not the
+				# browser. Kept outside /etc/hwdash so upgrades don't clear it.
+				if [ -f /etc/hwdash-settings.json ]; then
+					cat /etc/hwdash-settings.json
+				else
+					echo '{}'
+				fi
+				;;
+			set_config)
+				_IN=""
+				IFS= read -r _IN 2>/dev/null
+				_CFG=""
+				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
+					# jsonfilter re-serializes, so whatever lands in the file is
+					# valid JSON or nothing; size-capped to keep it sane.
+					_CFG=$(printf '%s' "$_IN" | head -c 16384 | jsonfilter -e '@.config' 2>/dev/null)
+				fi
+				if [ -n "$_CFG" ]; then
+					printf '%s\n' "$_CFG" > "/etc/hwdash-settings.json.$$" 2>/dev/null && \
+						mv "/etc/hwdash-settings.json.$$" /etc/hwdash-settings.json 2>/dev/null
+					echo '{"result":"ok"}'
+				else
+					echo '{"result":"invalid"}'
+				fi
+				;;
 			ping)
 				# Router-side latency probes. Target list priority:
 				#   1. "targets" array in the RPC args (set from the dashboard
