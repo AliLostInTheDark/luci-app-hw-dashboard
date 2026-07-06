@@ -607,6 +607,36 @@ EOF
 				done
 				COOLING="$COOLING]"
 
+				# Non-temperature hwmon channels: voltage rails, fans, power,
+				# current. Most routers expose none (the card hides itself);
+				# boards with a PMIC get free telemetry. Builtin reads only.
+				HWMON_EXTRA="["
+				_HX_FIRST=1
+				for h in /sys/class/hwmon/hwmon*; do
+					[ -d "$h" ] || continue
+					read_file _hx_name "$h/name" "hwmon"
+					for _hxi in "$h"/in[0-9]*_input "$h"/fan[0-9]*_input "$h"/power[0-9]*_input "$h"/curr[0-9]*_input; do
+						[ -f "$_hxi" ] || continue
+						read_file _hxv "$_hxi" ""
+						case "$_hxv" in ''|*[!0-9-]*) continue ;; esac
+						_hxch=${_hxi##*/}
+						_hxch=${_hxch%_input}
+						case "$_hxch" in
+							in*) _hxu="V" ;;
+							fan*) _hxu="RPM" ;;
+							power*) _hxu="W" ;;
+							curr*) _hxu="A" ;;
+							*) continue ;;
+						esac
+						read_file _hxl "${_hxi%_input}_label" ""
+						json_esc "${_hxl:-$_hx_name $_hxch}"
+						[ $_HX_FIRST -eq 0 ] && HWMON_EXTRA="$HWMON_EXTRA,"
+						HWMON_EXTRA="$HWMON_EXTRA{\"name\":\"$JSV\",\"val\":$_hxv,\"unit\":\"$_hxu\"}"
+						_HX_FIRST=0
+					done
+				done
+				HWMON_EXTRA="$HWMON_EXTRA]"
+
 				# LOGICAL_CPUS / PHYSICAL_CORES / MAX_FREQ_KHZ are resolved once and
 				# cached together with the board identity above (hw_identity_v1.sh).
 
@@ -992,7 +1022,7 @@ EOF
 				# same volatile pattern used for the WiFi block. postinst clears
 				# /tmp/hwdash_* on upgrade so the schema can never go stale.
 				STORAGE_INV_CACHE=/tmp/hwdash_storage_inv_v2.sh
-				UBI_DEVS=""; MTD_PARTS=""; UBI_MAX_EC=0; UBI_BAD_PEB=0
+				UBI_DEVS=""; MTD_PARTS=""; UBI_MAX_EC=0; UBI_BAD_PEB=0; ECC_BASE_DATE=0
 				# Sourced cache carries its own expiry epoch (_SI_EXP); sourcing a
 				# stale file is harmless since the vars get recomputed below.
 				_SI_EXP=0
@@ -1048,6 +1078,20 @@ EOF
 				done
 				UBI_DEVS="$UBI_DEVS]"
 
+				# ECC baseline: first-seen counter snapshot, persisted OUTSIDE
+				# /etc/hwdash so it survives package upgrades (postinst clears
+				# /etc/hwdash and /tmp/hwdash_*). Accumulating bitflips since a
+				# fixed baseline are the real NAND health signal, not absolutes.
+				ECC_BASE_FILE=/etc/hwdash-ecc.baseline
+				ECC_BASE_DATE=0
+				if [ -f "$ECC_BASE_FILE" ]; then
+					read -r _eb_hdr < "$ECC_BASE_FILE" 2>/dev/null
+					case "$_eb_hdr" in DATE=*) ECC_BASE_DATE=${_eb_hdr#DATE=} ;; esac
+					case "$ECC_BASE_DATE" in ''|*[!0-9]*) ECC_BASE_DATE=0 ;; esac
+				fi
+				_ECC_SNAP=""
+				_ECC_RESET=0
+
 				# MTD partition table
 				MTD_PARTS="["
 				FM=1
@@ -1067,18 +1111,41 @@ EOF
 							: "${_mecc_c:=0}" "${_mecc_f:=0}"
 						fi
 						[ -f "/sys/class/mtd/mtd${mn}/ecc_strength" ] && read_file _mecc_str "/sys/class/mtd/mtd${mn}/ecc_strength" 0
+						# Baseline lookup for this partition; counter lower than the
+						# baseline means a reflash/reset — rebuild the baseline.
+						_eb_c=$_mecc_c; _eb_f=$_mecc_f
+						if [ "$ECC_BASE_DATE" != "0" ]; then
+							while read -r _eb_n _eb_c2 _eb_f2; do
+								if [ "$_eb_n" = "$mn" ]; then
+									case "$_eb_c2" in ''|*[!0-9]*) ;; *) _eb_c=$_eb_c2 ;; esac
+									case "$_eb_f2" in ''|*[!0-9]*) ;; *) _eb_f=$_eb_f2 ;; esac
+									break
+								fi
+							done < "$ECC_BASE_FILE"
+							{ [ "$_eb_c" -gt "$_mecc_c" ] || [ "$_eb_f" -gt "$_mecc_f" ]; } && _ECC_RESET=1
+						fi
+						_ECC_SNAP="${_ECC_SNAP}${mn} ${_mecc_c} ${_mecc_f}
+"
 						[ $FM -eq 0 ] && MTD_PARTS="$MTD_PARTS,"
-						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\",\"ecc_corr\":${_mecc_c},\"ecc_fail\":${_mecc_f},\"ecc_strength\":${_mecc_str}}"
+						MTD_PARTS="$MTD_PARTS{\"num\":$mn,\"name\":\"$(json_str "$mname")\",\"size\":$msz_b,\"erasesize\":$mesz_b,\"type\":\"$mtype\",\"ecc_corr\":${_mecc_c},\"ecc_fail\":${_mecc_f},\"ecc_corr_base\":${_eb_c},\"ecc_fail_base\":${_eb_f},\"ecc_strength\":${_mecc_str}}"
 						FM=0
 					done < /proc/mtd
 				fi
 				MTD_PARTS="$MTD_PARTS]"
+				if [ -n "$_ECC_SNAP" ] && { [ "$ECC_BASE_DATE" = "0" ] || [ "$_ECC_RESET" = "1" ]; }; then
+					{
+						printf 'DATE=%s\n' "${HWDASH_NOW:-0}"
+						printf '%s' "$_ECC_SNAP"
+					} > "$ECC_BASE_FILE.$$" 2>/dev/null && mv "$ECC_BASE_FILE.$$" "$ECC_BASE_FILE" 2>/dev/null && \
+						ECC_BASE_DATE=${HWDASH_NOW:-0}
+				fi
 				{
 					printf "_SI_EXP=%s\n" "$((${HWDASH_NOW:-0} + 30))"
 					printf "UBI_MAX_EC=%s\n" "${UBI_MAX_EC:-0}"
 					printf "UBI_BAD_PEB=%s\n" "${UBI_BAD_PEB:-0}"
 					printf "UBI_DEVS='%s'\n" "$UBI_DEVS"
 					printf "MTD_PARTS='%s'\n" "$MTD_PARTS"
+					printf "ECC_BASE_DATE=%s\n" "${ECC_BASE_DATE:-0}"
 				} > "$STORAGE_INV_CACHE.$$" 2>/dev/null && mv "$STORAGE_INV_CACHE.$$" "$STORAGE_INV_CACHE" 2>/dev/null
 				fi
 
@@ -1248,7 +1315,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

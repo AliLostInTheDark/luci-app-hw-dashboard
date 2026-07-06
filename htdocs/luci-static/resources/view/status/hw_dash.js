@@ -454,6 +454,8 @@ return view.extend({
         
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
 
+        var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
+
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
@@ -463,6 +465,7 @@ return view.extend({
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
+        container.appendChild(hwmonCard);
         container.appendChild(dskCard.node);
         container.appendChild(extCard);
         var myExtWrapper = E('div', {
@@ -482,7 +485,15 @@ return view.extend({
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 var coresNode = document.getElementById('hw-cores');
-                coresNode.innerHTML = '';
+                // Per-core rows are fixed-shape: build once, update text/width
+                // in place on subsequent polls instead of rebuilding the DOM
+                // subtree every 3 seconds. Rebuilt only if the core count changes.
+                var nCores = res.cpus.length - 1;
+                if (!self._coreEls || self._coreCount !== nCores) {
+                    coresNode.innerHTML = '';
+                    self._coreEls = {};
+                    self._coreCount = nCores;
+                }
                 var advStats = null;
                 res.cpus.forEach(function(cpuLine) {
                     var stat = parseCpu(cpuLine);
@@ -602,22 +613,25 @@ return view.extend({
                             }
                             var coreName = stat.name.toUpperCase().replace('CPU', 'CORE ');
                             var colorCore = getDynColor(pct);
-                            var coreRow = E('div', {
-                                class: 'hw-progress-item'
-                            }, [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                class: 'hw-stat-label'
-                            }, coreName), E('span', {
-                                class: 'hw-stat-value',
-                                style: 'color: ' + colorCore + ';'
-                            }, freqStr + pct.toFixed(2) + '%')]), E('div', {
-                                class: 'hw-bar-bg'
-                            }, [E('div', {
-                                class: 'hw-bar-fill',
-                                style: 'width: ' + pct + '%; background: ' + colorCore + ';'
-                            })])]);
-                            coresNode.appendChild(coreRow);
+                            var ce = self._coreEls[coreIdx];
+                            if (!ce) {
+                                var ceVal = E('span', { class: 'hw-stat-value' });
+                                var ceFill = E('div', { class: 'hw-bar-fill' });
+                                coresNode.appendChild(E('div', {
+                                    class: 'hw-progress-item'
+                                }, [E('div', {
+                                    class: 'hw-progress-header'
+                                }, [E('span', {
+                                    class: 'hw-stat-label'
+                                }, coreName), ceVal]), E('div', {
+                                    class: 'hw-bar-bg'
+                                }, [ceFill])]));
+                                ce = self._coreEls[coreIdx] = { val: ceVal, fill: ceFill };
+                            }
+                            ce.val.textContent = freqStr + pct.toFixed(2) + '%';
+                            ce.val.style.color = colorCore;
+                            ce.fill.style.width = pct + '%';
+                            ce.fill.style.background = colorCore;
                         }
                     }
                     self.prevCpu[stat.name] = stat;
@@ -1035,13 +1049,17 @@ return view.extend({
                             var eccParts = res.mtd_parts.filter(function(p) { return p.ecc_fail > 0 || p.ecc_corr > 0; });
                             if (eccParts.length > 0) {
                                 var eccDiv = E('div', {style: 'margin-top:10px; padding-top:8px; border-top:1px dashed var(--border-color,rgba(128,128,128,0.2));'});
-                                eccDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;'}, 'ECC Alerts'));
+                                var eccHdr = 'ECC Alerts';
+                                if (res.ecc_base_date > 0) eccHdr += ' (+n since ' + new Date(res.ecc_base_date * 1000).toLocaleDateString() + ')';
+                                eccDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;'}, eccHdr));
                                 eccParts.forEach(function(p) {
                                     var eccRow = E('div', {style: 'display:flex; justify-content:space-between; font-size:0.82em; padding:3px 0;'});
                                     eccRow.appendChild(E('span', {style: 'color:#00bcd4;'}, 'mtd'+p.num+' ('+p.name+')'));
                                     var eccVals = E('span', {});
-                                    if (p.ecc_corr > 0) eccVals.appendChild(E('span', {style: 'color:#ffb300; margin-right:8px;'}, p.ecc_corr+' corr'));
-                                    if (p.ecc_fail > 0) eccVals.appendChild(E('span', {style: 'color:#ff5252;'}, p.ecc_fail+' fail'));
+                                    var dCorr = (p.ecc_corr_base != null) ? p.ecc_corr - p.ecc_corr_base : 0;
+                                    var dFail = (p.ecc_fail_base != null) ? p.ecc_fail - p.ecc_fail_base : 0;
+                                    if (p.ecc_corr > 0) eccVals.appendChild(E('span', {style: 'color:#ffb300; margin-right:8px;'}, p.ecc_corr + ' corr' + (dCorr > 0 ? ' (+' + dCorr + ')' : '')));
+                                    if (p.ecc_fail > 0) eccVals.appendChild(E('span', {style: 'color:#ff5252;'}, p.ecc_fail + ' fail' + (dFail > 0 ? ' (+' + dFail + ')' : '')));
                                     eccRow.appendChild(eccVals);
                                     eccDiv.appendChild(eccRow);
                                 });
@@ -1679,6 +1697,32 @@ return view.extend({
                     }
                 } else {
                     wifiCard.style.display = 'none';
+                }
+
+                // Power & Fans — voltage rails / fans / power / current from
+                // hwmon; hidden when the platform exposes none.
+                if (res.hwmon_extra && res.hwmon_extra.length > 0) {
+                    var hxNode = document.getElementById('hw-hwmon');
+                    var hxShown = 0;
+                    if (hxNode) {
+                        hxNode.innerHTML = '';
+                        res.hwmon_extra.forEach(function(hx) {
+                            var txt = '';
+                            if (hx.unit === 'V') txt = (hx.val / 1000).toFixed(2) + ' V';
+                            else if (hx.unit === 'RPM') txt = hx.val + ' RPM';
+                            else if (hx.unit === 'W') txt = (hx.val / 1e6).toFixed(2) + ' W';
+                            else if (hx.unit === 'A') txt = (hx.val / 1000).toFixed(2) + ' A';
+                            if (!txt) return;
+                            hxShown++;
+                            hxNode.appendChild(E('div', { class: 'hw-stat-row' }, [
+                                E('span', { class: 'hw-stat-label' }, hx.name),
+                                E('span', { class: 'hw-stat-value' }, txt)
+                            ]));
+                        });
+                    }
+                    hwmonCard.style.display = hxShown > 0 ? 'flex' : 'none';
+                } else {
+                    hwmonCard.style.display = 'none';
                 }
 
                 // System Info card
