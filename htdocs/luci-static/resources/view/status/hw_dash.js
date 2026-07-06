@@ -630,7 +630,8 @@ return view.extend({
         var DEFAULT_PING_TARGETS = [
             { host: 'dns.google', fam: 4 }, { host: 'dns.google', fam: 6 },
             { host: 'one.one.one.one', fam: 4 }, { host: 'one.one.one.one', fam: 6 },
-            { host: 'google.com', fam: 4 }, { host: 'youtube.com', fam: 4 }
+            { host: 'google.com', fam: 4 }, { host: 'google.com', fam: 6 },
+            { host: 'youtube.com', fam: 4 }, { host: 'youtube.com', fam: 6 }
         ];
         var expandFams = function(t) { return String(t.fam) === 'both' ? [4, 6] : [parseInt(t.fam) === 6 ? 6 : 4]; };
         var pingTargetPairs = function() {
@@ -704,7 +705,7 @@ return view.extend({
         var renderTargetList = function() {
             targetList.innerHTML = '';
             if (self.pingTargets.length === 0) {
-                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'No extra targets. Defaults (always pinged): dns.google (v4+v6), one.one.one.one (v4+v6), google.com, youtube.com'));
+                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'No extra targets. Defaults (always pinged): dns.google, one.one.one.one, google.com, youtube.com — all v4+v6'));
                 return;
             }
             self.pingTargets.forEach(function(t, i) {

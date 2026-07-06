@@ -143,7 +143,9 @@ dns.google 6
 one.one.one.one 4
 one.one.one.one 6
 google.com 4
+google.com 6
 youtube.com 4
+youtube.com 6
 "
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
