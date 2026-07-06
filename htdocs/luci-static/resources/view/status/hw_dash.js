@@ -583,6 +583,10 @@ return view.extend({
 
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
 
+        var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
+
+        var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
+
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
@@ -593,6 +597,7 @@ return view.extend({
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
         container.appendChild(hwmonCard);
+        container.appendChild(offloadCard);
         container.appendChild(dskCard.node);
         container.appendChild(extCard);
         var myExtWrapper = E('div', {
@@ -605,6 +610,7 @@ return view.extend({
         container.appendChild(pingCard);
         container.appendChild(wifiCard);
         container.appendChild(thermWrapper);
+        container.appendChild(eventsCard);
         var self = this;
 
         // ---------- Settings (persisted per-browser in localStorage) ----------
@@ -659,6 +665,8 @@ return view.extend({
             ram: { nodes: [ramCard.node], label: 'Memory', show: 'flex' },
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
+            offload: { nodes: [offloadCard], label: 'Offload Engines', show: null },
+            events: { nodes: [eventsCard], label: 'Hardware Events', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
             ext: { nodes: [extCard, myExtWrapper], label: 'External Storage', show: null },
             ports: { nodes: [ethCard], label: 'Ports Topology', show: null },
@@ -796,9 +804,37 @@ return view.extend({
                     hist[key].data.push(typeof t.ms === 'number' ? t.ms : null);
                     if (hist[key].data.length > PING_WINDOW) hist[key].data.shift();
                 });
+                // Bufferbloat: compare median latency while the WAN is under
+                // sustained load vs idle. Zero extra probes — reuses the ping
+                // window and the live WAN throughput from the ports card.
+                var loaded = (self.wanLoadMbps >= 100) || (self.wanSpeedMbps > 0 && self.wanLoadMbps >= self.wanSpeedMbps * 0.25);
+                var tickVals = [];
+                res.targets.forEach(function(t) { if (typeof t.ms === 'number') tickVals.push(t.ms); });
+                if (tickVals.length > 0) {
+                    tickVals.sort(function(a, b) { return a - b; });
+                    if (!self.bbSamples) self.bbSamples = [];
+                    self.bbSamples.push({ v: tickVals[Math.floor(tickVals.length / 2)], l: !!loaded });
+                    if (self.bbSamples.length > PING_WINDOW) self.bbSamples.shift();
+                }
                 var pgNode = document.getElementById('hw-ping');
                 if (pgNode) {
                     renderPingGraph(pgNode, hist);
+                    var idleV = [], loadV = [];
+                    (self.bbSamples || []).forEach(function(sm) { (sm.l ? loadV : idleV).push(sm.v); });
+                    var med = function(a) { a = a.slice().sort(function(x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
+                    var bbTxt, bbColor;
+                    if (idleV.length >= 10 && loadV.length >= 5) {
+                        var delta = Math.max(0, med(loadV) - med(idleV));
+                        var grade = delta < 5 ? 'A+' : delta < 30 ? 'A' : delta < 60 ? 'B' : delta < 100 ? 'C' : delta < 200 ? 'D' : 'F';
+                        bbColor = delta < 30 ? '#00bcd4' : delta < 60 ? '#8bc34a' : delta < 100 ? '#ffb300' : '#ff5252';
+                        bbTxt = 'Bufferbloat: ' + grade + ' (+' + delta.toFixed(0) + ' ms under load)';
+                    } else {
+                        bbColor = '#9e9e9e';
+                        bbTxt = 'Bufferbloat: measuring \u2014 needs sustained WAN load';
+                    }
+                    pgNode.appendChild(E('div', { style: 'text-align: center; margin-top: 8px;' }, [
+                        E('span', { style: 'font-size: 0.8em; font-weight: 600; color: ' + bbColor + '; padding: 3px 10px; border-radius: 4px; border: 1px solid ' + bbColor + '44; background: ' + bbColor + '18;' }, bbTxt)
+                    ]));
                     pingCard.style.display = 'flex';
                 }
                 applyCardVisibility();
@@ -1035,6 +1071,73 @@ return view.extend({
                                 class: 'hw-bar-fill',
                                 style: 'width: ' + connPct + '%; background: ' + colorConn + ';'
                             })])]));
+                        }
+                        // Top interrupt sources by rate, with per-core split —
+                        // shows which core services the NIC/Wi-Fi and whether
+                        // packet steering spreads the load.
+                        if (res.irqs && res.irqs.length > 0) {
+                            if (!self.prevIrqs) self.prevIrqs = {};
+                            var CORE_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
+                            var irqRates = [];
+                            res.irqs.forEach(function(q) {
+                                var pk = q.n + '|' + q.d;
+                                var prev = self.prevIrqs[pk];
+                                if (prev) {
+                                    var rate = (q.t - prev.t) / 3;
+                                    if (rate >= 1) {
+                                        var coreD = q.c.map(function(v, ci) { return Math.max(0, v - (prev.c[ci] || 0)); });
+                                        var parts = q.d.split(/\s+/);
+                                        irqRates.push({ name: parts[parts.length - 1] || q.d, rate: rate, cores: coreD });
+                                    }
+                                }
+                                self.prevIrqs[pk] = q;
+                            });
+                            irqRates.sort(function(a, b) { return b.rate - a.rate; });
+                            if (irqRates.length > 0) {
+                                advNode.appendChild(E('div', { style: 'font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-top: 12px; margin-bottom: 6px;' }, 'Top IRQs (per-core split)'));
+                                irqRates.slice(0, 5).forEach(function(q) {
+                                    var total = q.cores.reduce(function(a, b) { return a + b; }, 0) || 1;
+                                    var segs = [];
+                                    q.cores.forEach(function(cv, ci) {
+                                        if (cv <= 0) return;
+                                        segs.push(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
+                                    });
+                                    advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [
+                                        E('div', { class: 'hw-progress-header' }, [
+                                            E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name),
+                                            E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, Math.round(q.rate) + ' /s')
+                                        ]),
+                                        E('div', { class: 'hw-bar-bg', style: 'height: 4px; display: flex;' }, segs)
+                                    ]));
+                                });
+                                var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin-bottom: 4px; flex-wrap: wrap;' });
+                                for (var lc = 0; lc < Math.min(res.cpus.length - 1, 8); lc++) {
+                                    legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
+                                        E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
+                                        'C' + lc
+                                    ]));
+                                }
+                                advNode.appendChild(legendCores);
+                            }
+                        }
+                        // softnet backlog: drops mean the CPU can't keep up
+                        // with packet input — the earliest overload warning.
+                        if (res.softnet && res.softnet.length > 0) {
+                            var snD = 0, snS = 0;
+                            if (self.prevSoftnet) {
+                                res.softnet.forEach(function(sn, si) {
+                                    var p = self.prevSoftnet[si];
+                                    if (p) { snD += Math.max(0, sn.d - p.d); snS += Math.max(0, sn.s - p.s); }
+                                });
+                                var snColor = snD > 0 ? '#ff5252' : snS > 0 ? '#ffb300' : 'currentColor';
+                                advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-top: 5px;' }, [
+                                    E('div', { class: 'hw-progress-header' }, [
+                                        E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
+                                        E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em; color: ' + snColor + ';' }, snD + ' / ' + snS + ' per 3s')
+                                    ])
+                                ]));
+                            }
+                            self.prevSoftnet = res.softnet;
                         }
                         // Cumulative frequency residency (time in each OPP since
                         // boot) — shows whether the CPU ever leaves its min/max
@@ -1827,6 +1930,10 @@ return view.extend({
                                 ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
                             }
                             self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
+                            if (l.iface.toLowerCase().indexOf('wan') !== -1 && dlMbps !== null) {
+                                self.wanLoadMbps = Math.max(dlMbps, ulMbps);
+                                self.wanSpeedMbps = parseInt(st) || 0;
+                            }
 
                             var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
@@ -1849,6 +1956,16 @@ return view.extend({
                                 box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px;' }, [
                                     E('span', {}, 'Errors/Drops:'),
                                     E('span', { style: 'color:' + errColor + ';' }, 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop)
+                                ]));
+                            }
+                            if (l.mac) {
+                                var flaps = parseInt(l.carrier_changes) || 0;
+                                // carrier_changes counts up+down edges; >2 means it
+                                // flapped after the initial link-up.
+                                var flapStr = flaps > 2 ? ' \u00b7 ' + flaps + ' link flaps' : '';
+                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 4px;' }, [
+                                    E('span', {}, 'MAC / MTU:'),
+                                    E('span', { style: flaps > 2 ? 'color:#ffb300;' : '' }, l.mac.toUpperCase() + ' \u00b7 ' + l.mtu + flapStr)
                                 ]));
                             }
                             portsNode.appendChild(box);
@@ -2029,6 +2146,55 @@ return view.extend({
                     }
                 } else {
                     wifiCard.style.display = 'none';
+                }
+
+                // Offload Engines — flowtable / PPE hardware NAT / WED status.
+                if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0)) {
+                    var off = res.offload;
+                    var offNode = document.getElementById('hw-offload');
+                    if (offNode) {
+                        offNode.innerHTML = '';
+                        var addOff = function(lbl, val, color) {
+                            offNode.appendChild(E('div', { class: 'hw-stat-row' }, [
+                                E('span', { class: 'hw-stat-label' }, lbl),
+                                E('span', { class: 'hw-stat-value', style: color ? 'color:' + color + ';' : '' }, val)
+                            ]));
+                        };
+                        addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
+                        addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
+                        if (off.sw_flows >= 0) addOff('Offloaded Flows (conntrack)', String(off.sw_flows), off.sw_flows > 0 ? '#00bcd4' : null);
+                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', String(off.ppe_flows), off.ppe_flows > 0 ? '#8bc34a' : null);
+                        if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
+                        offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
+                    }
+                    offloadCard.style.display = 'flex';
+                } else {
+                    offloadCard.style.display = 'none';
+                }
+
+                // Hardware Events — filtered dmesg lines with relative timestamps.
+                if (res.hw_events && res.hw_events.length > 0) {
+                    var evNode = document.getElementById('hw-events');
+                    if (evNode) {
+                        evNode.innerHTML = '';
+                        res.hw_events.slice().reverse().forEach(function(line) {
+                            var rel = '';
+                            var m = line.match(/^\[\s*(\d+)\./);
+                            if (m && res.uptime) {
+                                var ago = res.uptime - parseInt(m[1]);
+                                if (ago < 0) ago = 0;
+                                rel = ago < 60 ? ago + 's ago' : ago < 3600 ? Math.floor(ago / 60) + 'm ago' : ago < 86400 ? Math.floor(ago / 3600) + 'h ago' : Math.floor(ago / 86400) + 'd ago';
+                            }
+                            var msg = line.replace(/^\[\s*[\d.]+\]\s*/, '');
+                            evNode.appendChild(E('div', { style: 'display: flex; gap: 10px; align-items: baseline; font-size: 0.85em; padding: 4px 8px; background: rgba(128,128,128,0.05); border-radius: 4px;' }, [
+                                E('span', { style: 'flex-shrink: 0; min-width: 62px; opacity: 0.55; font-size: 0.9em;' }, rel),
+                                E('span', { style: 'font-family: monospace; font-size: 0.92em; opacity: 0.85; word-break: break-word; min-width: 0;' }, msg)
+                            ]));
+                        });
+                    }
+                    eventsCard.style.display = 'flex';
+                } else {
+                    eventsCard.style.display = 'none';
                 }
 
                 // Power & Fans — voltage rails / fans / power / current from
