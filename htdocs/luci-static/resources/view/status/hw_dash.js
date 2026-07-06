@@ -1958,6 +1958,15 @@ return view.extend({
                                     E('span', { style: 'color:' + errColor + ';' }, 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop)
                                 ]));
                             }
+                            var et = res.ethtool && res.ethtool[l.iface];
+                            if (et && st !== 'Down') {
+                                var eeeCol = et.eee === 'active' ? '#ffb300' : '';
+                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '');
+                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;' }, [
+                                    E('span', {}, 'PHY:'),
+                                    E('span', { style: eeeCol ? 'color:' + eeeCol + ';' : '' }, etStr)
+                                ]));
+                            }
                             if (l.mac) {
                                 var flaps = parseInt(l.carrier_changes) || 0;
                                 // carrier_changes counts up+down edges; >2 means it

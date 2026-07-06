@@ -884,6 +884,75 @@ EOF
 				fi
 				[ -z "$HW_EVENTS" ] && HW_EVENTS="[]"
 
+				# --- ethtool PHY details: autoneg, NEGOTIATED flow control
+				# (the real state — config RX/TX are often off while the link
+				# negotiates pause anyway) and EEE. 3 ethtool forks per port,
+				# but only once per 30s window; parsed with builtin reads.
+				# ethtool 6.15 prints EEE state as two bare enabled/disabled
+				# lines instead of "EEE status:" — handle both.
+				ETHTOOL_JSON="{}"
+				if command -v ethtool >/dev/null; then
+					if _cache_read /tmp/hwdash_ethtool.cache; then
+						ETHTOOL_JSON=$C_VAL
+					else
+						ETHTOOL_JSON="{"
+						_ETF=1
+						for netdev in /sys/class/net/*; do
+							[ -e "$netdev/device" ] || continue
+							eth=${netdev##*/}
+							case "$eth" in
+								lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
+							esac
+							[ -f "$netdev/speed" ] || continue
+							_an=""
+							while read -r _k _v _; do
+								case "$_k" in Auto-negotiation:) _an=$_v; break ;; esac
+							done <<EOF
+$(ethtool "$eth" 2>/dev/null)
+EOF
+							_prx=""; _ptx=""; _prxn=""; _ptxn=""
+							while read -r _k _v _v2 _; do
+								case "$_k $_v" in
+									"RX negotiated:") _prxn=$_v2; continue ;;
+									"TX negotiated:") _ptxn=$_v2; continue ;;
+								esac
+								case "$_k" in
+									RX:) _prx=$_v ;;
+									TX:) _ptx=$_v ;;
+								esac
+							done <<EOF
+$(ethtool -a "$eth" 2>/dev/null)
+EOF
+							_e1=""; _e2=""
+							while read -r _w _rest; do
+								[ -n "$_rest" ] && continue
+								case "$_w" in
+									enabled|disabled|active|inactive)
+										if [ -z "$_e1" ]; then _e1=$_w
+										elif [ -z "$_e2" ]; then _e2=$_w
+										fi
+										;;
+								esac
+							done <<EOF
+$(ethtool --show-eee "$eth" 2>/dev/null)
+EOF
+							_eee="n/a"
+							if [ -n "$_e1" ]; then
+								if [ "$_e1" = "disabled" ]; then _eee="disabled"
+								elif [ "$_e2" = "active" ] || [ "$_e2" = "enabled" ]; then _eee="active"
+								else _eee="enabled"
+								fi
+							fi
+							_pause="rx ${_prxn:-${_prx:-?}} / tx ${_ptxn:-${_ptx:-?}}"
+							[ $_ETF -eq 0 ] && ETHTOOL_JSON="$ETHTOOL_JSON,"
+							ETHTOOL_JSON="$ETHTOOL_JSON\"$eth\":{\"an\":\"${_an:-?}\",\"pause\":\"$_pause\",\"eee\":\"$_eee\"}"
+							_ETF=0
+						done
+						ETHTOOL_JSON="$ETHTOOL_JSON}"
+						_cache_write /tmp/hwdash_ethtool.cache 30 "$ETHTOOL_JSON"
+					fi
+				fi
+
 				ETH_LINKS="["
 				FIRST_ETH=1
 				for netdev in /sys/class/net/*; do
@@ -1537,7 +1606,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
