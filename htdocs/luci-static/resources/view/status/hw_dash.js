@@ -1008,9 +1008,9 @@ return view.extend({
                                             vsz = fmtBytesS(reservedBytes > 0 ? reservedBytes : vol.data_bytes);
                                         }
                                         var volEntry = E('div', {style: 'border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.07)); padding: 3px 0;'});
-                                        volEntry.appendChild(E('div', {style: 'display:flex; justify-content:space-between; font-size: 0.85em;'}, [
-                                            E('span', {style: 'color:#00bcd4;'}, vol.name),
-                                            E('span', {style: 'opacity: 0.7;'}, vsz + ' | ' + vol.type)
+                                        volEntry.appendChild(E('div', {style: 'display:flex; justify-content:space-between; align-items:baseline; gap: 12px; font-size: 0.85em;'}, [
+                                            E('span', {style: 'color:#00bcd4; flex-shrink: 0; white-space: nowrap;'}, vol.name),
+                                            E('span', {style: 'opacity: 0.7; text-align: right; min-width: 0; word-break: break-word;'}, vsz + ' | ' + vol.type)
                                         ]));
                                         if (fillRatio >= 0) {
                                             var fillPct = Math.max(0, Math.min(100, fillRatio * 100));
