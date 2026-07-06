@@ -228,6 +228,22 @@ return view.extend({
             }
             return memTotalKb;
         };
+        // Small filled area graph for usage history (0-100%), fills the
+        // idle space at the bottom of the CPU / Memory cards.
+        var drawUsageSpark = function(el, data, color) {
+            if (!el || data.length < 2) return;
+            var W = 300, H = 46, P = 2;
+            var pts = data.map(function(v, i) {
+                var x = P + i * (W - 2 * P) / (data.length - 1);
+                var y = H - P - Math.max(0, Math.min(100, v)) * (H - 2 * P) / 100;
+                return x.toFixed(1) + ',' + y.toFixed(1);
+            });
+            var poly = pts.join(' ');
+            var area = (P) + ',' + (H - P) + ' ' + poly + ' ' + (W - P) + ',' + (H - P);
+            el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+                '<polygon points="' + area + '" fill="' + color + '22"/>' +
+                '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + poly + '"/></svg>';
+        };
         var makeMemBar = function(label, valueMb, totalMb) {
             var pct = totalMb > 0 ? (valueMb / totalMb) * 100 : 0;
             var colorMem = getDynColor(pct, label === 'Free');
@@ -660,6 +676,14 @@ return view.extend({
 
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
+        ramCard.node.appendChild(E('div', {
+            style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
+        }));
+        ramCard.node.appendChild(E('h4', {
+            style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'
+        }, 'USAGE HISTORY (3 MIN)'));
+        ramCard.node.appendChild(E('div', { id: 'hw-mem-spark', style: 'width: 100%; line-height: 0;' }));
+
         var _dskNode = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'});
         _dskNode.appendChild(E('h3', {}, 'Internal Storage'));
         _dskNode.appendChild(E('div', {id: 'stats-dsk', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;'}));
@@ -689,6 +713,13 @@ return view.extend({
             style: 'margin-top: 0; padding-top: 0;'
         });
         cpuCard.node.appendChild(cpuMetaNode);
+        cpuCard.node.appendChild(E('div', {
+            style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
+        }));
+        cpuCard.node.appendChild(E('h4', {
+            style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'
+        }, 'USAGE HISTORY (3 MIN)'));
+        cpuCard.node.appendChild(E('div', { id: 'hw-cpu-spark', style: 'width: 100%; line-height: 0;' }));
         var advCard = E('div', {
             class: 'hw-card',
             style: 'justify-content: flex-start;'
@@ -1068,6 +1099,10 @@ return view.extend({
                         pct = Math.max(0, Math.min(100, pct));
                         if (stat.name === 'cpu') {
                             var pctRound = Math.round(pct);
+                            if (!self.cpuHist) self.cpuHist = [];
+                            self.cpuHist.push(pct);
+                            if (self.cpuHist.length > 60) self.cpuHist.shift();
+                            drawUsageSpark(document.getElementById('hw-cpu-spark'), self.cpuHist, '#00bcd4');
                             updateDial('cpu', pctRound, cpuCard.circ);
                             document.getElementById('dial-sub-cpu').textContent = (res.cpus.length - 1) + ' Cores';
                             var calcPct = function(key) {
@@ -1163,6 +1198,17 @@ return view.extend({
                                 }, 'Uptime'), E('span', {
                                     class: 'hw-stat-value'
                                 }, uptimeStr)]));
+                                var psi = res.cpu_meta && res.cpu_meta.psi;
+                                if (psi) {
+                                    metaNode.appendChild(E('div', {
+                                        class: 'hw-stat-row'
+                                    }, [E('span', {
+                                        class: 'hw-stat-label'
+                                    }, 'Pressure (CPU / IO, 10s)'), E('span', {
+                                        class: 'hw-stat-value',
+                                        style: (psi.cpu >= 20 || psi.io >= 20) ? 'color:#ffb300;' : ''
+                                    }, psi.cpu.toFixed(1) + '% / ' + psi.io.toFixed(1) + '%')]));
+                                }
                             }
                         } else {
                             var coreIdx = parseInt(stat.name.replace('cpu', ''));
@@ -1262,7 +1308,7 @@ return view.extend({
                             }, 'Active Connections'), E('span', {
                                 class: 'hw-stat-value',
                                 style: 'color: ' + colorConn + ';'
-                            }, connCount + ' / ' + connMax + (res.peaks && res.peaks.conntrack > 0 ? ' \u00b7 peak ' + res.peaks.conntrack : ''))]), E('div', {
+                            }, [connCount + ' / ' + connMax, (res.peaks && res.peaks.conntrack > 0 ? E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal;', title: 'Highest count since boot' }, ' \u00b7 peak ' + res.peaks.conntrack) : '')])]), E('div', {
                                 class: 'hw-bar-bg'
                             }, [E('div', {
                                 class: 'hw-bar-fill',
@@ -1284,7 +1330,12 @@ return view.extend({
                                     if (rate >= 1) {
                                         var coreD = q.c.map(function(v, ci) { return Math.max(0, v - (prev.c[ci] || 0)); });
                                         var parts = q.d.split(/\s+/);
-                                        irqRates.push({ name: parts[parts.length - 1] || q.d, rate: rate, cores: coreD });
+                                        var iname = parts[parts.length - 1] || q.d;
+                                        // ARM IPI rows all end in "interrupts"
+                                        // ("Rescheduling interrupts", ...) — keep
+                                        // the qualifier so rows stay distinct.
+                                        if (/^interrupts?$/i.test(iname)) iname = q.d.length > 24 ? q.d.slice(0, 23) + '\u2026' : q.d;
+                                        irqRates.push({ name: iname, rate: rate, cores: coreD });
                                     }
                                 }
                                 self.prevIrqs[pk] = q;
@@ -1414,6 +1465,25 @@ return view.extend({
                     if (mem.pagetables > 0) {
                         ramStats.appendChild(makeMemBar('PageTables', mem.pagetables / 1024, mem.total / 1024));
                     }
+                    if (mem.dirty > 0 || mem.writeback > 0) {
+                        ramStats.appendChild(E('div', { class: 'hw-stat-row' }, [
+                            E('span', { class: 'hw-stat-label' }, 'Dirty / Writeback'),
+                            E('span', { class: 'hw-stat-value', style: mem.writeback > 1024 ? 'color:#ffb300;' : '' },
+                                (mem.dirty / 1024).toFixed(1) + ' MB / ' + (mem.writeback / 1024).toFixed(1) + ' MB')
+                        ]));
+                    }
+                    var memPsi = res.cpu_meta && res.cpu_meta.psi;
+                    if (memPsi && (memPsi.mem > 0 || memPsi.mem_full > 0)) {
+                        ramStats.appendChild(E('div', { class: 'hw-stat-row' }, [
+                            E('span', { class: 'hw-stat-label' }, 'Memory Pressure (10s)'),
+                            E('span', { class: 'hw-stat-value', style: memPsi.mem_full >= 5 ? 'color:#ff5252;' : memPsi.mem >= 10 ? 'color:#ffb300;' : '' },
+                                memPsi.mem.toFixed(1) + '%' + (memPsi.mem_full > 0 ? ' (full ' + memPsi.mem_full.toFixed(1) + '%)' : ''))
+                        ]));
+                    }
+                    if (!self.memHist) self.memHist = [];
+                    self.memHist.push(pct);
+                    if (self.memHist.length > 60) self.memHist.shift();
+                    drawUsageSpark(document.getElementById('hw-mem-spark'), self.memHist, '#b388ff');
                 }
                 if (res.df && Array.isArray(res.df)) {
                     var totalSpace = 0;
@@ -2382,7 +2452,11 @@ return view.extend({
                         addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
                         addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
                         if (off.sw_flows >= 0) addOff('Offloaded Flows (conntrack)', String(off.sw_flows), off.sw_flows > 0 ? '#00bcd4' : null);
-                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', off.ppe_flows + (res.peaks && res.peaks.ppe > 0 ? ' \u00b7 peak ' + res.peaks.ppe : ''), off.ppe_flows > 0 ? '#8bc34a' : null);
+                        if (off.ppe_flows >= 0) addOff('PPE HW-Bound Flows', String(off.ppe_flows), off.ppe_flows > 0 ? '#8bc34a' : null);
+                        if (res.peaks && res.peaks.ppe > 0 && off.ppe_flows >= 0) {
+                            var lastOffRow = offNode.lastChild.querySelector('.hw-stat-value');
+                            if (lastOffRow) lastOffRow.appendChild(E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal; color: var(--text-color, inherit);', title: 'Highest count since boot' }, ' \u00b7 peak ' + res.peaks.ppe));
+                        }
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }

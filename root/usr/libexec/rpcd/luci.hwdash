@@ -391,7 +391,7 @@ EOF
 				FREQ_STATS="$FREQ_STATS]"
 
 
-				MEM_TOTAL=0; MEM_FREE=0; MEM_AVAIL=0; MEM_BUFF=0; MEM_CACH=0; SWAP_TOTAL=0; SWAP_FREE=0; MEM_SLAB=0; MEM_PAGETABLES=0
+				MEM_TOTAL=0; MEM_FREE=0; MEM_AVAIL=0; MEM_BUFF=0; MEM_CACH=0; SWAP_TOTAL=0; SWAP_FREE=0; MEM_SLAB=0; MEM_PAGETABLES=0; MEM_DIRTY=0; MEM_WRITEBACK=0
 				while read -r key val _; do
 					case "$key" in
 						MemTotal:) MEM_TOTAL=$val ;;
@@ -403,6 +403,8 @@ EOF
 						SwapFree:) SWAP_FREE=$val ;;
 						Slab:) MEM_SLAB=$val ;;
 						PageTables:) MEM_PAGETABLES=$val ;;
+						Dirty:) MEM_DIRTY=$val ;;
+						Writeback:) MEM_WRITEBACK=$val ;;
 					esac
 				done < /proc/meminfo
 
@@ -829,6 +831,26 @@ EOF
 				
 
 				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
+
+				# PSI pressure (avg10) — absent on kernels without CONFIG_PSI.
+				PSI_JSON="null"
+				if [ -f /proc/pressure/cpu ]; then
+					_psi_some() {
+						PSI_V=0
+						while read -r _pk _pa _; do
+							if [ "$_pk" = "$2" ]; then
+								PSI_V=${_pa#avg10=}
+								case "$PSI_V" in ''|*[!0-9.]*) PSI_V=0 ;; esac
+								break
+							fi
+						done < "$1"
+					}
+					_psi_some /proc/pressure/cpu some;    _pc=$PSI_V
+					_psi_some /proc/pressure/memory some; _pm=$PSI_V
+					_psi_some /proc/pressure/memory full; _pmf=$PSI_V
+					_psi_some /proc/pressure/io some;     _pio=$PSI_V
+					PSI_JSON="{\"cpu\":$_pc,\"mem\":$_pm,\"mem_full\":$_pmf,\"io\":$_pio}"
+				fi
 
 
 				# Do NOT use read_file here: busybox ash's read builtin fetches
@@ -1735,7 +1757,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
