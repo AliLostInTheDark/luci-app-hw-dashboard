@@ -459,10 +459,12 @@ return view.extend({
             node.appendChild(legend);
             // per-target stats table over the displayed window
             var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
-            var tbl = E('table', { style: 'width: 100%; min-width: 480px; border-collapse: collapse; font-size: 0.78em;' });
+            var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em; table-layout: fixed;' });
             var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
+            var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
             tbl.appendChild(E('tr', {}, [
-                E('th', { style: thStyle + 'text-align: left;' }, 'Target'),
+                E('th', { style: thStyle + 'text-align: left; width: 17%;' }, 'Target'),
+                E('th', { style: thStyle + 'text-align: left; width: 17%;' + divS }, 'IP'),
                 E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
                 E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
                 E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
@@ -487,7 +489,8 @@ return view.extend({
                 var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
                 var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
                 tbl.appendChild(E('tr', { style: (t.hidden ? 'opacity: 0.35;' : '') }, [
-                    E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap;' }, t.label),
+                    E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' }, t.label),
+                    E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' + divS }, t.ip || '\u2014'),
                     E('td', { style: tdS }, last === null ? 'TO' : fmt(last)),
                     E('td', { style: tdS }, fmt(vals.length ? vals[0] : null)),
                     E('td', { style: tdS }, fmt(vals.length ? sum / vals.length : null)),
@@ -979,6 +982,7 @@ return view.extend({
                         };
                     }
                     var h = hist[key];
+                    if (t.ip) h.ip = t.ip;
                     var v = typeof t.ms === 'number' ? t.ms : null;
                     h.data.push(v);
                     if (h.data.length > PING_WINDOW) h.data.shift();

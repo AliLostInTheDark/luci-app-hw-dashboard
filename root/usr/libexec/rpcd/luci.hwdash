@@ -178,18 +178,28 @@ $_PT_LIST" ;;
 					[ -z "$_pt_h" ] && continue
 					(
 						_out=$(ping -c 1 -W 1 -"$_pt_f" "$_pt_h" 2>/dev/null)
+						# resolved address from the "PING host (ip)" banner — the
+						# IP this probe ACTUALLY hit (visible through DNS rotation)
+						_ip=""
+						case "$_out" in
+							*"("*")"*)
+								_ip=${_out#*\(}
+								_ip=${_ip%%\)*}
+								case "$_ip" in *[!0-9a-fA-F:.]*) _ip="" ;; esac
+								;;
+						esac
+						_t=""
 						case "$_out" in
 							*time=*)
 								_t=${_out##*time=}
 								# keep only the leading numeric run (handles both
 								# "time=48.9 ms" and "time=48.9ms" formats)
 								_t=${_t%%[!0-9.]*}
-								case "$_t" in
-									''|.|*.*.*) ;;
-									[0-9]*) printf '%s' "$_t" > "$_PT_TMP.$_pi" ;;
-								esac
+								case "$_t" in ''|.|*.*.*) _t="" ;; esac
 								;;
 						esac
+						# "x" marks no-reply so the reader can still pick up the IP
+						[ -n "$_t$_ip" ] && printf '%s %s' "${_t:-x}" "$_ip" > "$_PT_TMP.$_pi"
 					) &
 					_pi=$((_pi + 1))
 				done <<EOF
@@ -201,15 +211,16 @@ EOF
 				_PF=1
 				while read -r _pt_h _pt_f; do
 					[ -z "$_pt_h" ] && continue
-					_ms="null"
+					_ms="null"; _pip=""
 					if [ -f "$_PT_TMP.$_pi" ]; then
-						read -r _ms < "$_PT_TMP.$_pi" 2>/dev/null
+						read -r _ms _pip < "$_PT_TMP.$_pi" 2>/dev/null
 						rm -f "$_PT_TMP.$_pi" 2>/dev/null
-						case "$_ms" in ''|*[!0-9.]*) _ms="null" ;; esac
+						case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
+						case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
 					fi
 					json_esc "$_pt_h"
 					[ $_PF -eq 0 ] && PINGS="$PINGS,"
-					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ms\":$_ms}"
+					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"ms\":$_ms}"
 					_PF=0
 					_pi=$((_pi + 1))
 				done <<EOF
