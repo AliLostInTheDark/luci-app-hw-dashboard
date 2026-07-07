@@ -1024,9 +1024,14 @@ return view.extend({
             // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
             // Never let requests pile up on a slow device: skip the tick if
-            // the previous one is still in flight.
-            if (self.pingBusy) return Promise.resolve();
+            // the previous one is still in flight — BUT self-heal, so a hung
+            // ubus call (rpcd busy, XHR stall) can never freeze the graph
+            // permanently. If the flag has been stuck > 10s the call is
+            // presumed dead and a fresh one is allowed.
+            var _pnow = Date.now();
+            if (self.pingBusy && (_pnow - (self.pingBusyAt || 0)) < 10000) return Promise.resolve();
             self.pingBusy = true;
+            self.pingBusyAt = _pnow;
             return callHwPing(pingTargetPairs()).then(function(res) {
                 if (!res || !res.targets || res.targets.length === 0) return;
                 if (!self.pingHist) self.pingHist = {};
@@ -1215,8 +1220,10 @@ return view.extend({
             // Skip the RPC entirely while the tab is hidden — the router does
             // no collection work for dashboards nobody is looking at.
             if (document.hidden) return Promise.resolve();
-            if (self.infoBusy) return Promise.resolve();
+            var _inow = Date.now();
+            if (self.infoBusy && (_inow - (self.infoBusyAt || 0)) < 10000) return Promise.resolve();
             self.infoBusy = true;
+            self.infoBusyAt = _inow;
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 self.lastInfo = res;
