@@ -261,7 +261,7 @@ EOFN
 					) >/dev/null 2>&1 &
 				fi
 				# DNS-quiet mode: the resolved address of each domain target is
-				# cached for 10 minutes and later probes ping the IP literal —
+				# cached for 30 minutes and later probes ping the IP literal —
 				# the DNS server (AdGuardHome etc.) sees each domain once per
 				# 10 minutes instead of once per second. A timeout on a cached
 				# IP drops the entry so the next probe re-resolves (heals DNS
@@ -391,7 +391,7 @@ EOF
 $_PT_LIST
 EOF
 				PINGS="$PINGS]"
-				[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 600 "$_NEW_MAP"
+				[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 1800 "$_NEW_MAP"
 				json_esc "${_GW6%%%*}"
 				echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
 				;;

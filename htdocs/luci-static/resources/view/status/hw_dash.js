@@ -269,6 +269,8 @@ return view.extend({
         var PING_AGG_KEEP = 1080;   // 10s buckets (3 h)
         var PING_VIEWS = {
             '2m':  { raw: true,  pts: 120, label: '−2 min',  step: 1 },
+            '5m':  { group: 1,   pts: 30,  label: '−5 min',  step: 10 },
+            '10m': { group: 1,   pts: 60,  label: '−10 min', step: 10 },
             '15m': { group: 1,   pts: 90,  label: '−15 min', step: 10 },
             '1h':  { group: 3,   pts: 120, label: '−1 h',    step: 30 },
             '3h':  { group: 9,   pts: 120, label: '−3 h',    step: 90 }
