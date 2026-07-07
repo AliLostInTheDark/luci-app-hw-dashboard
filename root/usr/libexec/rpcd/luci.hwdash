@@ -172,6 +172,77 @@ $_GW 4"*) ;;
 $_PT_LIST" ;;
 					esac
 				fi
+				# IPv6 default gateway from `ip -6 route` (cached 60s). Link-
+				# local gateways need the %interface zone to be pingable.
+				_GW6=""
+				if _cache_read /tmp/hwdash_gw6.cache; then
+					[ "$C_VAL" != "-" ] && _GW6=$C_VAL
+				elif command -v ip >/dev/null; then
+					while read -r _d6 _via6 _g6 _dev6 _if6 _; do
+						[ "$_d6" = "default" ] || continue
+						[ "$_via6" = "via" ] || continue
+						_GW6=$_g6
+						if [ "$_dev6" = "dev" ]; then
+							case "$_g6" in fe80:*) _GW6="$_g6%$_if6" ;; esac
+						fi
+						break
+					done <<EOF6
+$(ip -6 route show default 2>/dev/null)
+EOF6
+					_cache_write /tmp/hwdash_gw6.cache 60 "${_GW6:--}"
+				fi
+				if [ -n "$_GW6" ]; then
+					case "$_PT_LIST" in
+						"$_GW6 6"*) ;;
+						*"
+$_GW6 6"*) ;;
+						*) _PT_LIST="$_GW 4
+$_GW6 6
+${_PT_LIST#$_GW 4
+}" ;;
+					esac
+				fi
+				# Reverse DNS for IP-literal targets (gateways, user-added IPs).
+				# Resolved by a detached child into a 30-min cache — never on
+				# the request path. Failures cache as "-" so they don't retry
+				# every second.
+				RDNS_MAP=""
+				_cache_read /tmp/hwdash_rdns.cache && RDNS_MAP=$C_VAL
+				_RDNS_MISS=""
+				while read -r _pt_h _pt_f; do
+					[ -z "$_pt_h" ] && continue
+					case "$_pt_h" in
+						*[!0-9.]*) case "$_pt_h" in *:*) ;; *) continue ;; esac ;;
+					esac
+					case ";$RDNS_MAP" in *";$_pt_h="*) continue ;; esac
+					_RDNS_MISS="$_RDNS_MISS $_pt_h"
+				done <<EOFR
+$_PT_LIST
+EOFR
+				if [ -n "$_RDNS_MISS" ] && ! _cache_read /tmp/hwdash_rdns.lock; then
+					_cache_write /tmp/hwdash_rdns.lock 60 resolving
+					(
+						_map=$RDNS_MAP
+						for _rip in $_RDNS_MISS; do
+							_bare=${_rip%%%*}
+							_nm="-"
+							while read -r _rl; do
+								case "$_rl" in
+									*" name = "*)
+										_nm=${_rl##* name = }
+										_nm=${_nm%.}
+										break
+										;;
+								esac
+							done <<EOFN
+$(nslookup "$_bare" 2>/dev/null)
+EOFN
+							case "$_nm" in *[!A-Za-z0-9.-]*) _nm="-" ;; esac
+							_map="${_map:+$_map;}$_rip=$_nm"
+						done
+						_cache_write /tmp/hwdash_rdns.cache 1800 "$_map"
+					) >/dev/null 2>&1 &
+				fi
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
 				while read -r _pt_h _pt_f; do
@@ -218,16 +289,27 @@ EOF
 						case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
 						case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
 					fi
+					_rdns=""
+					case ";$RDNS_MAP;" in
+						*";$_pt_h="*)
+							_rdns=";$RDNS_MAP;"
+							_rdns=${_rdns#*";$_pt_h="}
+							_rdns=${_rdns%%;*}
+							[ "$_rdns" = "-" ] && _rdns=""
+							;;
+					esac
+					json_esc "$_rdns"; _rdj=$JSV
 					json_esc "$_pt_h"
 					[ $_PF -eq 0 ] && PINGS="$PINGS,"
-					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"ms\":$_ms}"
+					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms}"
 					_PF=0
 					_pi=$((_pi + 1))
 				done <<EOF
 $_PT_LIST
 EOF
 				PINGS="$PINGS]"
-				echo "{\"gateway\":\"$_GW\",\"targets\":$PINGS}"
+				json_esc "$_GW6"
+				echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
 				;;
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)

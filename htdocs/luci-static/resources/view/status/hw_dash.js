@@ -276,6 +276,8 @@ return view.extend({
         var TEMP_WINDOW = 200;      // raw 3s temp samples (10 min)
         var TEMP_AGG_KEEP = 360;    // 30s buckets (3 h)
         var TEMP_VIEWS = {
+            '2m':  { raw: true, pts: 40,  label: '−2 min',  step: 3 },
+            '5m':  { raw: true, pts: 100, label: '−5 min',  step: 3 },
             '10m': { raw: true, pts: 200, label: '−10 min', step: 3 },
             '1h':  { group: 1,  pts: 120, label: '−1 h',    step: 30 },
             '3h':  { group: 3,  pts: 120, label: '−3 h',    step: 90 }
@@ -286,7 +288,7 @@ return view.extend({
         };
         var buildSeriesFrom = function(t, vw) {
             if (vw.raw) {
-                return t.data.map(function(v) { return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1 }; });
+                return t.data.slice(-vw.pts).map(function(v) { return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1 }; });
             }
             var per = vw.group;
             var src = t.agg.slice(-(vw.pts * per));
@@ -367,21 +369,26 @@ return view.extend({
             }
             styleBtns();
             el.appendChild(ctlRow);
-            var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden; touch-action: pan-y;' });
+            // outer holds the crosshair + tooltip UNCLIPPED (so a tall
+            // tooltip can extend past the plot instead of truncating); the
+            // inner clip keeps the SVG inside the rounded border.
+            var plot = E('div', { style: 'position: relative; width: 100%; touch-action: pan-y;' });
+            var plotClip = E('div', { style: 'width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
+            plot.appendChild(plotClip);
             var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
-            plot.appendChild(svgWrap);
+            plotClip.appendChild(svgWrap);
             var gridFracs = [0.25, 0.5, 0.75];
             var plotHc = GH - GTOP - GBOT;
             var gridLabels = gridFracs.map(function(g) {
                 var topPct = ((GTOP + plotHc * (1 - g)) / GH * 100).toFixed(1);
-                var sp = E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' });
+                var sp = E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none; z-index: 2;' });
                 plot.appendChild(sp);
                 return sp;
             });
             var topLabel = E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55; pointer-events: none;' });
             plot.appendChild(topLabel);
             var xline = E('div', { style: 'position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); display: none; pointer-events: none;' });
-            var tip = E('div', { style: 'position: absolute; top: 6px; font-size: 0.72em; background: rgba(20,22,26,0.92); border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 6px 9px; display: none; pointer-events: none; z-index: 5; white-space: nowrap;' });
+            var tip = E('div', { style: 'position: absolute; top: 6px; font-size: 0.76em; line-height: 1.5; background: rgba(20,22,26,0.95); border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 7px 10px; display: none; pointer-events: none; z-index: 9; white-space: nowrap;' });
             plot.appendChild(xline);
             plot.appendChild(tip);
             var applyHover = function(frac) {
@@ -1019,8 +1026,12 @@ return view.extend({
                 res.targets.forEach(function(t, i) {
                     var key = t.host + '/v' + t.fam;
                     if (!hist[key]) {
+                        var isGw = (res.gateway && t.host === res.gateway) ? 4 : (res.gateway6 && t.host === res.gateway6) ? 6 : 0;
                         hist[key] = {
-                            label: (res.gateway && t.host === res.gateway) ? 'Gateway (' + t.host + ')' : t.host + ' (v' + t.fam + ')',
+                            label: isGw ? 'Gateway v' + isGw : t.host + ' (v' + t.fam + ')',
+                            gw: isGw,
+                            host: t.host,
+                            fam: t.fam,
                             color: PING_COLORS[Object.keys(hist).length % PING_COLORS.length],
                             hidden: false,
                             data: [],
@@ -1030,6 +1041,7 @@ return view.extend({
                     }
                     var h = hist[key];
                     if (t.ip) h.ip = t.ip;
+                    if (t.rdns) h.rdns = t.rdns;
                     var v = typeof t.ms === 'number' ? t.ms : null;
                     h.data.push(v);
                     if (h.data.length > PING_WINDOW) h.data.shift();
@@ -1065,6 +1077,7 @@ return view.extend({
                             defaultView: '2m',
                             unit: ' ms',
                             csvName: 'ping',
+                            height: 250,
                             spikeNulls: true,
                             lossTicks: true,
                             autoRange: false,
@@ -1090,8 +1103,9 @@ return view.extend({
                         var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
                         var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em; table-layout: fixed;' });
                         tbl.appendChild(E('tr', {}, [
-                            E('th', { style: thStyle + 'text-align: left; width: 17%;' }, 'Target'),
-                            E('th', { style: thStyle + 'text-align: left; width: 17%;' + divS }, 'IP'),
+                            E('th', { style: thStyle + 'text-align: left; width: 8%;' }, 'Protocol'),
+                            E('th', { style: thStyle + 'text-align: left; width: 15%;' + divS }, 'Target'),
+                            E('th', { style: thStyle + 'text-align: left; width: 16%;' + divS }, 'IP Address'),
                             E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
                             E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
                             E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
@@ -1116,16 +1130,18 @@ return view.extend({
                         keys.forEach(function(k) {
                             var t = hist[k];
                             var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
+                            var ellip = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;';
                             var cells = {
-                                ip: E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' + pt.divS }),
+                                target: E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; ' + ellip + pt.divS }),
+                                ip: E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; ' + ellip + pt.divS }),
                                 cur: E('td', { style: tdS }), min: E('td', { style: tdS }),
                                 avg: E('td', { style: tdS }), p95: E('td', { style: tdS }),
                                 max: E('td', { style: tdS }), jit: E('td', { style: tdS }),
                                 loss: E('td', { style: tdS })
                             };
                             var tr = E('tr', {}, [
-                                E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' }, t.label),
-                                cells.ip, cells.cur, cells.min, cells.avg, cells.p95, cells.max, cells.jit, cells.loss
+                                E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap;' }, 'IPv' + (t.fam || (k.indexOf('/v6') !== -1 ? 6 : 4))),
+                                cells.target, cells.ip, cells.cur, cells.min, cells.avg, cells.p95, cells.max, cells.jit, cells.loss
                             ]);
                             pt.tbl.appendChild(tr);
                             pt.rows[k] = { tr: tr, cells: cells };
@@ -1151,7 +1167,16 @@ return view.extend({
                         var last = t.data.length ? t.data[t.data.length - 1] : null;
                         var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
                         var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
-                        row.cells.ip.textContent = t.ip || '—';
+                        // Target column: domains stay as-is, IP-literal targets show
+                        // their reverse-DNS name (or —); IP column always shows the
+                        // address actually being probed.
+                        var isIpLit = /^[0-9.]+$/.test(t.host) || t.host.indexOf(':') !== -1;
+                        var tgtTxt = t.gw ? 'Gateway' + (t.rdns ? ' (' + t.rdns + ')' : '') : (isIpLit ? (t.rdns || '—') : t.host);
+                        row.cells.target.textContent = tgtTxt;
+                        row.cells.target.title = tgtTxt;
+                        var ipTxt = isIpLit ? t.host : (t.ip || '—');
+                        row.cells.ip.textContent = ipTxt;
+                        row.cells.ip.title = ipTxt;
                         row.cells.cur.textContent = last === null ? 'TO' : fmt(last);
                         row.cells.min.textContent = fmt(vals.length ? vals[0] : null);
                         row.cells.avg.textContent = fmt(vals.length ? sum / vals.length : null);
@@ -1429,7 +1454,7 @@ return view.extend({
                             }, 'Active Connections'), E('span', {
                                 class: 'hw-stat-value',
                                 style: 'color: ' + colorConn + ';'
-                            }, [connCount + ' / ' + connMax, (res.peaks && res.peaks.conntrack > 0 ? E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal;', title: 'Highest count since boot' }, ' \u00b7 peak ' + res.peaks.conntrack) : '')])]), E('div', {
+                            }, connCount + ' / ' + connMax)]), E('div', {
                                 class: 'hw-bar-bg'
                             }, [E('div', {
                                 class: 'hw-bar-fill',
@@ -2179,7 +2204,7 @@ return view.extend({
                                 lossTicks: false,
                                 autoRange: true,
                                 legend: false,
-                                height: 150
+                                height: 170
                             });
                             self.tempPanel.el.style.marginBottom = '16px';
                         }
@@ -2240,17 +2265,6 @@ return view.extend({
                             coolRow.insertBefore(E('span', { style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; align-self: center;' }, 'Cooling'), coolRow.firstChild);
                             thermWrap.firstChild.appendChild(coolRow);
                         }
-                    }
-                    // since-boot peak watermark
-                    if (res.peaks && res.peaks.temp > 0 && thermWrap.firstChild) {
-                        var pkAgo = '';
-                        if (res.peaks.temp_ts > 0) {
-                            var nowEp = Math.floor(Date.now() / 1000);
-                            var agoS = Math.max(0, nowEp - res.peaks.temp_ts);
-                            pkAgo = agoS < 60 ? 'just now' : agoS < 3600 ? Math.floor(agoS / 60) + 'm ago' : agoS < 86400 ? Math.floor(agoS / 3600) + 'h ago' : Math.floor(agoS / 86400) + 'd ago';
-                        }
-                        thermWrap.firstChild.appendChild(E('div', { style: 'text-align: center; font-size: 0.78em; opacity: 0.6; margin-top: 8px;' },
-                            'Peak since boot: ' + res.peaks.temp + ' \u00b0C (' + res.peaks.temp_sensor.replace(/_/g, '-').toUpperCase() + (pkAgo ? ', ' + pkAgo : '') + ')'));
                     }
                 }
                 // Ports Topology: ethernet links and the USB bus share one card.
@@ -2609,10 +2623,9 @@ return view.extend({
                         addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
                         addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
                         // turboacc-style current/total bars
-                        var mkOffBar = function(lbl, cur, tot, color, peakN) {
+                        var mkOffBar = function(lbl, cur, tot, color) {
                             var pctB = tot > 0 ? Math.min(100, cur / tot * 100) : 0;
                             var valSpan = E('span', { class: 'hw-stat-value', style: 'color:' + color + ';' }, cur + ' / ' + tot);
-                            if (peakN > 0) valSpan.appendChild(E('span', { style: 'opacity: 0.5; font-size: 0.85em; font-weight: normal; color: var(--text-color, inherit);', title: 'Highest count since boot' }, ' \u00b7 peak ' + peakN));
                             offNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
                                 E('div', { class: 'hw-progress-header' }, [
                                     E('span', { class: 'hw-stat-label' }, lbl),
@@ -2622,10 +2635,10 @@ return view.extend({
                             ]));
                         };
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
-                        if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4', 0);
+                        if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4');
                         // vs the real hardware table: 16384 entries per PPE on the
                         // upstream driver (turboacc-style bind/total display)
-                        if (off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a', (res.peaks && res.peaks.ppe) || 0);
+                        if (off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a');
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }
