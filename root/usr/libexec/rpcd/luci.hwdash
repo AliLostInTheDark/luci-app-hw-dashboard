@@ -173,49 +173,39 @@ $_GW 4"*) ;;
 $_PT_LIST" ;;
 					esac
 				fi
-				# IPv6 default gateway (cached 60s). Chain: routing table
-				# first — a GUA next-hop wins, else the lowest-metric fe80::
-				# next-hop (the real gateway on RA-only ISPs, kept pingable
-				# via its %zone) — then the netifd v6 wan interfaces as a
-				# fallback source. Only a link with no v6 gateway at all
-				# leaves gateway6 empty (UI shows the row as N/A).
+				# IPv6 default gateway (cached 60s): the FIRST default route
+				# (ip orders by metric, so lowest-metric wins) — on real ISPs
+				# this is the BNG/BRAS link-local. The %zone is kept internally
+				# so the probe works, but stripped from everything shown.
+				# netifd v6 wan interfaces are the fallback source.
 				_GW6=""
 				if _cache_read /tmp/hwdash_gw6.cache; then
 					[ "$C_VAL" != "-" ] && _GW6=$C_VAL
 				else
-					_gw6_ll=""
 					if command -v ip >/dev/null; then
 						while read -r _d6 _via6 _g6 _dev6 _if6 _; do
 							[ "$_d6" = "default" ] || continue
 							[ "$_via6" = "via" ] || continue
+							_GW6=$_g6
 							case "$_g6" in
-								fe80:*)
-									if [ -z "$_gw6_ll" ] && [ "$_dev6" = "dev" ]; then
-										_gw6_ll="$_g6%$_if6"
-									fi
-									;;
-								*:*)
-									_GW6=$_g6
-									break
-									;;
+								fe80:*) [ "$_dev6" = "dev" ] && _GW6="$_g6%$_if6" ;;
 							esac
+							break
 						done <<EOF6
 $(ip -6 route show default 2>/dev/null)
 EOF6
 					fi
-					if [ -z "$_GW6" ] && [ -z "$_gw6_ll" ] && command -v jsonfilter >/dev/null; then
+					if [ -z "$_GW6" ] && command -v jsonfilter >/dev/null; then
 						for _w6 in wan6 wan_6 wan; do
 							_ifn6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
-							for _g6 in $(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[*].nexthop' 2>/dev/null); do
-								case "$_g6" in
-									'') ;;
-									fe80:*) [ -z "$_gw6_ll" ] && _gw6_ll="$_g6${_ifn6:+%$_ifn6}" ;;
-									*:*) _GW6=$_g6; break 2 ;;
-								esac
-							done
+							_g6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+							case "$_g6" in
+								'') ;;
+								fe80:*) _GW6="$_g6${_ifn6:+%$_ifn6}"; break ;;
+								*:*) _GW6=$_g6; break ;;
+							esac
 						done
 					fi
-					[ -z "$_GW6" ] && _GW6=$_gw6_ll
 					_cache_write /tmp/hwdash_gw6.cache 60 "${_GW6:--}"
 				fi
 				if [ -n "$_GW6" ]; then
@@ -372,7 +362,8 @@ EOF
 							;;
 					esac
 					json_esc "$_rdns"; _rdj=$JSV
-					json_esc "$_pt_h"
+					# report hosts without the internal %zone suffix
+					json_esc "${_pt_h%%%*}"
 					[ $_PF -eq 0 ] && PINGS="$PINGS,"
 					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms}"
 					_PF=0
@@ -382,7 +373,7 @@ $_PT_LIST
 EOF
 				PINGS="$PINGS]"
 				[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 600 "$_NEW_MAP"
-				json_esc "$_GW6"
+				json_esc "${_GW6%%%*}"
 				echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
 				;;
 			info)
