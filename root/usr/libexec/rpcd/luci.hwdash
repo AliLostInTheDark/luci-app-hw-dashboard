@@ -106,6 +106,7 @@ case "$1" in
 				fi
 				;;
 			ping)
+				HWDASH_NOW=$(date +%s 2>/dev/null)
 				# Router-side latency probes. Target list priority:
 				#   1. "targets" array in the RPC args (set from the dashboard
 				#      settings panel, stored per-browser) — "<host> <4|6>"
@@ -172,23 +173,46 @@ $_GW 4"*) ;;
 $_PT_LIST" ;;
 					esac
 				fi
-				# IPv6 default gateway from `ip -6 route` (cached 60s). Link-
-				# local gateways need the %interface zone to be pingable.
+				# IPv6 default gateway (cached 60s). Preference chain: a GUA
+				# next-hop in the routing table, then a GUA gateway from the
+				# netifd v6 wan interfaces, and only as a last resort the
+				# link-local next-hop (with its %zone so it stays pingable) —
+				# ISPs that only RA a fe80:: hop still get a v6 first-hop probe.
 				_GW6=""
 				if _cache_read /tmp/hwdash_gw6.cache; then
 					[ "$C_VAL" != "-" ] && _GW6=$C_VAL
-				elif command -v ip >/dev/null; then
-					while read -r _d6 _via6 _g6 _dev6 _if6 _; do
-						[ "$_d6" = "default" ] || continue
-						[ "$_via6" = "via" ] || continue
-						_GW6=$_g6
-						if [ "$_dev6" = "dev" ]; then
-							case "$_g6" in fe80:*) _GW6="$_g6%$_if6" ;; esac
-						fi
-						break
-					done <<EOF6
+				else
+					_gw6_ll=""
+					if command -v ip >/dev/null; then
+						while read -r _d6 _via6 _g6 _dev6 _if6 _; do
+							[ "$_d6" = "default" ] || continue
+							[ "$_via6" = "via" ] || continue
+							case "$_g6" in
+								fe80:*)
+									if [ -z "$_gw6_ll" ] && [ "$_dev6" = "dev" ]; then
+										_gw6_ll="$_g6%$_if6"
+									fi
+									;;
+								*:*)
+									_GW6=$_g6
+									break
+									;;
+							esac
+						done <<EOF6
 $(ip -6 route show default 2>/dev/null)
 EOF6
+					fi
+					if [ -z "$_GW6" ] && command -v jsonfilter >/dev/null; then
+						for _w6 in wan6 wan_6 wan; do
+							for _g6 in $(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[*].nexthop' 2>/dev/null); do
+								case "$_g6" in
+									fe80:*|'') ;;
+									*:*) _GW6=$_g6; break 2 ;;
+								esac
+							done
+						done
+					fi
+					[ -z "$_GW6" ] && _GW6=$_gw6_ll
 					_cache_write /tmp/hwdash_gw6.cache 60 "${_GW6:--}"
 				fi
 				if [ -n "$_GW6" ]; then
@@ -243,12 +267,34 @@ EOFN
 						_cache_write /tmp/hwdash_rdns.cache 1800 "$_map"
 					) >/dev/null 2>&1 &
 				fi
+				# DNS-quiet mode: the resolved address of each domain target is
+				# cached for 10 minutes and later probes ping the IP literal —
+				# the DNS server (AdGuardHome etc.) sees each domain once per
+				# 10 minutes instead of once per second. A timeout on a cached
+				# IP drops the entry so the next probe re-resolves (heals DNS
+				# rotation); the cache file is only rewritten when it changes.
+				DNS_MAP=""
+				_cache_read /tmp/hwdash_dns.cache && DNS_MAP=$C_VAL
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
 				while read -r _pt_h _pt_f; do
 					[ -z "$_pt_h" ] && continue
+					_tgt=$_pt_h
+					case "$_pt_h" in
+						*:*) ;;
+						*[!0-9.]*)
+							case ";$DNS_MAP;" in
+								*";$_pt_h|$_pt_f="*)
+									_tgt=";$DNS_MAP;"
+									_tgt=${_tgt#*";$_pt_h|$_pt_f="}
+									_tgt=${_tgt%%;*}
+									[ -z "$_tgt" ] && _tgt=$_pt_h
+									;;
+							esac
+							;;
+					esac
 					(
-						_out=$(ping -c 1 -W 1 -"$_pt_f" "$_pt_h" 2>/dev/null)
+						_out=$(ping -c 1 -W 1 -"$_pt_f" "$_tgt" 2>/dev/null)
 						# resolved address from the "PING host (ip)" banner — the
 						# IP this probe ACTUALLY hit (visible through DNS rotation)
 						_ip=""
@@ -280,6 +326,8 @@ EOF
 				PINGS="["
 				_pi=0
 				_PF=1
+				_NEW_MAP=""
+				_MAP_DIRTY=0
 				while read -r _pt_h _pt_f; do
 					[ -z "$_pt_h" ] && continue
 					_ms="null"; _pip=""
@@ -289,6 +337,28 @@ EOF
 						case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
 						case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
 					fi
+					# maintain the domain->IP cache from this probe result
+					case "$_pt_h" in
+						*:*) ;;
+						*[!0-9.]*)
+							_old=""
+							case ";$DNS_MAP;" in
+								*";$_pt_h|$_pt_f="*)
+									_old=";$DNS_MAP;"
+									_old=${_old#*";$_pt_h|$_pt_f="}
+									_old=${_old%%;*}
+									;;
+							esac
+							if [ "$_ms" != "null" ] && [ -n "$_pip" ]; then
+								_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$_pt_h|$_pt_f=$_pip"
+								[ "$_pip" != "$_old" ] && _MAP_DIRTY=1
+							elif [ "$_ms" = "null" ] && [ -n "$_old" ]; then
+								_MAP_DIRTY=1
+							elif [ -n "$_old" ]; then
+								_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$_pt_h|$_pt_f=$_old"
+							fi
+							;;
+					esac
 					_rdns=""
 					case ";$RDNS_MAP;" in
 						*";$_pt_h="*)
@@ -308,6 +378,7 @@ EOF
 $_PT_LIST
 EOF
 				PINGS="$PINGS]"
+				[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 600 "$_NEW_MAP"
 				json_esc "$_GW6"
 				echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
 				;;

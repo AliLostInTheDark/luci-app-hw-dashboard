@@ -1011,7 +1011,7 @@ return view.extend({
         container.insertBefore(settingsRow, settingsPanel);
         applyCardVisibility();
 
-        poll.add(function() {
+        var pingTick = function() {
             // Same hidden-tab rule as the main poll: no pings for a dashboard
             // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
@@ -1210,9 +1210,10 @@ return view.extend({
                 }
                 applyCardVisibility();
             }).catch(function() {}).then(function() { self.pingBusy = false; });
-        }, 1);
+        };
+        poll.add(pingTick, 1);
 
-        poll.add(function() {
+        var infoTick = function() {
             // Skip the RPC entirely while the tab is hidden — the router does
             // no collection work for dashboards nobody is looking at.
             if (document.hidden) return Promise.resolve();
@@ -2776,7 +2777,13 @@ return view.extend({
             }).catch(function(err) {
                 console.error(err);
             }).then(function() { self.infoBusy = false; });
-        }, 3);
+        };
+        poll.add(infoTick, 3);
+        // First paint NOW — don't wait for LuCI's poll to align to its 3s
+        // boundary (that alignment is why the hardware cards used to appear
+        // seconds after the ping card).
+        infoTick();
+        pingTick();
 
         return container;
     },
