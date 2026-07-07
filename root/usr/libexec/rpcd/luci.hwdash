@@ -268,6 +268,16 @@ EOFN
 				# rotation); the cache file is only rewritten when it changes.
 				DNS_MAP=""
 				_cache_read /tmp/hwdash_dns.cache && DNS_MAP=$C_VAL
+				# -n (no reverse DNS) is an iputils flag and the fix for the
+				# 5s resolver-hang; busybox ping builds vary, so probe loopback
+				# once (cached 1h) and only pass -n where it is accepted.
+				PING_N=""
+				if _cache_read /tmp/hwdash_ping_n.cache; then
+					PING_N=$C_VAL
+				else
+					ping -4 -c 1 -w 1 -n 127.0.0.1 >/dev/null 2>&1 && PING_N="-n"
+					_cache_write /tmp/hwdash_ping_n.cache 3600 "$PING_N"
+				fi
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
 				_ping_pids=""
@@ -292,7 +302,7 @@ EOFN
 						# hangs that -W does not cap), -n = no reverse-DNS
 						# (its resolver timeout was the 5s stall when the
 						# internet/DNS was unreachable).
-						_out=$(ping -"$_pt_f" -c 1 -w 2 -n "$_tgt" 2>/dev/null)
+						_out=$(ping -"$_pt_f" -c 1 -w 2 $PING_N "$_tgt" 2>/dev/null)
 						# resolved address from the "PING host (ip)" banner — the
 						# IP this probe ACTUALLY hit (visible through DNS rotation)
 						_ip=""
