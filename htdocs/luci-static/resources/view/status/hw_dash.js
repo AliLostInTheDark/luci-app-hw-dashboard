@@ -265,29 +265,26 @@ return view.extend({
         };
         // PING_GRAPH_START (marker used by the test harness)
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
-        var PING_WINDOW = 120;          // raw 1s samples kept (2 min)
-        var PING_AGG_KEEP = 1080;       // 10s buckets kept (3 h)
-        // view: [bucket size in raw agg entries (10s each), points shown, axis label]
+        var PING_WINDOW = 120;      // raw 1s ping samples (2 min)
+        var PING_AGG_KEEP = 1080;   // 10s buckets (3 h)
         var PING_VIEWS = {
-            '2m':  { raw: true,  pts: 120, label: '−2 min' },
-            '15m': { group: 1,   pts: 90,  label: '−15 min' },
-            '1h':  { group: 3,   pts: 120, label: '−1 h' },
-            '3h':  { group: 9,   pts: 120, label: '−3 h' }
+            '2m':  { raw: true,  pts: 120, label: '−2 min',  step: 1 },
+            '15m': { group: 1,   pts: 90,  label: '−15 min', step: 10 },
+            '1h':  { group: 3,   pts: 120, label: '−1 h',    step: 30 },
+            '3h':  { group: 9,   pts: 120, label: '−3 h',    step: 90 }
         };
-        var pingUI = { view: '2m', lastNode: null, lastHist: null, series: null, plotRect: null };
-        var repaintPing = function() {
-            if (pingUI.lastNode && pingUI.lastHist) renderPingGraph(pingUI.lastNode, pingUI.lastHist);
+        var TEMP_WINDOW = 200;      // raw 3s temp samples (10 min)
+        var TEMP_AGG_KEEP = 360;    // 30s buckets (3 h)
+        var TEMP_VIEWS = {
+            '10m': { raw: true, pts: 200, label: '−10 min', step: 3 },
+            '1h':  { group: 1,  pts: 120, label: '−1 h',    step: 30 },
+            '3h':  { group: 3,  pts: 120, label: '−3 h',    step: 90 }
         };
         var pingPct = function(sorted, p) {
             if (!sorted.length) return null;
             return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
         };
-        // Build the plotted series for a target in the selected view.
-        // Raw view: 1s values, null = timeout. Decimated views: 10s-bucket
-        // averages grouped further; a bucket with zero successful samples is
-        // null (drawn as a spike), partial loss sets the loss flag (tick).
-        var pingSeries = function(t, viewKey) {
-            var vw = PING_VIEWS[viewKey];
+        var buildSeriesFrom = function(t, vw) {
             if (vw.raw) {
                 return t.data.map(function(v) { return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1 }; });
             }
@@ -302,142 +299,113 @@ return view.extend({
                     loss += b.loss;
                 }
                 var cnt = n + loss;
-                // tick flag: >=2% of the bucket's samples lost, so a single
-                // stray drop in a 90s bucket doesn't paint the whole axis red
                 out.push({ v: n > 0 ? sum / n : null, loss: loss > 0 && cnt > 0 && loss / cnt >= 0.02, lostN: loss, cnt: cnt });
             }
             return out;
         };
-        var renderPingGraph = function(node, hist) {
-            pingUI.lastNode = node;
-            pingUI.lastHist = hist;
-            var keys = Object.keys(hist);
-            if (keys.length === 0) return;
-            var vw = PING_VIEWS[pingUI.view];
-            var W = 600, H = 190, TOP = 6, BOT = 8;
-            var series = {};
-            keys.forEach(function(k) { series[k] = pingSeries(hist[k], pingUI.view); });
-            pingUI.series = series;
-            // Y scale from VISIBLE lines: p95 * 1.5 with 20ms floor
-            var all = [];
-            keys.forEach(function(k) {
-                if (hist[k].hidden) return;
-                series[k].forEach(function(p) { if (p.v !== null) all.push(p.v); });
-            });
-            var ymax = 20;
-            if (all.length) {
-                all.sort(function(a, b) { return a - b; });
-                ymax = Math.max(20, Math.min(all[all.length - 1], pingPct(all, 0.95) * 1.5));
-            }
-            ymax = Math.ceil(ymax / 10) * 10;
-            var plotH = H - TOP - BOT;
-            var step = W / (vw.pts - 1);
-            var yFor = function(v) { return TOP + plotH * (1 - Math.min(v, ymax) / ymax); };
-            var svg = '';
-            var gridFracs = [0.25, 0.5, 0.75];
-            gridFracs.forEach(function(g) {
-                var gy = (TOP + plotH * (1 - g)).toFixed(1);
-                svg += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
-            });
-            var lossXs = {};
-            keys.forEach(function(k) {
-                var t = hist[k];
-                if (t.hidden) return;
-                var sr = series[k];
-                var anyOk = sr.some(function(p) { return p.v !== null; });
-                if (!anyOk) return; // fully dead target: no line, no loss ticks — legend shows N/A
-                var pts = [];
-                var lastPt = null, lastNull = false;
-                for (var i = 0; i < sr.length; i++) {
-                    var x = W - (sr.length - 1 - i) * step;
-                    if (sr[i].loss) lossXs[x.toFixed(1)] = 1;
-                    var y = sr[i].v === null ? TOP : yFor(sr[i].v);
-                    pts.push(x.toFixed(1) + ',' + y.toFixed(1));
-                    lastPt = [x, y];
-                    lastNull = (sr[i].v === null);
-                }
-                if (pts.length === 1) {
-                    var xy = pts[0].split(',');
-                    svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
-                } else if (pts.length > 1) {
-                    svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
-                }
-                if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + (lastNull ? '#ff1744' : t.color) + '"/>';
-            });
-            // packet-loss tick marks along the bottom edge
-            Object.keys(lossXs).forEach(function(x) {
-                svg += '<line x1="' + x + '" y1="' + (H - 6) + '" x2="' + x + '" y2="' + H + '" stroke="#ff1744" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
-            });
-            node.innerHTML = '';
-            // window selector + CSV export
+        // Persistent realtime graph panel. The skeleton (buttons, plot, axis,
+        // tooltip, legend entries) is created ONCE and keeps its DOM identity —
+        // poll ticks only repaint the SVG data and update text in place, so
+        // hover state and the mouse pointer are never reset by a refresh.
+        // Hover position is remembered and re-applied after each repaint.
+        var createGraphPanel = function(opts) {
+            var VIEWS = opts.views;
+            var GW = 600, GH = opts.height || 190, GTOP = 6, GBOT = opts.lossTicks ? 8 : 4;
+            var P = { view: opts.defaultView, hoverFrac: null, hist: null, series: null, keys: [] };
+            var el = E('div', { style: 'width: 100%;' });
+            var btnBase = 'font-size: 0.72em; padding: 2px 9px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: transparent; color: inherit;';
+            var btns = {};
+            var styleBtns = function() {
+                Object.keys(btns).forEach(function(vk) {
+                    var sel = vk === P.view;
+                    btns[vk].style.borderColor = sel ? '#00bcd4' : '';
+                    btns[vk].style.background = sel ? 'rgba(0,188,212,0.15)' : 'transparent';
+                    btns[vk].style.color = sel ? '#00bcd4' : 'inherit';
+                });
+            };
             var ctlRow = E('div', { style: 'display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-bottom: 6px;' });
-            Object.keys(PING_VIEWS).forEach(function(vk) {
-                var sel = vk === pingUI.view;
-                ctlRow.appendChild(E('button', {
-                    style: 'font-size: 0.72em; padding: 2px 9px; border-radius: 4px; cursor: pointer; border: 1px solid ' + (sel ? '#00bcd4' : 'var(--border-color, rgba(128,128,128,0.3))') + '; background: ' + (sel ? 'rgba(0,188,212,0.15)' : 'transparent') + '; color: ' + (sel ? '#00bcd4' : 'inherit') + ';',
-                    click: function() { pingUI.view = vk; repaintPing(); }
-                }, vk));
-            });
-            ctlRow.appendChild(E('button', {
-                style: 'font-size: 0.72em; padding: 2px 9px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: transparent; color: inherit; margin-left: 8px;',
-                click: function() {
-                    var head = ['offset_s'];
-                    var cols = [];
-                    keys.forEach(function(k) { head.push('"' + hist[k].label + '"'); cols.push(series[k]); });
-                    var maxLen = 0;
-                    cols.forEach(function(c) { maxLen = Math.max(maxLen, c.length); });
-                    var stepS = vw.raw ? 1 : vw.group * 10;
-                    var lines = [head.join(',')];
-                    for (var r = 0; r < maxLen; r++) {
-                        var row = [String(-(maxLen - 1 - r) * stepS)];
-                        cols.forEach(function(c) {
-                            var idx = r - (maxLen - c.length);
-                            var p = idx >= 0 ? c[idx] : null;
-                            row.push(p && p.v !== null ? p.v.toFixed(1) : '');
-                        });
-                        lines.push(row.join(','));
+            Object.keys(VIEWS).forEach(function(vk) {
+                var b = E('button', {
+                    style: btnBase,
+                    click: function() {
+                        P.view = vk;
+                        styleBtns();
+                        axisL.textContent = VIEWS[vk].label;
+                        if (P.hist) update(P.hist);
                     }
-                    var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-                    var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-ping-' + pingUI.view + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                    URL.revokeObjectURL(a.href);
-                }
-            }, '⤓ CSV'));
-            node.appendChild(ctlRow);
+                }, vk);
+                btns[vk] = b;
+                ctlRow.appendChild(b);
+            });
+            if (opts.csvName) {
+                ctlRow.appendChild(E('button', {
+                    style: btnBase + ' margin-left: 8px;',
+                    click: function() {
+                        if (!P.series) return;
+                        var vw = VIEWS[P.view];
+                        var head = ['offset_s'];
+                        var cols = [];
+                        P.keys.forEach(function(k) { head.push('"' + P.hist[k].label + '"'); cols.push(P.series[k]); });
+                        var maxLen = 0;
+                        cols.forEach(function(c) { maxLen = Math.max(maxLen, c.length); });
+                        var lines = [head.join(',')];
+                        for (var r = 0; r < maxLen; r++) {
+                            var row = [String(-(maxLen - 1 - r) * vw.step)];
+                            cols.forEach(function(c) {
+                                var idx = r - (maxLen - c.length);
+                                var p = idx >= 0 ? c[idx] : null;
+                                row.push(p && p.v !== null ? p.v.toFixed(1) : '');
+                            });
+                            lines.push(row.join(','));
+                        }
+                        var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+                        var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-' + opts.csvName + '-' + P.view + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                        URL.revokeObjectURL(a.href);
+                    }
+                }, '⤓ CSV'));
+            }
+            styleBtns();
+            el.appendChild(ctlRow);
             var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
             var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
-            svgWrap.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
             plot.appendChild(svgWrap);
-            gridFracs.forEach(function(g) {
-                var topPct = ((TOP + plotH * (1 - g)) / H * 100).toFixed(1);
-                plot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, Math.round(ymax * g) + ' ms'));
+            var gridFracs = [0.25, 0.5, 0.75];
+            var plotHc = GH - GTOP - GBOT;
+            var gridLabels = gridFracs.map(function(g) {
+                var topPct = ((GTOP + plotHc * (1 - g)) / GH * 100).toFixed(1);
+                var sp = E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' });
+                plot.appendChild(sp);
+                return sp;
             });
-            plot.appendChild(E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, ymax + ' ms'));
-            // hover crosshair + tooltip
+            var topLabel = E('span', { style: 'position: absolute; top: 2px; left: 5px; font-size: 0.68em; opacity: 0.55; pointer-events: none;' });
+            plot.appendChild(topLabel);
             var xline = E('div', { style: 'position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); display: none; pointer-events: none;' });
             var tip = E('div', { style: 'position: absolute; top: 6px; font-size: 0.72em; background: rgba(20,22,26,0.92); border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 6px 9px; display: none; pointer-events: none; z-index: 5; white-space: nowrap;' });
             plot.appendChild(xline);
             plot.appendChild(tip);
             var applyHover = function(frac) {
+                if (!P.series) return;
                 var rect = plot.getBoundingClientRect();
                 if (!rect.width) return;
+                var vw = VIEWS[P.view];
                 var idx = Math.round(frac * (vw.pts - 1));
-                var stepS = vw.raw ? 1 : vw.group * 10;
                 var px = (idx / (vw.pts - 1)) * rect.width;
                 xline.style.left = px + 'px';
                 xline.style.display = 'block';
                 tip.innerHTML = '';
-                tip.appendChild(E('div', { style: 'opacity: 0.6; margin-bottom: 3px;' }, '−' + ((vw.pts - 1 - idx) * stepS) + ' s'));
-                keys.forEach(function(k) {
-                    if (hist[k].hidden) return;
-                    var sr = series[k];
+                tip.appendChild(E('div', { style: 'opacity: 0.6; margin-bottom: 3px;' }, '−' + ((vw.pts - 1 - idx) * vw.step) + ' s'));
+                P.keys.forEach(function(k) {
+                    var t = P.hist[k];
+                    if (t.hidden) return;
+                    var sr = P.series[k];
                     var si = idx - (vw.pts - sr.length);
                     var p = si >= 0 && si < sr.length ? sr[si] : null;
-                    var val = !p ? '—' : (p.v === null ? 'timeout' : p.v.toFixed(1) + ' ms');
+                    var val = !p || p.v === null ? (p && opts.spikeNulls ? 'timeout' : '—') : p.v.toFixed(1) + opts.unit;
                     tip.appendChild(E('div', { style: 'display: flex; align-items: center; gap: 5px;' }, [
-                        E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; background: ' + hist[k].color + ';' }),
-                        E('span', { style: 'opacity: 0.75;' }, hist[k].label),
-                        E('span', { style: 'font-weight: 600; color: ' + (p && p.v === null ? '#ff5252' : hist[k].color) + '; margin-left: auto; padding-left: 8px;' }, val)
+                        E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; background: ' + t.color + ';' }),
+                        E('span', { style: 'opacity: 0.75;' }, t.label),
+                        E('span', { style: 'font-weight: 600; color: ' + (p && p.v === null && opts.spikeNulls ? '#ff5252' : t.color) + '; margin-left: auto; padding-left: 8px;' }, val)
                     ]));
                 });
                 tip.style.display = 'block';
@@ -445,88 +413,132 @@ return view.extend({
             };
             plot.addEventListener('mousemove', function(ev) {
                 var rect = plot.getBoundingClientRect();
-                pingUI.hoverFrac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-                applyHover(pingUI.hoverFrac);
+                P.hoverFrac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                applyHover(P.hoverFrac);
             });
             plot.addEventListener('mouseleave', function() {
-                pingUI.hoverFrac = null;
+                P.hoverFrac = null;
                 xline.style.display = 'none';
                 tip.style.display = 'none';
             });
-            node.appendChild(plot);
-            // Re-apply the crosshair after every 1s repaint, so the tooltip no
-            // longer vanishes under the cursor while the graph refreshes.
-            if (pingUI.hoverFrac != null) applyHover(pingUI.hoverFrac);
-            node.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
-                E('span', {}, vw.label),
+            el.appendChild(plot);
+            var axisL = E('span', {}, VIEWS[P.view].label);
+            el.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
+                axisL,
                 E('span', {}, 'now')
             ]));
-            // legend — click an entry to hide/show its line
-            var legend = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 10px;' });
-            keys.forEach(function(k) {
-                var t = hist[k];
-                var last = t.data.length ? t.data[t.data.length - 1] : null;
-                var okCnt = 0;
-                t.data.forEach(function(v) { if (v !== null) okCnt++; });
-                var dead = okCnt === 0 && t.data.length >= 3;
-                var valTxt = dead ? 'N/A' : (last === null ? 'timeout' : last.toFixed(1) + ' ms');
-                var valColor = dead ? '#9e9e9e' : (last === null ? '#ff5252' : t.color);
-                legend.appendChild(E('span', {
-                    style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em; cursor: pointer; user-select: none;' + (t.hidden ? ' opacity: 0.35;' : (dead ? ' opacity: 0.55;' : '')),
-                    title: 'Click to ' + (t.hidden ? 'show' : 'hide'),
-                    click: function() { t.hidden = !t.hidden; repaintPing(); }
-                }, [
-                    E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + (dead ? '#9e9e9e' : t.color) + '; flex-shrink: 0;' }),
-                    E('span', { style: 'opacity: 0.8;' + (t.hidden ? ' text-decoration: line-through;' : '') }, t.label),
-                    E('span', { style: 'font-weight: 600; color: ' + valColor + ';' }, valTxt)
-                ]));
-            });
-            node.appendChild(legend);
-            // per-target stats table over the displayed window
-            var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
-            var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em; table-layout: fixed;' });
-            var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
-            var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
-            tbl.appendChild(E('tr', {}, [
-                E('th', { style: thStyle + 'text-align: left; width: 17%;' }, 'Target'),
-                E('th', { style: thStyle + 'text-align: left; width: 17%;' + divS }, 'IP'),
-                E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
-                E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
-                E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
-                E('th', { style: thStyle }, 'loss')
-            ]));
-            keys.forEach(function(k) {
-                var t = hist[k];
-                var sr = series[k];
-                var vals = [], lostSamples = 0, totSamples = 0;
-                sr.forEach(function(p) { if (p.v !== null) vals.push(p.v); lostSamples += p.lostN; totSamples += p.cnt; });
-                vals.sort(function(a, b) { return a - b; });
-                var sum = 0;
-                vals.forEach(function(v) { sum += v; });
-                // jitter: mean absolute successive difference over the RAW window
-                var jit = null, jn = 0, prevV = null;
-                t.data.forEach(function(v) {
-                    if (v !== null && prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
-                    if (v !== null) prevV = v;
+            var legendWrap = null;
+            var legendEntries = {};
+            if (opts.legend) {
+                legendWrap = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 10px;' });
+                el.appendChild(legendWrap);
+            }
+            var syncLegend = function() {
+                var sig = P.keys.join('|');
+                if (legendWrap.dataset.sig !== sig) {
+                    legendWrap.dataset.sig = sig;
+                    legendWrap.innerHTML = '';
+                    legendEntries = {};
+                    P.keys.forEach(function(k) {
+                        var t = P.hist[k];
+                        var dot = E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; background: ' + t.color + '; flex-shrink: 0;' });
+                        var lbl = E('span', { style: 'opacity: 0.8;' }, t.label);
+                        var val = E('span', { style: 'font-weight: 600;' });
+                        var extra = E('span', { style: 'opacity: 0.5; font-size: 0.9em;' });
+                        var root = E('span', {
+                            style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em; cursor: pointer; user-select: none;',
+                            title: 'Click to hide/show',
+                            click: function() {
+                                t.hidden = !t.hidden;
+                                if (P.hist) update(P.hist);
+                            }
+                        }, [dot, lbl, val, extra]);
+                        legendWrap.appendChild(root);
+                        legendEntries[k] = { root: root, dot: dot, lbl: lbl, val: val, extra: extra };
+                    });
+                }
+                P.keys.forEach(function(k) {
+                    var t = P.hist[k];
+                    var en = legendEntries[k];
+                    if (!en) return;
+                    var lv = opts.legendValue(t);
+                    en.root.style.opacity = t.hidden ? '0.35' : (lv.dim ? '0.55' : '1');
+                    en.lbl.style.textDecoration = t.hidden ? 'line-through' : 'none';
+                    en.dot.style.background = lv.dotColor || t.color;
+                    en.val.textContent = lv.text;
+                    en.val.style.color = lv.color;
+                    en.extra.textContent = lv.extra || '';
                 });
-                var last = t.data.length ? t.data[t.data.length - 1] : null;
-                var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
-                var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
-                var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
-                tbl.appendChild(E('tr', { style: (t.hidden ? 'opacity: 0.35;' : '') }, [
-                    E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' }, t.label),
-                    E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' + divS }, t.ip || '\u2014'),
-                    E('td', { style: tdS }, last === null ? 'TO' : fmt(last)),
-                    E('td', { style: tdS }, fmt(vals.length ? vals[0] : null)),
-                    E('td', { style: tdS }, fmt(vals.length ? sum / vals.length : null)),
-                    E('td', { style: tdS }, fmt(pingPct(vals, 0.95))),
-                    E('td', { style: tdS }, fmt(vals.length ? vals[vals.length - 1] : null)),
-                    E('td', { style: tdS }, jn > 0 ? (jit / jn).toFixed(1) : '—'),
-                    E('td', { style: tdS + (lossPct > 0 ? ' color: #ff5252;' : '') }, lossPct + '%')
-                ]));
-            });
-            tblWrap.appendChild(tbl);
-            node.appendChild(tblWrap);
+            };
+            var update = function(hist) {
+                P.hist = hist;
+                P.keys = Object.keys(hist);
+                var vw = VIEWS[P.view];
+                var series = {};
+                P.keys.forEach(function(k) { series[k] = buildSeriesFrom(hist[k], vw); });
+                P.series = series;
+                var plotH = GH - GTOP - GBOT;
+                var step = GW / (vw.pts - 1);
+                var all = [];
+                P.keys.forEach(function(k) {
+                    if (hist[k].hidden) return;
+                    series[k].forEach(function(p) { if (p.v !== null) all.push(p.v); });
+                });
+                var ylo = 0, yhi = opts.yFloor || 20;
+                if (all.length) {
+                    all.sort(function(a, b) { return a - b; });
+                    if (opts.autoRange) {
+                        ylo = Math.floor((all[0] - 3) / 5) * 5;
+                        yhi = Math.ceil((all[all.length - 1] + 3) / 5) * 5;
+                        if (yhi - ylo < 10) yhi = ylo + 10;
+                    } else {
+                        yhi = Math.max(opts.yFloor || 20, Math.min(all[all.length - 1], pingPct(all, 0.95) * 1.5));
+                        yhi = Math.ceil(yhi / 10) * 10;
+                    }
+                }
+                var yFor = function(v) { return GTOP + plotH * (1 - (Math.min(v, yhi) - ylo) / (yhi - ylo)); };
+                var svg = '';
+                gridFracs.forEach(function(g) {
+                    var gy = (GTOP + plotH * (1 - g)).toFixed(1);
+                    svg += '<line x1="0" y1="' + gy + '" x2="' + GW + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
+                });
+                var lossXs = {};
+                P.keys.forEach(function(k) {
+                    var t = hist[k];
+                    if (t.hidden) return;
+                    var sr = series[k];
+                    var anyOk = sr.some(function(p) { return p.v !== null; });
+                    if (!anyOk) return;
+                    var pts = [];
+                    var lastPt = null, lastNull = false;
+                    for (var i = 0; i < sr.length; i++) {
+                        var x = GW - (sr.length - 1 - i) * step;
+                        if (opts.lossTicks && sr[i].loss) lossXs[x.toFixed(1)] = 1;
+                        var y = sr[i].v === null ? GTOP : yFor(sr[i].v);
+                        pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+                        lastPt = [x, y];
+                        lastNull = (sr[i].v === null);
+                    }
+                    if (pts.length === 1) {
+                        var xy = pts[0].split(',');
+                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
+                    } else if (pts.length > 1) {
+                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
+                    }
+                    if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + (lastNull && opts.spikeNulls ? '#ff1744' : t.color) + '"/>';
+                });
+                Object.keys(lossXs).forEach(function(x) {
+                    svg += '<line x1="' + x + '" y1="' + (GH - 6) + '" x2="' + x + '" y2="' + GH + '" stroke="#ff1744" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
+                });
+                svgWrap.innerHTML = '<svg width="100%" height="' + GH + '" viewBox="0 0 ' + GW + ' ' + GH + '" preserveAspectRatio="none">' + svg + '</svg>';
+                gridFracs.forEach(function(g, gi) {
+                    gridLabels[gi].textContent = Math.round(ylo + (yhi - ylo) * g) + opts.unit;
+                });
+                topLabel.textContent = yhi + opts.unit;
+                if (opts.legend) syncLegend();
+                if (P.hoverFrac != null) applyHover(P.hoverFrac);
+            };
+            return { el: el, update: update, currentSeries: function() { return P.series; }, currentView: function() { return P.view; } };
         };
         // PING_GRAPH_END
 
@@ -1041,14 +1053,116 @@ return view.extend({
                 }
                 var pgNode = document.getElementById('hw-ping');
                 if (pgNode) {
-                    renderPingGraph(pgNode, hist);
+                    // Persistent skeleton, created once: graph panel, stats
+                    // table, bufferbloat chip. Ticks only update data in place.
+                    if (!self.pingPanel) {
+                        self.pingPanel = createGraphPanel({
+                            views: PING_VIEWS,
+                            defaultView: '2m',
+                            unit: ' ms',
+                            csvName: 'ping',
+                            spikeNulls: true,
+                            lossTicks: true,
+                            autoRange: false,
+                            yFloor: 20,
+                            legend: true,
+                            legendValue: function(t) {
+                                var last = t.data.length ? t.data[t.data.length - 1] : null;
+                                var okCnt = 0;
+                                t.data.forEach(function(v) { if (v !== null) okCnt++; });
+                                var dead = okCnt === 0 && t.data.length >= 3;
+                                return {
+                                    text: dead ? 'N/A' : (last === null ? 'timeout' : last.toFixed(1) + ' ms'),
+                                    color: dead ? '#9e9e9e' : (last === null ? '#ff5252' : t.color),
+                                    dotColor: dead ? '#9e9e9e' : t.color,
+                                    dim: dead
+                                };
+                            }
+                        });
+                        pgNode.innerHTML = '';
+                        pgNode.appendChild(self.pingPanel.el);
+                        var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
+                        var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
+                        var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
+                        var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em; table-layout: fixed;' });
+                        tbl.appendChild(E('tr', {}, [
+                            E('th', { style: thStyle + 'text-align: left; width: 17%;' }, 'Target'),
+                            E('th', { style: thStyle + 'text-align: left; width: 17%;' + divS }, 'IP'),
+                            E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
+                            E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
+                            E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
+                            E('th', { style: thStyle }, 'loss')
+                        ]));
+                        tblWrap.appendChild(tbl);
+                        pgNode.appendChild(tblWrap);
+                        self.pingTable = { tbl: tbl, rows: {}, sig: '', divS: divS };
+                        self.bbChip = E('span', { style: 'font-size: 0.8em; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid transparent;' });
+                        pgNode.appendChild(E('div', { style: 'text-align: center; margin-top: 8px;' }, [self.bbChip]));
+                    }
+                    self.pingPanel.update(hist);
+                    // stats table — persistent rows keyed by target, cells
+                    // updated in place
+                    var pt = self.pingTable;
+                    var keys = Object.keys(hist);
+                    var sig = keys.join('|');
+                    if (pt.sig !== sig) {
+                        pt.sig = sig;
+                        for (var rk in pt.rows) pt.rows[rk].tr.remove();
+                        pt.rows = {};
+                        keys.forEach(function(k) {
+                            var t = hist[k];
+                            var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
+                            var cells = {
+                                ip: E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' + pt.divS }),
+                                cur: E('td', { style: tdS }), min: E('td', { style: tdS }),
+                                avg: E('td', { style: tdS }), p95: E('td', { style: tdS }),
+                                max: E('td', { style: tdS }), jit: E('td', { style: tdS }),
+                                loss: E('td', { style: tdS })
+                            };
+                            var tr = E('tr', {}, [
+                                E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;' }, t.label),
+                                cells.ip, cells.cur, cells.min, cells.avg, cells.p95, cells.max, cells.jit, cells.loss
+                            ]);
+                            pt.tbl.appendChild(tr);
+                            pt.rows[k] = { tr: tr, cells: cells };
+                        });
+                    }
+                    var curSeries = self.pingPanel.currentSeries() || {};
+                    keys.forEach(function(k) {
+                        var t = hist[k];
+                        var row = pt.rows[k];
+                        if (!row) return;
+                        row.tr.style.opacity = t.hidden ? '0.35' : '';
+                        var sr = curSeries[k] || [];
+                        var vals = [], lostSamples = 0, totSamples = 0;
+                        sr.forEach(function(p) { if (p.v !== null) vals.push(p.v); lostSamples += p.lostN; totSamples += p.cnt; });
+                        vals.sort(function(a, b) { return a - b; });
+                        var sum = 0;
+                        vals.forEach(function(v) { sum += v; });
+                        var jit = null, jn = 0, prevV = null;
+                        t.data.forEach(function(v) {
+                            if (v !== null && prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
+                            if (v !== null) prevV = v;
+                        });
+                        var last = t.data.length ? t.data[t.data.length - 1] : null;
+                        var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
+                        var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
+                        row.cells.ip.textContent = t.ip || '—';
+                        row.cells.cur.textContent = last === null ? 'TO' : fmt(last);
+                        row.cells.min.textContent = fmt(vals.length ? vals[0] : null);
+                        row.cells.avg.textContent = fmt(vals.length ? sum / vals.length : null);
+                        row.cells.p95.textContent = fmt(pingPct(vals, 0.95));
+                        row.cells.max.textContent = fmt(vals.length ? vals[vals.length - 1] : null);
+                        row.cells.jit.textContent = jn > 0 ? (jit / jn).toFixed(1) : '—';
+                        row.cells.loss.textContent = lossPct + '%';
+                        row.cells.loss.style.color = lossPct > 0 ? '#ff5252' : '';
+                    });
+                    // bufferbloat chip — text/colors updated in place
                     var idleV = [], loadV = [];
                     (self.bbSamples || []).forEach(function(sm) { (sm.l ? loadV : idleV).push(sm.v); });
                     var med = function(a) { a = a.slice().sort(function(x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
                     var bbTxt, bbColor;
                     if (idleV.length >= 10 && loadV.length >= 5) {
-                        // p95 under load vs idle median — jitter-aware, closer to
-                        // how Waveform grades it than a median-vs-median compare.
                         var lSorted = loadV.slice().sort(function(x, y) { return x - y; });
                         var p95Load = lSorted[Math.min(lSorted.length - 1, Math.floor(lSorted.length * 0.95))];
                         var delta = Math.max(0, p95Load - med(idleV));
@@ -1059,9 +1173,10 @@ return view.extend({
                         bbColor = '#9e9e9e';
                         bbTxt = 'Bufferbloat: measuring \u2014 needs sustained WAN load';
                     }
-                    pgNode.appendChild(E('div', { style: 'text-align: center; margin-top: 8px;' }, [
-                        E('span', { style: 'font-size: 0.8em; font-weight: 600; color: ' + bbColor + '; padding: 3px 10px; border-radius: 4px; border: 1px solid ' + bbColor + '44; background: ' + bbColor + '18;' }, bbTxt)
-                    ]));
+                    self.bbChip.textContent = bbTxt;
+                    self.bbChip.style.color = bbColor;
+                    self.bbChip.style.borderColor = bbColor + '44';
+                    self.bbChip.style.background = bbColor + '18';
                     pingCard.style.display = 'flex';
                 }
                 applyCardVisibility();
@@ -2024,58 +2139,46 @@ return view.extend({
                         if (pass !== null && (pass <= 0 || pass > 150)) pass = null;
                         if (crit !== null && pass !== null && pass >= crit) pass = null;
                         var th = self.tempHist[name];
-                        if (!th || Array.isArray(th)) th = self.tempHist[name] = { data: [], color: PING_COLORS[Object.keys(self.tempHist).length % PING_COLORS.length] };
+                        if (!th || Array.isArray(th) || !th.agg) th = self.tempHist[name] = { label: name, color: PING_COLORS[Object.keys(self.tempHist).length % PING_COLORS.length], hidden: false, data: [], agg: [], acc: { sum: 0, n: 0, cnt: 0 } };
                         th.data.push(tempC);
-                        if (th.data.length > 200) th.data.shift();
+                        if (th.data.length > TEMP_WINDOW) th.data.shift();
+                        // 30s aggregation buckets feed the 1h/3h views
+                        th.acc.cnt++; th.acc.sum += tempC; th.acc.n++;
+                        if (th.acc.cnt >= 10) {
+                            th.agg.push({ a: th.acc.n > 0 ? th.acc.sum / th.acc.n : null, n: th.acc.n, loss: 0 });
+                            if (th.agg.length > TEMP_AGG_KEEP) th.agg.shift();
+                            th.acc = { sum: 0, n: 0, cnt: 0 };
+                        }
                         sensors.push({ name: name, temp: tempC, crit: crit, pass: pass, color: th.color, hist: th.data });
                     });
-                    // Realtime multi-line temperature graph (last ~10 min at the
-                    // 3s poll), drawn above the sensor rows in the first card.
-                    // Minimal on purpose: lines, three labeled gridlines, nothing
-                    // else — the rows below carry the exact values and trips.
+                    // Realtime temperature history — the same persistent graph
+                    // panel as the ping card (10m/1h/3h windows, hover crosshair,
+                    // CSV export). The panel element keeps its DOM identity and is
+                    // re-parented into the rebuilt card each tick, so buttons and
+                    // hover never lose pointer state.
                     var tGraph = null;
-                    var gSensors = sensors.filter(function(sn) { return sn.hist && sn.hist.length >= 2; });
-                    if (gSensors.length > 0) {
-                        var TW = 600, TH = 150, TTOP = 6, TBOT = 4;
-                        var tmin = Infinity, tmax = -Infinity;
-                        gSensors.forEach(function(sn) {
-                            sn.hist.forEach(function(v) { if (v < tmin) tmin = v; if (v > tmax) tmax = v; });
-                        });
-                        var ylo = Math.floor((tmin - 3) / 5) * 5;
-                        var yhi = Math.ceil((tmax + 3) / 5) * 5;
-                        if (yhi - ylo < 10) yhi = ylo + 10;
-                        var tPlotH = TH - TTOP - TBOT;
-                        var tStep = TW / (200 - 1);
-                        var tSvg = '';
-                        [0.25, 0.5, 0.75].forEach(function(g) {
-                            var gy = (TTOP + tPlotH * (1 - g)).toFixed(1);
-                            tSvg += '<line x1="0" y1="' + gy + '" x2="' + TW + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
-                        });
-                        gSensors.forEach(function(sn) {
-                            var pts = [];
-                            for (var ti = 0; ti < sn.hist.length; ti++) {
-                                var x = TW - (sn.hist.length - 1 - ti) * tStep;
-                                var y = TTOP + tPlotH * (1 - (sn.hist[ti] - ylo) / (yhi - ylo));
-                                pts.push(x.toFixed(1) + ',' + y.toFixed(1));
-                            }
-                            tSvg += '<polyline fill="none" stroke="' + sn.color + '" stroke-width="1.8" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
-                            var lp = pts[pts.length - 1].split(',');
-                            tSvg += '<circle cx="' + lp[0] + '" cy="' + lp[1] + '" r="2.5" fill="' + sn.color + '"/>';
-                        });
-                        tGraph = E('div', { style: 'width: 100%; margin-bottom: 16px;' });
-                        var tPlot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
-                        var tWrap = E('div', { style: 'width: 100%; line-height: 0;' });
-                        tWrap.innerHTML = '<svg width="100%" height="' + TH + '" viewBox="0 0 ' + TW + ' ' + TH + '" preserveAspectRatio="none">' + tSvg + '</svg>';
-                        tPlot.appendChild(tWrap);
-                        [0.25, 0.5, 0.75].forEach(function(g) {
-                            var topPct = ((TTOP + tPlotH * (1 - g)) / TH * 100).toFixed(1);
-                            tPlot.appendChild(E('span', { style: 'position: absolute; top: ' + topPct + '%; left: 5px; transform: translateY(-100%); font-size: 0.68em; opacity: 0.55; pointer-events: none;' }, Math.round(ylo + (yhi - ylo) * g) + ' \u00b0C'));
-                        });
-                        tGraph.appendChild(tPlot);
-                        tGraph.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.68em; opacity: 0.45; margin-top: 3px;' }, [
-                            E('span', {}, '\u221210 min'),
-                            E('span', {}, 'now')
-                        ]));
+                    var tHistMap = {};
+                    sensors.forEach(function(sn) {
+                        var th = self.tempHist[sn.name];
+                        if (th && th.data.length >= 2) tHistMap[sn.name] = th;
+                    });
+                    if (Object.keys(tHistMap).length > 0) {
+                        if (!self.tempPanel) {
+                            self.tempPanel = createGraphPanel({
+                                views: TEMP_VIEWS,
+                                defaultView: '10m',
+                                unit: ' \u00b0C',
+                                csvName: 'temps',
+                                spikeNulls: false,
+                                lossTicks: false,
+                                autoRange: true,
+                                legend: false,
+                                height: 150
+                            });
+                            self.tempPanel.el.style.marginBottom = '16px';
+                        }
+                        self.tempPanel.update(tHistMap);
+                        tGraph = self.tempPanel.el;
                     }
                     // Up to 3 columns per card, up to 4 sensors per column; when
                     // the platform exposes more sensors, additional cards are added.
@@ -2514,7 +2617,9 @@ return view.extend({
                         };
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
                         if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4', 0);
-                        if (off.ppe_flows >= 0) mkOffBar('PPE HW-Bound / Offloaded', off.ppe_flows, off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows, '#8bc34a', (res.peaks && res.peaks.ppe) || 0);
+                        // vs the real hardware table: 16384 entries per PPE on the
+                        // upstream driver (turboacc-style bind/total display)
+                        if (off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a', (res.peaks && res.peaks.ppe) || 0);
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }

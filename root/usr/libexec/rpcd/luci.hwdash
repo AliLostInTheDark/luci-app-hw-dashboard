@@ -947,7 +947,30 @@ EOF
 				for _wd in /sys/kernel/debug/wed[0-9]*; do
 					[ -d "$_wd" ] && WED_CNT=$((WED_CNT + 1))
 				done
-				OFFLOAD_JSON="{\"ft\":$OFF_FT,\"sw_cfg\":$OFF_SWCFG,\"hw_cfg\":$OFF_HWCFG,\"ppe_flows\":$PPE_FLOWS,\"sw_flows\":$SW_FLOWS,\"wed\":$WED_CNT}"
+				# PPE table capacity: the MTK SDK hnat driver publishes it in
+				# hnat_stats ("entry num=..."); the upstream mtk_eth_soc driver
+				# doesn't expose it, but MTK_PPE_ENTRIES = 1024 << 4 = 16384 per
+				# PPE (verified in linux-6.12.94 drivers/net/ethernet/mediatek/
+				# mtk_ppe.h, the exact kernel the target runs).
+				PPE_TOTAL=0
+				if [ -f /sys/kernel/debug/hnat/hnat_stats ]; then
+					while read -r _hl; do
+						case "$_hl" in
+							*"entry num="*)
+								_hv=${_hl##*entry num=}
+								_hv=${_hv%%[!0-9]*}
+								case "$_hv" in ''|*[!0-9]*) ;; *) PPE_TOTAL=$((PPE_TOTAL + _hv)) ;; esac
+								;;
+						esac
+					done < /sys/kernel/debug/hnat/hnat_stats
+				else
+					_ppe_n=0
+					for _pd in /sys/kernel/debug/ppe[0-9]*; do
+						[ -d "$_pd" ] && _ppe_n=$((_ppe_n + 1))
+					done
+					[ $_ppe_n -gt 0 ] && PPE_TOTAL=$((_ppe_n * 16384))
+				fi
+				OFFLOAD_JSON="{\"ft\":$OFF_FT,\"sw_cfg\":$OFF_SWCFG,\"hw_cfg\":$OFF_HWCFG,\"ppe_flows\":$PPE_FLOWS,\"sw_flows\":$SW_FLOWS,\"ppe_total\":$PPE_TOTAL,\"wed\":$WED_CNT}"
 
 				# --- since-boot watermarks (peak temp / conntrack / PPE flows).
 				# Sourced from a /tmp file (clears on reboot); rewritten only
