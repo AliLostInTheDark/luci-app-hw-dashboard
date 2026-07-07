@@ -232,9 +232,18 @@ EOF
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				HWDASH_PERSIST_DIR=/etc/hwdash
+				# iw list parsing takes seconds on some chips — never on the
+				# request path. Generated once by a detached child; radios show
+				# without phycap for the first seconds and pick it up next cycle.
 				if [ ! -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && command -v iw >/dev/null; then
-					mkdir -p "$HWDASH_PERSIST_DIR"
-					iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" 2>/dev/null
+					if ! _cache_read /tmp/hwdash_wificap.lock; then
+						_cache_write /tmp/hwdash_wificap.lock 120 generating
+						(
+							mkdir -p "$HWDASH_PERSIST_DIR"
+							iw list | awk -f /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk > "$HWDASH_PERSIST_DIR/wifi_cap_v4.json.$$" 2>/dev/null && \
+								mv "$HWDASH_PERSIST_DIR/wifi_cap_v4.json.$$" "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" 2>/dev/null
+						) >/dev/null 2>&1 &
+					fi
 				fi
 
 				# Board name, CPU model, core/thread counts and max frequency are
@@ -1104,7 +1113,11 @@ EOF
 							( _ethtool_refresh ) >/dev/null 2>&1 &
 						fi
 					else
-						_ethtool_refresh
+						ETHTOOL_JSON="{}"
+						if ! _cache_read /tmp/hwdash_ethtool.cache.lock; then
+							_cache_write /tmp/hwdash_ethtool.cache.lock 60 refreshing
+							( _ethtool_refresh ) >/dev/null 2>&1 &
+						fi
 					fi
 				fi
 				[ -z "$ETHTOOL_JSON" ] && ETHTOOL_JSON="{}"
@@ -1444,7 +1457,15 @@ EOF
 						( _wifi_refresh ) >/dev/null 2>&1 &
 					fi
 				else
-					_wifi_refresh
+					# first-ever call (fresh boot/install): serve empty NOW and
+					# build in the background — the card appears a few seconds
+					# later instead of the whole dashboard stalling on the fork
+					# burst.
+					WIFI_RADIOS="[]"
+					if ! _cache_read "$WIFI_CACHE.lock"; then
+						_cache_write "$WIFI_CACHE.lock" 60 refreshing
+						( _wifi_refresh ) >/dev/null 2>&1 &
+					fi
 				fi
 				[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
 

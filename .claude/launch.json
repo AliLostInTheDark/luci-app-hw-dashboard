@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "perf-harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8479", "--directory", "/tmp/claude-1000/-home-ali-luci-app-hw-dashboard/7e3ad073-7689-4620-beb9-7a9db39f1ba8/scratchpad/perf"],
+      "port": 8479
+    }
+  ]
+}

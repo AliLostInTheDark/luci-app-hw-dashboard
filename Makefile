@@ -4,7 +4,7 @@ PKG_NAME:=luci-app-hw-dashboard
 LUCI_TITLE:=Hardware Dashboard
 LUCI_DEPENDS:=+luci-base +ethtool-full
 LUCI_PKGARCH:=all
-PKG_VERSION:=1.0.9
+PKG_VERSION:=1.0.10
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
@@ -20,6 +20,7 @@ define Package/luci-app-hw-dashboard/postinst
 	rm -f /tmp/hwdash_*
 	rm -rf /etc/hwdash
 	/etc/init.d/rpcd restart 2>/dev/null
+	( sleep 3; ubus call luci.hwdash info >/dev/null 2>&1; ubus call luci.hwdash info >/dev/null 2>&1 ) &
 	exit 0
 }
 endef

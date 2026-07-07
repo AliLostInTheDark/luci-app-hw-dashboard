@@ -13,7 +13,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.0.9-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.0.10-r1.apk
 ```
 
 The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.

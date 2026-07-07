@@ -367,7 +367,7 @@ return view.extend({
             }
             styleBtns();
             el.appendChild(ctlRow);
-            var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
+            var plot = E('div', { style: 'position: relative; width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden; touch-action: pan-y;' });
             var svgWrap = E('div', { style: 'width: 100%; line-height: 0;' });
             plot.appendChild(svgWrap);
             var gridFracs = [0.25, 0.5, 0.75];
@@ -1008,6 +1008,10 @@ return view.extend({
             // Same hidden-tab rule as the main poll: no pings for a dashboard
             // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
+            // Never let requests pile up on a slow device: skip the tick if
+            // the previous one is still in flight.
+            if (self.pingBusy) return Promise.resolve();
+            self.pingBusy = true;
             return callHwPing(pingTargetPairs()).then(function(res) {
                 if (!res || !res.targets || res.targets.length === 0) return;
                 if (!self.pingHist) self.pingHist = {};
@@ -1180,13 +1184,15 @@ return view.extend({
                     pingCard.style.display = 'flex';
                 }
                 applyCardVisibility();
-            }).catch(function() {});
+            }).catch(function() {}).then(function() { self.pingBusy = false; });
         }, 1);
 
         poll.add(function() {
             // Skip the RPC entirely while the tab is hidden — the router does
             // no collection work for dashboards nobody is looking at.
             if (document.hidden) return Promise.resolve();
+            if (self.infoBusy) return Promise.resolve();
+            self.infoBusy = true;
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 self.lastInfo = res;
@@ -2756,7 +2762,7 @@ return view.extend({
                 applyCardVisibility();
             }).catch(function(err) {
                 console.error(err);
-            });
+            }).then(function() { self.infoBusy = false; });
         }, 3);
 
         return container;
