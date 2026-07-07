@@ -408,7 +408,7 @@ return view.extend({
                     var sr = P.series[k];
                     var si = idx - (vw.pts - sr.length);
                     var p = si >= 0 && si < sr.length ? sr[si] : null;
-                    var val = !p || p.v === null ? (p && opts.spikeNulls ? 'timeout' : '—') : p.v.toFixed(1) + opts.unit;
+                    var val = !p || p.v === null ? (p && opts.spikeNulls && !t.na ? 'timeout' : '—') : p.v.toFixed(1) + opts.unit;
                     tip.appendChild(E('div', { style: 'display: flex; align-items: center; gap: 5px;' }, [
                         E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; background: ' + t.color + ';' }),
                         E('span', { style: 'opacity: 0.75;' }, t.label),
@@ -1055,6 +1055,23 @@ return view.extend({
                         h.acc = { sum: 0, n: 0, loss: 0, cnt: 0 };
                     }
                 });
+                // No global v6 gateway on this link: keep an explicit N/A row
+                // so it's visible that detection ran and found nothing global.
+                if (!res.gateway6) {
+                    var gk6 = '__gw6na';
+                    if (!hist[gk6]) {
+                        hist[gk6] = {
+                            label: 'Gateway v6', gw: 6, na: true, host: '', fam: 6,
+                            color: '#9e9e9e', hidden: false,
+                            data: [], agg: [], acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
+                        };
+                    }
+                    var g6 = hist[gk6];
+                    g6.data.push(null);
+                    if (g6.data.length > PING_WINDOW) g6.data.shift();
+                } else if (hist['__gw6na']) {
+                    delete hist['__gw6na'];
+                }
                 // Bufferbloat: compare median latency while the WAN is under
                 // sustained load vs idle. Zero extra probes — reuses the ping
                 // window and the live WAN throughput from the ports card.
@@ -1170,6 +1187,13 @@ return view.extend({
                         // Target column: domains stay as-is, IP-literal targets show
                         // their reverse-DNS name (or —); IP column always shows the
                         // address actually being probed.
+                        if (t.na) {
+                            row.cells.target.textContent = 'Gateway';
+                            row.cells.ip.textContent = 'N/A';
+                            ['cur', 'min', 'avg', 'p95', 'max', 'jit', 'loss'].forEach(function(c) { row.cells[c].textContent = '—'; });
+                            row.cells.loss.style.color = '';
+                            return;
+                        }
                         var isIpLit = /^[0-9.]+$/.test(t.host) || t.host.indexOf(':') !== -1;
                         var tgtTxt = t.gw ? 'Gateway' + (t.rdns ? ' (' + t.rdns + ')' : '') : (isIpLit ? (t.rdns || '—') : t.host);
                         row.cells.target.textContent = tgtTxt;

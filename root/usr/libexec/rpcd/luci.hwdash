@@ -173,11 +173,12 @@ $_GW 4"*) ;;
 $_PT_LIST" ;;
 					esac
 				fi
-				# IPv6 default gateway (cached 60s). Preference chain: a GUA
-				# next-hop in the routing table, then a GUA gateway from the
-				# netifd v6 wan interfaces, and only as a last resort the
-				# link-local next-hop (with its %zone so it stays pingable) —
-				# ISPs that only RA a fe80:: hop still get a v6 first-hop probe.
+				# IPv6 default gateway (cached 60s). Chain: routing table
+				# first — a GUA next-hop wins, else the lowest-metric fe80::
+				# next-hop (the real gateway on RA-only ISPs, kept pingable
+				# via its %zone) — then the netifd v6 wan interfaces as a
+				# fallback source. Only a link with no v6 gateway at all
+				# leaves gateway6 empty (UI shows the row as N/A).
 				_GW6=""
 				if _cache_read /tmp/hwdash_gw6.cache; then
 					[ "$C_VAL" != "-" ] && _GW6=$C_VAL
@@ -202,11 +203,13 @@ $_PT_LIST" ;;
 $(ip -6 route show default 2>/dev/null)
 EOF6
 					fi
-					if [ -z "$_GW6" ] && command -v jsonfilter >/dev/null; then
+					if [ -z "$_GW6" ] && [ -z "$_gw6_ll" ] && command -v jsonfilter >/dev/null; then
 						for _w6 in wan6 wan_6 wan; do
+							_ifn6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
 							for _g6 in $(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[*].nexthop' 2>/dev/null); do
 								case "$_g6" in
-									fe80:*|'') ;;
+									'') ;;
+									fe80:*) [ -z "$_gw6_ll" ] && _gw6_ll="$_g6${_ifn6:+%$_ifn6}" ;;
 									*:*) _GW6=$_g6; break 2 ;;
 								esac
 							done
