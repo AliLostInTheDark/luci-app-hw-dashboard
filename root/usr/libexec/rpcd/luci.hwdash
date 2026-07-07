@@ -270,6 +270,7 @@ EOFN
 				_cache_read /tmp/hwdash_dns.cache && DNS_MAP=$C_VAL
 				_PT_TMP="/tmp/hwdash_ping.$$"
 				_pi=0
+				_ping_pids=""
 				while read -r _pt_h _pt_f; do
 					[ -z "$_pt_h" ] && continue
 					_tgt=$_pt_h
@@ -287,7 +288,11 @@ EOFN
 							;;
 					esac
 					(
-						_out=$(ping -c 1 -W 1 -"$_pt_f" "$_tgt" 2>/dev/null)
+						# family FIRST, -w 2 = hard 2s deadline (route/connect
+						# hangs that -W does not cap), -n = no reverse-DNS
+						# (its resolver timeout was the 5s stall when the
+						# internet/DNS was unreachable).
+						_out=$(ping -"$_pt_f" -c 1 -w 2 -n "$_tgt" 2>/dev/null)
 						# resolved address from the "PING host (ip)" banner — the
 						# IP this probe ACTUALLY hit (visible through DNS rotation)
 						_ip=""
@@ -311,11 +316,15 @@ EOFN
 						# "x" marks no-reply so the reader can still pick up the IP
 						[ -n "$_t$_ip" ] && printf '%s %s' "${_t:-x}" "$_ip" > "$_PT_TMP.$_pi"
 					) &
+					_ping_pids="$_ping_pids $!"
 					_pi=$((_pi + 1))
 				done <<EOF
 $_PT_LIST
 EOF
-				wait
+				# Wait ONLY for the ping children, never a bare `wait` — a bare
+				# wait also blocks on the detached reverse-DNS nslookup child,
+				# whose NXDOMAIN timeout (~5s) was stalling every ping call.
+				for _wp in $_ping_pids; do wait "$_wp" 2>/dev/null; done
 				PINGS="["
 				_pi=0
 				_PF=1
@@ -1069,62 +1078,64 @@ EOF
 				fi
 				SOFTNET="$SOFTNET]"
 
-				# --- offload engines: flowtable config (nft/uci forks, cached
-				# 30s) + live counters: PPE hardware-bound flows (builtin count
-				# of BND entries in debugfs), conntrack OFFLOAD flows (one grep)
-				# and WED (Wi-Fi Ethernet Dispatch) engine presence.
-				OFF_FT=0; OFF_SWCFG=0; OFF_HWCFG=0
+				# --- offload engines. The LIVE flow counts are the single
+				# most expensive thing in the whole poll on a busy high-end
+				# router: `grep -c OFFLOAD /proc/net/nf_conntrack` reads the
+				# ENTIRE conntrack table (tens of thousands of lines on an
+				# IPQ9554 under load) and the PPE bind walk touches every
+				# hardware-bound flow. Doing that on the request path stalled
+				# every 3s poll. The whole block (config + counts) now lives
+				# behind a 5s stale-while-revalidate cache: the request serves
+				# the last computed value instantly and a detached child does
+				# the heavy read at most once per 5s.
+				_offload_refresh() {
+					local _ft=0 _swcfg=0 _hwcfg=0 _ppe=-1 _sw=-1 _wed=0 _ptot=0 _pl _p _w _hl _hv _pd _pn
+					command -v nft >/dev/null && _ft=$(nft list flowtables 2>/dev/null | grep -c "flags offload")
+					_swcfg=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
+					_hwcfg=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
+					case "$_ft" in ""|*[!0-9]*) _ft=0 ;; esac
+					case "$_swcfg" in ""|*[!0-9]*) _swcfg=0 ;; esac
+					case "$_hwcfg" in ""|*[!0-9]*) _hwcfg=0 ;; esac
+					for _p in /sys/kernel/debug/ppe*/bind; do
+						[ -f "$_p" ] || continue
+						[ "$_ppe" -lt 0 ] && _ppe=0
+						while read -r _pl; do case "$_pl" in *BND*) _ppe=$((_ppe + 1)) ;; esac; done < "$_p"
+					done
+					[ -f /proc/net/nf_conntrack ] && _sw=$(grep -c OFFLOAD /proc/net/nf_conntrack 2>/dev/null)
+					case "$_sw" in ""|*[!0-9]*) _sw=-1 ;; esac
+					for _w in /sys/kernel/debug/wed[0-9]*; do [ -d "$_w" ] && _wed=$((_wed + 1)); done
+					# PPE table capacity: SDK hnat driver publishes it in
+					# hnat_stats; upstream mtk_eth_soc uses MTK_PPE_ENTRIES =
+					# 1024 << 4 = 16384 per PPE (verified linux-6.12.94).
+					if [ -f /sys/kernel/debug/hnat/hnat_stats ]; then
+						while read -r _hl; do
+							case "$_hl" in
+								*"entry num="*) _hv=${_hl##*entry num=}; _hv=${_hv%%[!0-9]*}; case "$_hv" in ""|*[!0-9]*) ;; *) _ptot=$((_ptot + _hv)) ;; esac ;;
+							esac
+						done < /sys/kernel/debug/hnat/hnat_stats
+					else
+						_pn=0; for _pd in /sys/kernel/debug/ppe[0-9]*; do [ -d "$_pd" ] && _pn=$((_pn + 1)); done
+						[ $_pn -gt 0 ] && _ptot=$((_pn * 16384))
+					fi
+					_cache_write /tmp/hwdash_offload.cache 5 "$_ft $_swcfg $_hwcfg $_ppe $_sw $_wed $_ptot"
+				}
+				OFF_FT=0; OFF_SWCFG=0; OFF_HWCFG=0; PPE_FLOWS=-1; SW_FLOWS=-1; WED_CNT=0; PPE_TOTAL=0
 				if _cache_read /tmp/hwdash_offload.cache; then
 					set -- $C_VAL
-					OFF_FT=${1:-0}; OFF_SWCFG=${2:-0}; OFF_HWCFG=${3:-0}
+					OFF_FT=${1:-0}; OFF_SWCFG=${2:-0}; OFF_HWCFG=${3:-0}; PPE_FLOWS=${4:--1}; SW_FLOWS=${5:--1}; WED_CNT=${6:-0}; PPE_TOTAL=${7:-0}
+				elif [ -n "$C_VAL" ]; then
+					set -- $C_VAL
+					OFF_FT=${1:-0}; OFF_SWCFG=${2:-0}; OFF_HWCFG=${3:-0}; PPE_FLOWS=${4:--1}; SW_FLOWS=${5:--1}; WED_CNT=${6:-0}; PPE_TOTAL=${7:-0}
+					if ! _cache_read /tmp/hwdash_offload.lock; then
+						_cache_write /tmp/hwdash_offload.lock 30 refreshing
+						( _offload_refresh ) >/dev/null 2>&1 &
+					fi
 				else
-					command -v nft >/dev/null && OFF_FT=$(nft list flowtables 2>/dev/null | grep -c 'flags offload')
-					OFF_SWCFG=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
-					OFF_HWCFG=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
-					case "$OFF_FT" in ''|*[!0-9]*) OFF_FT=0 ;; esac
-					case "$OFF_SWCFG" in ''|*[!0-9]*) OFF_SWCFG=0 ;; esac
-					case "$OFF_HWCFG" in ''|*[!0-9]*) OFF_HWCFG=0 ;; esac
-					_cache_write /tmp/hwdash_offload.cache 30 "$OFF_FT $OFF_SWCFG $OFF_HWCFG"
-				fi
-				PPE_FLOWS=-1
-				for _ppe in /sys/kernel/debug/ppe*/bind; do
-					[ -f "$_ppe" ] || continue
-					[ "$PPE_FLOWS" -lt 0 ] && PPE_FLOWS=0
-					while read -r _pl; do
-						case "$_pl" in *BND*) PPE_FLOWS=$((PPE_FLOWS + 1)) ;; esac
-					done < "$_ppe"
-				done
-				SW_FLOWS=-1
-				if [ -f /proc/net/nf_conntrack ]; then
-					SW_FLOWS=$(grep -c OFFLOAD /proc/net/nf_conntrack 2>/dev/null)
-					case "$SW_FLOWS" in ''|*[!0-9]*) SW_FLOWS=-1 ;; esac
-				fi
-				WED_CNT=0
-				for _wd in /sys/kernel/debug/wed[0-9]*; do
-					[ -d "$_wd" ] && WED_CNT=$((WED_CNT + 1))
-				done
-				# PPE table capacity: the MTK SDK hnat driver publishes it in
-				# hnat_stats ("entry num=..."); the upstream mtk_eth_soc driver
-				# doesn't expose it, but MTK_PPE_ENTRIES = 1024 << 4 = 16384 per
-				# PPE (verified in linux-6.12.94 drivers/net/ethernet/mediatek/
-				# mtk_ppe.h, the exact kernel the target runs).
-				PPE_TOTAL=0
-				if [ -f /sys/kernel/debug/hnat/hnat_stats ]; then
-					while read -r _hl; do
-						case "$_hl" in
-							*"entry num="*)
-								_hv=${_hl##*entry num=}
-								_hv=${_hv%%[!0-9]*}
-								case "$_hv" in ''|*[!0-9]*) ;; *) PPE_TOTAL=$((PPE_TOTAL + _hv)) ;; esac
-								;;
-						esac
-					done < /sys/kernel/debug/hnat/hnat_stats
-				else
-					_ppe_n=0
-					for _pd in /sys/kernel/debug/ppe[0-9]*; do
-						[ -d "$_pd" ] && _ppe_n=$((_ppe_n + 1))
-					done
-					[ $_ppe_n -gt 0 ] && PPE_TOTAL=$((_ppe_n * 16384))
+					# first-ever call: build in the background, serve empty now
+					if ! _cache_read /tmp/hwdash_offload.lock; then
+						_cache_write /tmp/hwdash_offload.lock 30 refreshing
+						( _offload_refresh ) >/dev/null 2>&1 &
+					fi
 				fi
 				OFFLOAD_JSON="{\"ft\":$OFF_FT,\"sw_cfg\":$OFF_SWCFG,\"hw_cfg\":$OFF_HWCFG,\"ppe_flows\":$PPE_FLOWS,\"sw_flows\":$SW_FLOWS,\"ppe_total\":$PPE_TOTAL,\"wed\":$WED_CNT}"
 
@@ -1155,23 +1166,31 @@ EOF
 				# --- hardware events: interesting dmesg lines (thermal, ECC,
 				# link flaps, USB, OOM, voltage). dmesg+grep forks only run
 				# once per 10s window; the result is TTL-cached.
-				HW_EVENTS=""
-				if _cache_read /tmp/hwdash_events.cache; then
-					HW_EVENTS=$C_VAL
-				else
-					HW_EVENTS="["
-					_EF=1
+				# dmesg dumps the whole kernel ring buffer — large and slow on
+				# Qualcomm. Background SWR so it never blocks the request.
+				_events_refresh() {
+					local _ev="[" _ef=1 _el
 					while read -r _el; do
 						[ -z "$_el" ] && continue
 						json_esc "$_el"
-						[ $_EF -eq 0 ] && HW_EVENTS="$HW_EVENTS,"
-						HW_EVENTS="$HW_EVENTS\"$JSV\""
-						_EF=0
+						[ $_ef -eq 0 ] && _ev="$_ev,"
+						_ev="$_ev\"$JSV\""
+						_ef=0
 					done <<EOF
 $(dmesg 2>/dev/null | grep -iE 'thermal|throttl|bad block|bad eraseblock| ecc |uncorrectable|link is (up|down)|over-?current|out of memory|oom-killer|under-?voltage|crc error|i/o error|new (high|full|low|super)-speed usb|usb disconnect' | tail -n 12)
 EOF
-					HW_EVENTS="$HW_EVENTS]"
-					_cache_write /tmp/hwdash_events.cache 10 "$HW_EVENTS"
+					_ev="$_ev]"
+					_cache_write /tmp/hwdash_events.cache 15 "$_ev"
+				}
+				HW_EVENTS="[]"
+				if _cache_read /tmp/hwdash_events.cache; then
+					HW_EVENTS=$C_VAL
+				else
+					[ -n "$C_VAL" ] && HW_EVENTS=$C_VAL
+					if ! _cache_read /tmp/hwdash_events.lock; then
+						_cache_write /tmp/hwdash_events.lock 30 refreshing
+						( _events_refresh ) >/dev/null 2>&1 &
+					fi
 				fi
 				[ -z "$HW_EVENTS" ] && HW_EVENTS="[]"
 

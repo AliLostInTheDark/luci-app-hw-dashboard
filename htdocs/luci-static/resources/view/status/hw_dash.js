@@ -543,7 +543,13 @@ return view.extend({
                 });
                 topLabel.textContent = yhi + opts.unit;
                 if (opts.legend) syncLegend();
-                if (P.hoverFrac != null) applyHover(P.hoverFrac);
+                if (P.hoverFrac != null) {
+                    // If the panel is momentarily detached (a parent card being
+                    // rebuilt), the rect is 0 — retry on the next frame so the
+                    // tooltip keeps tracking live values under a still cursor.
+                    if (plot.getBoundingClientRect().width) applyHover(P.hoverFrac);
+                    else window.requestAnimationFrame(function() { if (P.hoverFrac != null) applyHover(P.hoverFrac); });
+                }
             };
             return { el: el, update: update, currentSeries: function() { return P.series; }, currentView: function() { return P.view; } };
         };
@@ -1072,18 +1078,6 @@ return view.extend({
                 } else if (hist['__gw6na']) {
                     delete hist['__gw6na'];
                 }
-                // Bufferbloat: compare median latency while the WAN is under
-                // sustained load vs idle. Zero extra probes — reuses the ping
-                // window and the live WAN throughput from the ports card.
-                var loaded = (self.wanLoadMbps >= 100) || (self.wanSpeedMbps > 0 && self.wanLoadMbps >= self.wanSpeedMbps * 0.25);
-                var tickVals = [];
-                res.targets.forEach(function(t) { if (typeof t.ms === 'number') tickVals.push(t.ms); });
-                if (tickVals.length > 0) {
-                    tickVals.sort(function(a, b) { return a - b; });
-                    if (!self.bbSamples) self.bbSamples = [];
-                    self.bbSamples.push({ v: tickVals[Math.floor(tickVals.length / 2)], l: !!loaded });
-                    if (self.bbSamples.length > PING_WINDOW) self.bbSamples.shift();
-                }
                 var pgNode = document.getElementById('hw-ping');
                 if (pgNode) {
                     // Persistent skeleton, created once: graph panel, stats
@@ -1131,8 +1125,6 @@ return view.extend({
                         tblWrap.appendChild(tbl);
                         pgNode.appendChild(tblWrap);
                         self.pingTable = { tbl: tbl, rows: {}, sig: '', divS: divS };
-                        self.bbChip = E('span', { style: 'font-size: 0.8em; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid transparent;' });
-                        pgNode.appendChild(E('div', { style: 'text-align: center; margin-top: 8px;' }, [self.bbChip]));
                     }
                     self.pingPanel.update(hist);
                     // stats table — persistent rows keyed by target, cells
@@ -1210,26 +1202,6 @@ return view.extend({
                         row.cells.loss.textContent = lossPct + '%';
                         row.cells.loss.style.color = lossPct > 0 ? '#ff5252' : '';
                     });
-                    // bufferbloat chip — text/colors updated in place
-                    var idleV = [], loadV = [];
-                    (self.bbSamples || []).forEach(function(sm) { (sm.l ? loadV : idleV).push(sm.v); });
-                    var med = function(a) { a = a.slice().sort(function(x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
-                    var bbTxt, bbColor;
-                    if (idleV.length >= 10 && loadV.length >= 5) {
-                        var lSorted = loadV.slice().sort(function(x, y) { return x - y; });
-                        var p95Load = lSorted[Math.min(lSorted.length - 1, Math.floor(lSorted.length * 0.95))];
-                        var delta = Math.max(0, p95Load - med(idleV));
-                        var grade = delta < 5 ? 'A+' : delta < 30 ? 'A' : delta < 60 ? 'B' : delta < 100 ? 'C' : delta < 200 ? 'D' : 'F';
-                        bbColor = delta < 30 ? '#00bcd4' : delta < 60 ? '#8bc34a' : delta < 100 ? '#ffb300' : '#ff5252';
-                        bbTxt = 'Bufferbloat: ' + grade + ' (+' + delta.toFixed(0) + ' ms p95 under load)';
-                    } else {
-                        bbColor = '#9e9e9e';
-                        bbTxt = 'Bufferbloat: measuring \u2014 needs sustained WAN load';
-                    }
-                    self.bbChip.textContent = bbTxt;
-                    self.bbChip.style.color = bbColor;
-                    self.bbChip.style.borderColor = bbColor + '44';
-                    self.bbChip.style.background = bbColor + '18';
                     pingCard.style.display = 'flex';
                 }
                 applyCardVisibility();
@@ -2233,8 +2205,10 @@ return view.extend({
                             });
                             self.tempPanel.el.style.marginBottom = '16px';
                         }
-                        self.tempPanel.update(tHistMap);
                         tGraph = self.tempPanel.el;
+                        // update AFTER the cards are attached below — updating
+                        // while detached froze the hover tooltip on old values
+                        self.tempPanelData = tHistMap;
                     }
                     // Up to 3 columns per card, up to 4 sensors per column; when
                     // the platform exposes more sensors, additional cards are added.
@@ -2273,6 +2247,7 @@ return view.extend({
                             class: 'hw-card wide'
                         }, cardKids));
                     }
+                    if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                     // Cooling device states (cpufreq throttling, fans, ...) as a
                     // chip row under the first thermal card. cur > 0 = the kernel
                     // is actively limiting that device right now.
@@ -2337,10 +2312,6 @@ return view.extend({
                                 ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
                             }
                             self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
-                            if (l.iface.toLowerCase().indexOf('wan') !== -1 && dlMbps !== null) {
-                                self.wanLoadMbps = Math.max(dlMbps, ulMbps);
-                                self.wanSpeedMbps = parseInt(st) || 0;
-                            }
 
                             var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
