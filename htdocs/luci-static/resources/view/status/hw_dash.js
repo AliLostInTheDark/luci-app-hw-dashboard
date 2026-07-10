@@ -345,6 +345,7 @@ return view.extend({
                             lines.push('---');
                             lines.push('Ping Statistics Summary');
                             lines.push('Target,Sent,Received,Timeouts,% Loss,Min,Max,Avg');
+                            var grandSent = 0, grandReceived = 0, grandTimeouts = 0, grandSum = 0, grandMin = null, grandMax = null;
                             P.keys.forEach(function(k) {
                                 var d = allHist[k].allData;
                                 var sent = d.length;
@@ -364,7 +365,19 @@ return view.extend({
                                 var lossPct = sent > 0 ? (timeouts / sent * 100).toFixed(1) : '0.0';
                                 var avg = received > 0 ? (sum / received).toFixed(1) : '';
                                 lines.push(['"' + allHist[k].label + '"', sent, received, timeouts, lossPct + '%', min !== null ? min.toFixed(1) : '', max !== null ? max.toFixed(1) : '', avg].join(','));
+                                grandSent += sent;
+                                grandReceived += received;
+                                grandTimeouts += timeouts;
+                                grandSum += sum;
+                                if (min !== null && (grandMin === null || min < grandMin)) grandMin = min;
+                                if (max !== null && (grandMax === null || max > grandMax)) grandMax = max;
                             });
+                            var grandLossPct = grandSent > 0 ? (grandTimeouts / grandSent * 100).toFixed(1) : '0.0';
+                            var grandAvg = grandReceived > 0 ? (grandSum / grandReceived).toFixed(1) : '';
+                            lines.push('');
+                            lines.push('Overall (All Targets Combined)');
+                            lines.push('Total Sent,Total Received,Total Timeouts,Overall % Loss,Overall Min,Overall Max,Overall Avg');
+                            lines.push([grandSent, grandReceived, grandTimeouts, grandLossPct + '%', grandMin !== null ? grandMin.toFixed(1) : '', grandMax !== null ? grandMax.toFixed(1) : '', grandAvg].join(','));
                         }
                         var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
                         var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-' + opts.csvName + '-' + (isPing ? 'all' : P.view) + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
