@@ -121,14 +121,6 @@ return view.extend({
                 circ: circumference
             };
         };
-        // IEEE 802.11 U-NII sub-band classification, per Wikipedia "List of WLAN
-        // channels". Ranges span every standardised 20 MHz channel (incl. the rare
-        // edge channels: 68 in U-NII-2A, 96 in U-NII-2C, 181 in U-NII-4) purely to
-        // group channels into the right band. The channel numbers AND the frequency
-        // span shown come from the radio's actually-enabled channels (regulatory-
-        // domain filtered in the backend), never the theoretical band edges — so the
-        // display reflects this specific router's capability, not the standard.
-        // Each row: [name, firstChannel, lastChannel, requiresDFS]
         var UNII_5GHZ = [
             ['U-NII-1',  36,  48,  false],
             ['U-NII-2A', 52,  68,  true ],
@@ -142,11 +134,10 @@ return view.extend({
             ['U-NII-7',  117, 185, false],
             ['U-NII-8',  189, 233, false]
         ];
-        // Center frequency (MHz) of a 20 MHz channel within its band.
         var chanFreq = function(band, ch) {
             if (band.indexOf('2.4') !== -1) return ch === 14 ? 2484 : 2412 + (ch - 1) * 5;
             if (band.indexOf('6') !== -1) return 5950 + ch * 5;
-            return 5000 + ch * 5; // 5 GHz
+            return 5000 + ch * 5;
         };
         var groupChannels = function(band, channels) {
             if (!channels || channels.length === 0) return '';
@@ -158,15 +149,12 @@ return view.extend({
             if (chs.length === 0) return '';
             chs.sort(function(a, b) { return a - b; });
             chs = chs.filter(function(c, i) { return i === 0 || c !== chs[i - 1]; });
-            // Format an enabled span as "lo-hi (freqLo-freqHi MHz)" from the real
-            // frequencies of the lowest and highest channel that is actually on.
             var fmt = function(lo, hi, dfs) {
                 var fl = chanFreq(band, lo), fh = chanFreq(band, hi);
                 var chTxt = lo === hi ? '' + lo : lo + '-' + hi;
                 var frTxt = fl === fh ? fl + ' MHz' : fl + '-' + fh + ' MHz';
                 return chTxt + ' (' + frTxt + (dfs ? ', DFS' : '') + ')';
             };
-            // 2.4 GHz is a single contiguous band.
             if (band.indexOf('2.4') !== -1) {
                 return fmt(chs[0], chs[chs.length - 1], false);
             }
@@ -177,20 +165,17 @@ return view.extend({
                 if (inBand.length === 0) return;
                 out.push(b[0] + ' ' + fmt(inBand[0], inBand[inBand.length - 1], b[3]));
             });
-            // Any channel outside the known sub-bands is listed verbatim.
             var unknown = chs.filter(function(c) {
                 return !table.some(function(b) { return c >= b[1] && c <= b[2]; });
             });
             if (unknown.length > 0) out.push(unknown.join(', '));
             return out.join(', ');
         };
-
         var calcMaxBitrate = function(hwmode, max_cw, max_spatial) {
             if (!hwmode || !max_cw || !max_spatial) return null;
             var mode = hwmode.toLowerCase();
             var cw = typeof max_cw === 'string' ? parseInt(max_cw.replace(/[^0-9]/g, '')) || 20 : max_cw;
             var streams = parseInt(max_spatial) || 1;
-            
             var ratePerStream = 54;
             if (mode.indexOf('be') !== -1) {
                 if (cw >= 320) ratePerStream = 2882;
@@ -214,11 +199,6 @@ return view.extend({
             }
             return (ratePerStream * streams) + ' Mbps';
         };
-
-        // Pure render helpers used inside the 3s poll callback below. Hoisted
-        // to render()-scope (created once at view load) instead of being
-        // redefined on every poll tick — some (fmtSpeedDf/fmtKb) were
-        // previously redefined once PER mounted filesystem, every 3s.
         var fmtCacheBytes = function(b) { return b >= 1048576 ? (b/1048576).toFixed(0)+' MB' : (b/1024).toFixed(0)+' KB'; };
         var getPhysicalRamTotal = function(memTotalKb) {
             var sizesMB = [32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768, 65536];
@@ -228,8 +208,6 @@ return view.extend({
             }
             return memTotalKb;
         };
-        // Small filled area graph for usage history (0-100%), fills the
-        // idle space at the bottom of the CPU / Memory cards.
         var drawUsageSpark = function(el, data, color) {
             if (!el || data.length < 2) return;
             var W = 300, H = 46, P = 2;
@@ -263,10 +241,9 @@ return view.extend({
                 style: 'width: ' + pct + '%; background: ' + colorMem + ';'
             })])]);
         };
-        // PING_GRAPH_START (marker used by the test harness)
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
-        var PING_WINDOW = 120;      // raw 1s ping samples (2 min)
-        var PING_AGG_KEEP = 1080;   // 10s buckets (3 h)
+        var PING_WINDOW = 120;
+        var PING_AGG_KEEP = 1080;
         var PING_VIEWS = {
             '2m':  { raw: true,  pts: 120, label: '−2 min',  step: 1 },
             '5m':  { group: 1,   pts: 30,  label: '−5 min',  step: 10 },
@@ -275,8 +252,8 @@ return view.extend({
             '1h':  { group: 3,   pts: 120, label: '−1 h',    step: 30 },
             '3h':  { group: 9,   pts: 120, label: '−3 h',    step: 90 }
         };
-        var TEMP_WINDOW = 200;      // raw 3s temp samples (10 min)
-        var TEMP_AGG_KEEP = 360;    // 30s buckets (3 h)
+        var TEMP_WINDOW = 200;
+        var TEMP_AGG_KEEP = 360;
         var TEMP_VIEWS = {
             '2m':  { raw: true, pts: 40,  label: '−2 min',  step: 3 },
             '5m':  { raw: true, pts: 100, label: '−5 min',  step: 3 },
@@ -307,11 +284,6 @@ return view.extend({
             }
             return out;
         };
-        // Persistent realtime graph panel. The skeleton (buttons, plot, axis,
-        // tooltip, legend entries) is created ONCE and keeps its DOM identity —
-        // poll ticks only repaint the SVG data and update text in place, so
-        // hover state and the mouse pointer are never reset by a refresh.
-        // Hover position is remembered and re-applied after each repaint.
         var createGraphPanel = function(opts) {
             var VIEWS = opts.views;
             var GW = 600, GH = opts.height || 190, GTOP = 6, GBOT = opts.lossTicks ? 8 : 4;
@@ -347,23 +319,55 @@ return view.extend({
                     click: function() {
                         if (!P.series) return;
                         var vw = VIEWS[P.view];
-                        var head = ['offset_s'];
+                        var isPing = opts.csvName === 'ping';
+                        var head = [isPing ? 'sample_idx' : 'offset_s'];
                         var cols = [];
-                        P.keys.forEach(function(k) { head.push('"' + P.hist[k].label + '"'); cols.push(P.series[k]); });
+                        var allHist = P.hist || {};
+                        P.keys.forEach(function(k) { head.push('"' + allHist[k].label + '"'); cols.push(isPing ? allHist[k].allData : P.series[k]); });
                         var maxLen = 0;
                         cols.forEach(function(c) { maxLen = Math.max(maxLen, c.length); });
                         var lines = [head.join(',')];
                         for (var r = 0; r < maxLen; r++) {
-                            var row = [String(-(maxLen - 1 - r) * vw.step)];
+                            var row = [isPing ? String(r + 1) : String(-(maxLen - 1 - r) * vw.step)];
                             cols.forEach(function(c) {
                                 var idx = r - (maxLen - c.length);
                                 var p = idx >= 0 ? c[idx] : null;
-                                row.push(p && p.v !== null ? p.v.toFixed(1) : '');
+                                if (isPing) {
+                                    row.push(p !== null && p !== undefined ? p.toFixed(1) : (p === null ? 'Timeout' : ''));
+                                } else {
+                                    row.push(p && p.v !== null ? p.v.toFixed(1) : '');
+                                }
                             });
                             lines.push(row.join(','));
                         }
+                        if (isPing) {
+                            lines.push('');
+                            lines.push('---');
+                            lines.push('Ping Statistics Summary');
+                            lines.push('Target,Sent,Received,Timeouts,% Loss,Min,Max,Avg');
+                            P.keys.forEach(function(k) {
+                                var d = allHist[k].allData;
+                                var sent = d.length;
+                                var received = 0;
+                                var timeouts = 0;
+                                var sum = 0, min = null, max = null;
+                                d.forEach(function(v) {
+                                    if (v !== null && v !== undefined) {
+                                        received++;
+                                        sum += v;
+                                        if (min === null || v < min) min = v;
+                                        if (max === null || v > max) max = v;
+                                    } else if (v === null) {
+                                        timeouts++;
+                                    }
+                                });
+                                var lossPct = sent > 0 ? (timeouts / sent * 100).toFixed(1) : '0.0';
+                                var avg = received > 0 ? (sum / received).toFixed(1) : '';
+                                lines.push(['"' + allHist[k].label + '"', sent, received, timeouts, lossPct + '%', min !== null ? min.toFixed(1) : '', max !== null ? max.toFixed(1) : '', avg].join(','));
+                            });
+                        }
                         var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-                        var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-' + opts.csvName + '-' + P.view + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
+                        var a = E('a', { href: URL.createObjectURL(blob), download: 'hwdash-' + opts.csvName + '-' + (isPing ? 'all' : P.view) + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv' });
                         document.body.appendChild(a); a.click(); document.body.removeChild(a);
                         URL.revokeObjectURL(a.href);
                     }
@@ -371,9 +375,6 @@ return view.extend({
             }
             styleBtns();
             el.appendChild(ctlRow);
-            // outer holds the crosshair + tooltip UNCLIPPED (so a tall
-            // tooltip can extend past the plot instead of truncating); the
-            // inner clip keeps the SVG inside the rounded border.
             var plot = E('div', { style: 'position: relative; width: 100%; touch-action: pan-y;' });
             var plotClip = E('div', { style: 'width: 100%; background: rgba(128,128,128,0.04); border: 1px solid var(--border-color, rgba(128,128,128,0.12)); border-radius: 8px; overflow: hidden;' });
             plot.appendChild(plotClip);
@@ -501,41 +502,91 @@ return view.extend({
                         yhi = Math.ceil((all[all.length - 1] + 3) / 5) * 5;
                         if (yhi - ylo < 10) yhi = ylo + 10;
                     } else {
-                        yhi = Math.max(opts.yFloor || 20, Math.min(all[all.length - 1], pingPct(all, 0.95) * 1.5));
+                        yhi = Math.max(opts.yFloor || 20, all[all.length - 1]);
                         yhi = Math.ceil(yhi / 10) * 10;
                     }
                 }
                 var yFor = function(v) { return GTOP + plotH * (1 - (Math.min(v, yhi) - ylo) / (yhi - ylo)); };
+                var spikeThresh = null;
+                if (opts.spikeNulls && all.length >= 5) {
+                    var p90 = pingPct(all, 0.90);
+                    spikeThresh = Math.max(p90 * 2, 50);
+                }
                 var svg = '';
                 gridFracs.forEach(function(g) {
                     var gy = (GTOP + plotH * (1 - g)).toFixed(1);
                     svg += '<line x1="0" y1="' + gy + '" x2="' + GW + '" y2="' + gy + '" stroke="rgba(128,128,128,0.18)" stroke-width="1" stroke-dasharray="3,4" vector-effect="non-scaling-stroke"/>';
                 });
                 var lossXs = {};
+                var spikeAnnotations = {};
                 P.keys.forEach(function(k) {
                     var t = hist[k];
                     if (t.hidden) return;
                     var sr = series[k];
-                    var anyOk = sr.some(function(p) { return p.v !== null; });
-                    if (!anyOk) return;
-                    var pts = [];
-                    var lastPt = null, lastNull = false;
-                    for (var i = 0; i < sr.length; i++) {
-                        var x = GW - (sr.length - 1 - i) * step;
+                    var n = sr.length;
+                    var xAt = function(i) { return GW - (n - 1 - i) * step; };
+                    var ys = new Array(n), isTO = new Array(n), anyOk = false;
+                    for (var i = 0; i < n; i++) {
+                        var x = xAt(i);
                         if (opts.lossTicks && sr[i].loss) lossXs[x.toFixed(1)] = 1;
-                        var y = sr[i].v === null ? GTOP : yFor(sr[i].v);
-                        pts.push(x.toFixed(1) + ',' + y.toFixed(1));
-                        lastPt = [x, y];
-                        lastNull = (sr[i].v === null);
+                        if (sr[i].v === null) {
+                            ys[i] = null;
+                            isTO[i] = !!opts.spikeNulls;
+                        } else {
+                            ys[i] = yFor(sr[i].v);
+                            isTO[i] = false;
+                            anyOk = true;
+                            if (spikeThresh && sr[i].v > spikeThresh) {
+                                var rounded = Math.round(sr[i].v);
+                                if (!spikeAnnotations[rounded] || sr[i].v > spikeAnnotations[rounded].v) spikeAnnotations[rounded] = { v: sr[i].v, y: ys[i] };
+                            }
+                        }
                     }
-                    if (pts.length === 1) {
-                        var xy = pts[0].split(',');
-                        svg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.5" fill="' + t.color + '"/>';
-                    } else if (pts.length > 1) {
-                        svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
+                    if (!anyOk) return;
+                    for (i = 0; i < n; i++) {
+                        if (ys[i] !== null) continue;
+                        var pj = i - 1; while (pj >= 0 && ys[pj] === null) pj--;
+                        var nj = i + 1; while (nj < n && ys[nj] === null) nj++;
+                        ys[i] = (pj >= 0 && nj < n) ? ys[pj] + (ys[nj] - ys[pj]) * (i - pj) / (nj - pj) : (pj >= 0 ? ys[pj] : ys[nj]);
                     }
-                    if (lastPt) svg += '<circle cx="' + lastPt[0].toFixed(1) + '" cy="' + lastPt[1].toFixed(1) + '" r="3" fill="' + (lastNull && opts.spikeNulls ? '#ff1744' : t.color) + '"/>';
+                    var pts = [];
+                    for (i = 0; i < n; i++) pts.push(xAt(i).toFixed(1) + ',' + ys[i].toFixed(1));
+                    svg += '<polyline fill="none" stroke="' + t.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="' + pts.join(' ') + '"/>';
+                    var run = null;
+                    for (i = 0; i <= n; i++) {
+                        var to = i < n && isTO[i];
+                        if (to && !run) run = { s: i, e: i };
+                        else if (to) run.e = i;
+                        else if (run) {
+                            var rs = Math.max(0, run.s - 1), re = Math.min(n - 1, run.e + 1), seg = [];
+                            for (var j = rs; j <= re; j++) seg.push(xAt(j).toFixed(1) + ',' + ys[j].toFixed(1));
+                            svg += '<polyline fill="none" stroke="#ff5252" stroke-width="2.5" stroke-dasharray="1,4" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.9" points="' + seg.join(' ') + '"/>';
+                            run = null;
+                        }
+                    }
+                    var spikePts = [];
+                    for (i = 0; i < n; i++) {
+                        if (isTO[i]) {
+                            if (i !== n - 1) svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + ys[i].toFixed(1) + '" r="3" fill="var(--background-color-high, #1b1e23)" stroke="#ff5252" stroke-width="1.6"/>';
+                        } else if (spikeThresh && sr[i].v !== null && sr[i].v > spikeThresh) {
+                            spikePts.push([xAt(i), ys[i]]);
+                        }
+                    }
+                    spikePts.forEach(function(sp) {
+                        var sx = sp[0], sy = sp[1];
+                        svg += '<polygon points="' + (sx - 4).toFixed(1) + ',' + sy.toFixed(1) + ' ' + (sx + 4).toFixed(1) + ',' + sy.toFixed(1) + ' ' + sx.toFixed(1) + ',' + (sy - 7).toFixed(1) + '" fill="' + t.color + '" opacity="0.85"/>';
+                    });
+                    svg += '<circle cx="' + xAt(n - 1).toFixed(1) + '" cy="' + ys[n - 1].toFixed(1) + '" r="3" fill="' + (isTO[n - 1] ? '#ff5252' : t.color) + '"/>';
                 });
+                if (opts.spikeNulls) {
+                    var annKeys = Object.keys(spikeAnnotations);
+                    annKeys.sort(function(a, b) { return spikeAnnotations[b].v - spikeAnnotations[a].v; });
+                    annKeys.slice(0, 2).forEach(function(ak) {
+                        var ann = spikeAnnotations[ak];
+                        svg += '<line x1="0" y1="' + ann.y.toFixed(1) + '" x2="' + GW + '" y2="' + ann.y.toFixed(1) + '" stroke="rgba(255,23,68,0.25)" stroke-width="1" stroke-dasharray="4,3" vector-effect="non-scaling-stroke"/>';
+                        svg += '<text x="' + (GW - 2) + '" y="' + (ann.y - 3).toFixed(1) + '" text-anchor="end" fill="rgba(255,23,68,0.6)" font-size="9" font-family="system-ui,sans-serif">' + Math.round(ann.v) + ' ms</text>';
+                    });
+                }
                 Object.keys(lossXs).forEach(function(x) {
                     svg += '<line x1="' + x + '" y1="' + (GH - 6) + '" x2="' + x + '" y2="' + GH + '" stroke="#ff1744" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
                 });
@@ -546,21 +597,13 @@ return view.extend({
                 topLabel.textContent = yhi + opts.unit;
                 if (opts.legend) syncLegend();
                 if (P.hoverFrac != null) {
-                    // If the panel is momentarily detached (a parent card being
-                    // rebuilt), the rect is 0 — retry on the next frame so the
-                    // tooltip keeps tracking live values under a still cursor.
                     if (plot.getBoundingClientRect().width) applyHover(P.hoverFrac);
                     else window.requestAnimationFrame(function() { if (P.hoverFrac != null) applyHover(P.hoverFrac); });
                 }
             };
             return { el: el, update: update, currentSeries: function() { return P.series; }, currentView: function() { return P.view; } };
         };
-        // PING_GRAPH_END
-
         var makeSensorRow = function(s) {
-            // Color thresholds come from the sensor's own trip points
-            // when the hardware exposes them (per-architecture dynamic);
-            // the fixed 60/80 °C split is only the fallback.
             var hot = s.crit ? s.crit * 0.85 : 80;
             var warm = s.pass ? Math.min(s.pass, hot - 5) : (s.crit ? s.crit * 0.65 : 60);
             var color = '#00bcd4', bgCol = 'rgba(0,188,212,0.14)';
@@ -623,8 +666,6 @@ return view.extend({
             return b + ' B';
         };
         var makeRow = function(label, val, color, wrap) {
-            // wrap: let long label/value pairs break onto two lines instead of
-            // the default nowrap+ellipsis truncation (needed on mobile widths).
             return E('div', {class: 'hw-stat-row', style: 'margin-bottom: 3px;' + (wrap ? ' flex-wrap: wrap; row-gap: 2px;' : '')}, [
                 E('span', {class: 'hw-stat-label', style: 'font-size: 0.9em;' + (wrap ? ' white-space: normal; overflow: visible;' : '')}, label),
                 E('span', {class: 'hw-stat-value', style: 'font-size: 0.9em; margin-left: auto;' + (color ? ' color:' + color + ';' : '')}, val)
@@ -671,7 +712,6 @@ return view.extend({
             var curRIos = parseInt(devObj.read_ios) || 0;
             var curWIos = parseInt(devObj.write_ios) || 0;
             var rSpeed = 0, wSpeed = 0, rIops = 0, wIops = 0;
-
             if (self.prevDisk[devName]) {
                 var prev = self.prevDisk[devName];
                 var tDiff = (now - prev.time) / 1000.0;
@@ -696,7 +736,6 @@ return view.extend({
                 wIops: wIops
             };
         };
-
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
         ramCard.node.appendChild(E('div', {
@@ -706,7 +745,6 @@ return view.extend({
             style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'
         }, 'USAGE HISTORY (3 MIN)'));
         ramCard.node.appendChild(E('div', { id: 'hw-mem-spark', style: 'width: 100%; line-height: 0;' }));
-
         var _dskNode = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'});
         _dskNode.appendChild(E('h3', {}, 'Internal Storage'));
         _dskNode.appendChild(E('div', {id: 'stats-dsk', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;'}));
@@ -763,46 +801,29 @@ return view.extend({
             id: 'hw-ext-meta',
             style: 'width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 8px;'
         })]);
-        
-        
-        
-        // Thermal cards are built dynamically each poll: sensors are laid out
-        // naturally (no CPU/Wi-Fi/Misc grouping) across up to 3 columns, and
-        // when the platform exposes more sensors than fit one card, extra
-        // cards are appended automatically.
         var thermWrapper = E('div', {
             id: 'hw-therm-wrapper',
             style: 'display: contents;'
         });
-        
-        
+        var thermGraphNode = E('div', { id: 'hw-therm-graph-wrapper', style: 'width: 100%;' });
         var ethCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Ports Topology'), E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
-
-        
-        
         var pcieCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'PCI-e Topology'), E('div', { id: 'hw-pcie', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
-
-        
-        
+        var pingGraphWrapper = E('div', { style: 'width: 100%;' });
+        var pingTableWrapper = E('div', { style: 'width: 100%;' });
+        var pingGraphNode = E('div', { id: 'hw-ping', style: 'width: 100%;' }, [pingGraphWrapper, pingTableWrapper]);
         var pingCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('h3', {}, 'Ping Latency'),
-            E('div', { id: 'hw-ping', style: 'width: 100%;' }),
+            pingGraphNode,
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
-
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-
         var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-
         var irqCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Interrupts'), E('div', { id: 'hw-irq', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-
         var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
-
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
-
         container.appendChild(style);
         container.appendChild(sysCard);
         container.appendChild(cpuCard.node);
@@ -825,27 +846,22 @@ return view.extend({
         container.appendChild(thermWrapper);
         container.appendChild(eventsCard);
         var self = this;
-
-        // ---------- Settings (persisted per-browser in localStorage) ----------
         var loadLS = function(key, dflt) {
             try {
                 var v = JSON.parse(localStorage.getItem(key));
                 return v == null ? dflt : v;
             } catch (e) { return dflt; }
         };
-        // Settings live on the ROUTER (set_config -> /etc/hwdash-settings.json)
-        // so they follow the device like normal LuCI config. localStorage is
-        // only read once to migrate pre-existing browser-side settings.
         var savedCfg = self.savedConfig || {};
         self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
         self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
+        self.disabledPings = Array.isArray(savedCfg.disabledPings) ? savedCfg.disabledPings : [];
         var saveConfig = function() {
-            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets }).catch(function() {});
+            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets, disabledPings: self.disabledPings }).catch(function() {});
         };
         if (!Array.isArray(savedCfg.hidden) && (self.hiddenCards.length > 0 || self.pingTargets.length > 0)) {
-            saveConfig(); // one-time migration of old browser-side settings
+            saveConfig();
         }
-        // Defaults are ALWAYS pinged; user targets are added on top of them.
         var DEFAULT_PING_TARGETS = [
             { host: 'dns.google', fam: 4 }, { host: 'dns.google', fam: 6 },
             { host: 'one.one.one.one', fam: 4 }, { host: 'one.one.one.one', fam: 6 },
@@ -853,8 +869,13 @@ return view.extend({
             { host: 'youtube.com', fam: 4 }, { host: 'youtube.com', fam: 6 }
         ];
         var expandFams = function(t) { return String(t.fam) === 'both' ? [4, 6] : [parseInt(t.fam) === 6 ? 6 : 4]; };
+        var isPingDisabled = function(host, fam) {
+            return self.disabledPings.indexOf(host + '|' + fam) !== -1;
+        };
+        var isGwDisabled = function(fam) {
+            return self.disabledPings.indexOf('__gateway|' + fam) !== -1;
+        };
         var pingTargetPairs = function() {
-            // defaults + customs, de-duplicated by host+family
             var seen = {};
             var pairs = [];
             DEFAULT_PING_TARGETS.concat(self.pingTargets).forEach(function(t) {
@@ -862,16 +883,22 @@ return view.extend({
                     var key = t.host + '|' + fam;
                     if (seen[key]) return;
                     seen[key] = true;
+                    if (isPingDisabled(t.host, fam)) return;
                     pairs.push(t.host + ' ' + fam);
                 });
             });
             return pairs;
         };
-
-        // Card registry: which container node(s) a settings checkbox controls.
-        // "show" is the display value to restore on unhide for cards that are
-        // unconditionally visible; conditional cards are re-shown by their own
-        // poll logic on the next tick.
+        var pingStatColor = function(ms) {
+            if (ms === null || ms === undefined) return '';
+            if (ms <= 5) return '#00e676';
+            if (ms <= 15) return '#69f0ae';
+            if (ms <= 30) return '#b2ff59';
+            if (ms <= 50) return '#ffee58';
+            if (ms <= 100) return '#ffb300';
+            if (ms <= 200) return '#ff7043';
+            return '#ff1744';
+        };
         var cardRegistry = {
             sysinfo: { nodes: [sysCard], label: 'System Info', show: 'flex' },
             cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
@@ -886,8 +913,10 @@ return view.extend({
             ports: { nodes: [ethCard], label: 'Ports Topology', show: null },
             pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
+            ping_graph: { nodes: [pingGraphWrapper], label: 'Ping Graph', show: 'block' },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
-            thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' }
+            thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
+            therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
         };
         var applyCardVisibility = function() {
             for (var key in cardRegistry) {
@@ -899,7 +928,6 @@ return view.extend({
                 });
             }
         };
-
         var settingsPanel = E('div', {
             class: 'cbi-section',
             style: 'display: none; width: 100%; padding: 14px 18px; border: 1px solid var(--border-color, rgba(128,128,128,0.25)); border-radius: 8px; background: var(--background-color-high, rgba(128,128,128,0.05));'
@@ -921,30 +949,64 @@ return view.extend({
             cardChecks.appendChild(E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, cardRegistry[key].label]));
         });
         settingsPanel.appendChild(cardChecks);
-
         settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Ping Targets'));
-        var targetList = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;' });
+        var targetList = E('div', { style: 'margin-bottom: 10px;' });
+        var makePingToggle = function(host, fam, label, isCustom, customIdx) {
+            var dKey = host + '|' + fam;
+            var cb = E('input', {
+                type: 'checkbox',
+                change: function(ev) {
+                    var idx = self.disabledPings.indexOf(dKey);
+                    if (ev.target.checked && idx !== -1) self.disabledPings.splice(idx, 1);
+                    else if (!ev.target.checked && idx === -1) self.disabledPings.push(dKey);
+                    saveConfig();
+                    self.pingHist = {};
+                }
+            });
+            cb.checked = self.disabledPings.indexOf(dKey) === -1;
+            var kids = [cb, E('span', { style: 'flex: 1;' }, label)];
+            if (isCustom) {
+                kids.push(E('button', {
+                    class: 'cbi-button cbi-button-remove',
+                    style: 'padding: 1px 6px; font-size: 0.8em; margin-left: 4px;',
+                    title: 'Remove target',
+                    click: function() {
+                        self.pingTargets.splice(customIdx, 1);
+                        var di = self.disabledPings.indexOf(dKey);
+                        if (di !== -1) self.disabledPings.splice(di, 1);
+                        saveConfig();
+                        self.pingHist = {};
+                        renderTargetList();
+                    }
+                }, '\u2715'));
+            }
+            return E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.88em; cursor: pointer; min-width: 200px;' }, kids);
+        };
         var renderTargetList = function() {
             targetList.innerHTML = '';
-            if (self.pingTargets.length === 0) {
-                targetList.appendChild(E('span', { style: 'font-size: 0.85em; opacity: 0.55;' }, 'No extra targets. Defaults (always pinged): dns.google, one.one.one.one, google.com, youtube.com — all v4+v6'));
-                return;
-            }
-            self.pingTargets.forEach(function(t, i) {
-                var famLbl = String(t.fam) === 'both' ? 'IPv4+IPv6' : 'IPv' + t.fam;
-                targetList.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color, rgba(128,128,128,0.3)); background: rgba(128,128,128,0.08);' }, [
-                    E('span', {}, t.host + ' (' + famLbl + ')'),
-                    E('a', {
-                        style: 'cursor: pointer; color: #ff5252; font-weight: bold; text-decoration: none;',
-                        click: function() {
-                            self.pingTargets.splice(i, 1);
-                            saveConfig();
-                            self.pingHist = {};
-                            renderTargetList();
-                        }
-                    }, '\u00d7')
-                ]));
+            targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Default Targets'));
+            var defGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
+            DEFAULT_PING_TARGETS.forEach(function(t) {
+                expandFams(t).forEach(function(fam) {
+                    defGrid.appendChild(makePingToggle(t.host, fam, t.host + ' (IPv' + fam + ')', false, -1));
+                });
             });
+            targetList.appendChild(defGrid);
+            targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Gateway (auto-detected)'));
+            var gwGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
+            gwGrid.appendChild(makePingToggle('__gateway', 4, 'Gateway (IPv4)', false, -1));
+            gwGrid.appendChild(makePingToggle('__gateway', 6, 'Gateway (IPv6)', false, -1));
+            targetList.appendChild(gwGrid);
+            if (self.pingTargets.length > 0) {
+                targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Custom Targets'));
+                var custGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
+                self.pingTargets.forEach(function(t, i) {
+                    expandFams(t).forEach(function(fam) {
+                        custGrid.appendChild(makePingToggle(t.host, fam, t.host + ' (IPv' + fam + ')', true, i));
+                    });
+                });
+                targetList.appendChild(custGrid);
+            }
         };
         renderTargetList();
         settingsPanel.appendChild(targetList);
@@ -957,7 +1019,6 @@ return view.extend({
         var addTarget = function() {
             var h = tgtInput.value.trim();
             if (!h || !/^[A-Za-z0-9.:-]+$/.test(h)) { tgtInput.style.borderColor = '#ff5252'; return; }
-            // reject duplicates against defaults AND existing custom targets
             var existing = {};
             DEFAULT_PING_TARGETS.concat(self.pingTargets).forEach(function(t) {
                 expandFams(t).forEach(function(fam) { existing[t.host + '|' + fam] = true; });
@@ -979,6 +1040,7 @@ return view.extend({
                 class: 'cbi-button cbi-button-reset',
                 click: function() {
                     self.pingTargets = [];
+                    self.disabledPings = [];
                     saveConfig();
                     self.pingHist = {};
                     renderTargetList();
@@ -989,8 +1051,6 @@ return view.extend({
             E('button', {
                 class: 'cbi-button cbi-button-action',
                 click: function() {
-                    // Full info payload as a downloadable file — handy for bug
-                    // reports and before/after firmware comparisons.
                     if (!self.lastInfo) return;
                     var host = (self.lastInfo.sys_info && self.lastInfo.sys_info.hostname) || 'router';
                     var blob = new Blob([JSON.stringify(self.lastInfo, null, 2)], { type: 'application/json' });
@@ -1006,7 +1066,6 @@ return view.extend({
             }, '\u2913 Download diagnostics snapshot'),
             E('span', { style: 'font-size: 0.78em; opacity: 0.5; margin-left: 10px;' }, 'Saves the latest full hardware readout as JSON')
         ]));
-
         var settingsBtn = E('button', {
             class: 'cbi-button',
             style: 'padding: 4px 14px;',
@@ -1018,16 +1077,9 @@ return view.extend({
         container.insertBefore(settingsPanel, sysCard);
         container.insertBefore(settingsRow, settingsPanel);
         applyCardVisibility();
-
         var pingTick = function() {
-            // Same hidden-tab rule as the main poll: no pings for a dashboard
-            // nobody is looking at. History simply resumes on return.
             if (document.hidden) return Promise.resolve();
-            // Never let requests pile up on a slow device: skip the tick if
-            // the previous one is still in flight — BUT self-heal, so a hung
-            // ubus call (rpcd busy, XHR stall) can never freeze the graph
-            // permanently. If the flag has been stuck > 10s the call is
-            // presumed dead and a fresh one is allowed.
+            if (self.hiddenCards && self.hiddenCards.indexOf('ping') !== -1) return Promise.resolve();
             var _pnow = Date.now();
             if (self.pingBusy && (_pnow - (self.pingBusyAt || 0)) < 10000) return Promise.resolve();
             self.pingBusy = true;
@@ -1040,6 +1092,7 @@ return view.extend({
                     var key = t.host + '/v' + t.fam;
                     if (!hist[key]) {
                         var isGw = (res.gateway && t.host === res.gateway) ? 4 : (res.gateway6 && t.host === res.gateway6) ? 6 : 0;
+                        if (isGw && isGwDisabled(isGw)) return;
                         hist[key] = {
                             label: isGw ? 'Gateway v' + isGw : t.host + ' (v' + t.fam + ')',
                             gw: isGw,
@@ -1048,17 +1101,21 @@ return view.extend({
                             color: PING_COLORS[Object.keys(hist).length % PING_COLORS.length],
                             hidden: false,
                             data: [],
+                            allData: [],
                             agg: [],
                             acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
                         };
+                    } else if (hist[key].gw && isGwDisabled(hist[key].gw)) {
+                        delete hist[key];
+                        return;
                     }
                     var h = hist[key];
                     if (t.ip) h.ip = t.ip;
                     if (t.rdns) h.rdns = t.rdns;
                     var v = typeof t.ms === 'number' ? t.ms : null;
                     h.data.push(v);
+                    h.allData.push(v);
                     if (h.data.length > PING_WINDOW) h.data.shift();
-                    // 10s aggregation buckets feed the 15m/1h/3h views
                     h.acc.cnt++;
                     if (v === null) h.acc.loss++;
                     else { h.acc.sum += v; h.acc.n++; }
@@ -1068,27 +1125,24 @@ return view.extend({
                         h.acc = { sum: 0, n: 0, loss: 0, cnt: 0 };
                     }
                 });
-                // No global v6 gateway on this link: keep an explicit N/A row
-                // so it's visible that detection ran and found nothing global.
-                if (!res.gateway6) {
+                if (!res.gateway6 && !isGwDisabled(6)) {
                     var gk6 = '__gw6na';
                     if (!hist[gk6]) {
                         hist[gk6] = {
                             label: 'Gateway v6', gw: 6, na: true, host: '', fam: 6,
                             color: '#9e9e9e', hidden: false,
-                            data: [], agg: [], acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
+                            data: [], allData: [], agg: [], acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
                         };
                     }
                     var g6 = hist[gk6];
                     g6.data.push(null);
+                    g6.allData.push(null);
                     if (g6.data.length > PING_WINDOW) g6.data.shift();
-                } else if (hist['__gw6na']) {
+                } else if (hist['__gw6na'] && (res.gateway6 || isGwDisabled(6))) {
                     delete hist['__gw6na'];
                 }
                 var pgNode = document.getElementById('hw-ping');
                 if (pgNode) {
-                    // Persistent skeleton, created once: graph panel, stats
-                    // table, bufferbloat chip. Ticks only update data in place.
                     if (!self.pingPanel) {
                         self.pingPanel = createGraphPanel({
                             views: PING_VIEWS,
@@ -1114,8 +1168,8 @@ return view.extend({
                                 };
                             }
                         });
-                        pgNode.innerHTML = '';
-                        pgNode.appendChild(self.pingPanel.el);
+                        pingGraphWrapper.innerHTML = '';
+                        pingGraphWrapper.appendChild(self.pingPanel.el);
                         var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
                         var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
                         var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
@@ -1130,12 +1184,11 @@ return view.extend({
                             E('th', { style: thStyle }, 'loss')
                         ]));
                         tblWrap.appendChild(tbl);
-                        pgNode.appendChild(tblWrap);
+                        pingTableWrapper.innerHTML = '';
+                        pingTableWrapper.appendChild(tblWrap);
                         self.pingTable = { tbl: tbl, rows: {}, sig: '', divS: divS };
                     }
                     self.pingPanel.update(hist);
-                    // stats table — persistent rows keyed by target, cells
-                    // updated in place
                     var pt = self.pingTable;
                     var keys = Object.keys(hist);
                     var sig = keys.join('|');
@@ -1183,9 +1236,6 @@ return view.extend({
                         var last = t.data.length ? t.data[t.data.length - 1] : null;
                         var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
                         var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
-                        // Target column: domains stay as-is, IP-literal targets show
-                        // their reverse-DNS name (or —); IP column always shows the
-                        // address actually being probed.
                         if (t.na) {
                             row.cells.target.textContent = 'Gateway';
                             row.cells.ip.textContent = 'N/A';
@@ -1201,11 +1251,20 @@ return view.extend({
                         row.cells.ip.textContent = ipTxt;
                         row.cells.ip.title = ipTxt;
                         row.cells.cur.textContent = last === null ? 'TO' : fmt(last);
+                        row.cells.cur.style.color = last === null ? '#ff5252' : pingStatColor(last);
                         row.cells.min.textContent = fmt(vals.length ? vals[0] : null);
-                        row.cells.avg.textContent = fmt(vals.length ? sum / vals.length : null);
-                        row.cells.p95.textContent = fmt(pingPct(vals, 0.95));
+                        row.cells.min.style.color = vals.length ? pingStatColor(vals[0]) : '';
+                        var avgVal = vals.length ? sum / vals.length : null;
+                        row.cells.avg.textContent = fmt(avgVal);
+                        row.cells.avg.style.color = avgVal !== null ? pingStatColor(avgVal) : '';
+                        var p95Val = pingPct(vals, 0.95);
+                        row.cells.p95.textContent = fmt(p95Val);
+                        row.cells.p95.style.color = p95Val !== null ? pingStatColor(p95Val) : '';
                         row.cells.max.textContent = fmt(vals.length ? vals[vals.length - 1] : null);
-                        row.cells.jit.textContent = jn > 0 ? (jit / jn).toFixed(1) : '—';
+                        row.cells.max.style.color = vals.length ? pingStatColor(vals[vals.length - 1]) : '';
+                        var jitVal = jn > 0 ? jit / jn : null;
+                        row.cells.jit.textContent = jitVal !== null ? jitVal.toFixed(1) : '—';
+                        row.cells.jit.style.color = jitVal !== null ? pingStatColor(jitVal) : '';
                         row.cells.loss.textContent = lossPct + '%';
                         row.cells.loss.style.color = lossPct > 0 ? '#ff5252' : '';
                     });
@@ -1215,10 +1274,7 @@ return view.extend({
             }).catch(function() {}).then(function() { self.pingBusy = false; });
         };
         poll.add(pingTick, 1);
-
         var infoTick = function() {
-            // Skip the RPC entirely while the tab is hidden — the router does
-            // no collection work for dashboards nobody is looking at.
             if (document.hidden) return Promise.resolve();
             var _inow = Date.now();
             if (self.infoBusy && (_inow - (self.infoBusyAt || 0)) < 10000) return Promise.resolve();
@@ -1228,9 +1284,6 @@ return view.extend({
                 if (!res || !res.cpus) return;
                 self.lastInfo = res;
                 var coresNode = document.getElementById('hw-cores');
-                // Per-core rows are fixed-shape: build once, update text/width
-                // in place on subsequent polls instead of rebuilding the DOM
-                // subtree every 3 seconds. Rebuilt only if the core count changes.
                 var nCores = res.cpus.length - 1;
                 if (!self._coreEls || self._coreCount !== nCores) {
                     coresNode.innerHTML = '';
@@ -1433,7 +1486,6 @@ return view.extend({
                                 style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;')
                             }, val)])]));
                         };
-
                         if (res.cpu_meta && res.cpu_meta.tasks) {
                             addAdvRowText('System Tasks', res.cpu_meta.tasks, null);
                             var ctxt = res.cpu_meta.ctxt || 0;
@@ -1467,10 +1519,6 @@ return view.extend({
                                 style: 'width: ' + connPct + '%; background: ' + colorConn + ';'
                             })])]));
                         }
-                        // Cumulative frequency residency (time in each OPP since
-                        // boot) — shows whether the CPU ever leaves its min/max
-                        // state. Hidden when the kernel doesn't expose the stats
-                        // or the policy has a single OPP.
                         if (res.freq_stats && res.freq_stats.length > 1) {
                             var fsTotal = 0;
                             res.freq_stats.forEach(function(p) { fsTotal += p[1]; });
@@ -1725,22 +1773,17 @@ return view.extend({
                     var extCardNode = document.getElementById('hw-ext-card');
                     if (extCardNode) extCardNode.style.display = 'none';
                 }
-
                 (function() {
                     var extraNode = document.getElementById('hw-int-storage-extra');
                     if (!extraNode) return;
                     extraNode.innerHTML = '';
-
                     var hasUbi = res.ubi_devs && res.ubi_devs.length > 0;
                     var hasMtd = res.mtd_parts && res.mtd_parts.length > 0;
                     var hasEmmc = !!res.emmc_info;
                     var hasNvme = !!res.nvme_info;
                     var hasF2fs = res.f2fs_info && res.f2fs_info.length > 0;
-
-                    // UBI + MTD side-by-side in a two-column thermals-style row
                     if (hasUbi || hasMtd) {
                         var nandRow = E('div', {id: 'hw-nand-row', class: 'hw-thermals-container'});
-
                         if (hasUbi) {
                             var ubiCol = E('div', {class: 'hw-thermals-col' + (hasMtd ? ' hw-thermals-col-left' : '')});
                             ubiCol.appendChild(secH('UBI / NAND Flash'));
@@ -1805,9 +1848,7 @@ return view.extend({
                             });
                             nandRow.appendChild(ubiCol);
                         }
-
                         if (hasUbi && hasMtd) nandRow.appendChild(E('div', {class: 'hw-thermals-divider'}));
-
                         if (hasMtd) {
                             var mtdCol = E('div', {class: 'hw-thermals-col' + (hasUbi ? ' hw-thermals-col-right' : ''), style: 'min-width: 0;'});
                             mtdCol.appendChild(secH('MTD Partition Table'));
@@ -1823,7 +1864,6 @@ return view.extend({
                                 ]));
                             });
                             mtdCol.appendChild(mtdWrap);
-                            // ECC error alert — only shown when non-zero errors exist
                             var eccParts = res.mtd_parts.filter(function(p) { return p.ecc_fail > 0 || p.ecc_corr > 0; });
                             if (eccParts.length > 0) {
                                 var eccDiv = E('div', {style: 'margin-top:10px; padding-top:8px; border-top:1px dashed var(--border-color,rgba(128,128,128,0.2));'});
@@ -1845,11 +1885,8 @@ return view.extend({
                             }
                             nandRow.appendChild(mtdCol);
                         }
-
                         extraNode.appendChild(nandRow);
                     }
-
-                    // eMMC / SD health
                     if (hasEmmc) {
                         if (hasUbi || hasMtd) extraNode.appendChild(hRule());
                         extraNode.appendChild(secH('eMMC / SD Health'));
@@ -1868,8 +1905,6 @@ return view.extend({
                         if (!em.life_a && !em.life_b) emBox.appendChild(makeRow('Lifetime', 'Not reported by device', '#9e9e9e'));
                         extraNode.appendChild(emBox);
                     }
-
-                    // NVMe
                     if (hasNvme) {
                         if (hasUbi || hasMtd || hasEmmc) extraNode.appendChild(hRule());
                         extraNode.appendChild(secH('NVMe Details'));
@@ -1880,8 +1915,6 @@ return view.extend({
                         if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
                         extraNode.appendChild(nvBox);
                     }
-
-                    // f2fs
                     if (hasF2fs) {
                         if (hasUbi || hasMtd || hasEmmc || hasNvme) extraNode.appendChild(hRule());
                         extraNode.appendChild(secH('f2fs Statistics'));
@@ -1901,32 +1934,26 @@ return view.extend({
                     var horizDiv = document.getElementById('hw-dsk-horiz-divider');
                     if (horizDiv && extraNode) horizDiv.style.display = extraNode.children.length > 0 ? '' : 'none';
                 })();
-
                 if (res.block_devs && Array.isArray(res.block_devs)) {
                     var extWrapper = document.getElementById('my-ext-wrapper');
                     var driveGroups = {};
                     var now = Date.now();
-
                     res.block_devs.forEach(function(bdev) {
                         if (bdev.dev.indexOf('mmcblk') === 0 || bdev.dev.indexOf('mtd') === 0 || bdev.dev.indexOf('ubi') === 0 || bdev.dev.indexOf('loop') === 0 || bdev.dev.indexOf('zram') === 0) return;
-
                         var parent = bdev.dev.replace(/[0-9]+$/, '');
                         if (bdev.dev.indexOf('nvme') === 0) {
                             parent = bdev.dev.replace(/p[0-9]+$/, '');
                         }
-
                         if (!driveGroups[parent]) driveGroups[parent] = {
                             main: null,
                             parts: []
                         };
-
                         if (bdev.dev === parent) {
                             driveGroups[parent].main = bdev;
                         } else {
                             driveGroups[parent].parts.push(bdev);
                         }
                     });
-
                     var extDrives = [];
                     for (var p in driveGroups) {
                         var grp = driveGroups[p];
@@ -1937,14 +1964,11 @@ return view.extend({
                             extDrives.push(grp);
                         }
                     }
-
                     if (extWrapper) {
                         extWrapper.innerHTML = '';
                         if (extDrives.length > 0) {
-                            // Advanced Layout Engine: Dynamic dial counting!
                             var dialsCount = document.querySelectorAll('.hw-dial').length;
                             var maxColsPerCard = dialsCount > 0 ? dialsCount : 3;
-
                             var cards = [];
                             var currentCard = {
                                 cols: []
@@ -1954,10 +1978,8 @@ return view.extend({
                                 weight: 0
                             };
                             var maxWeightPerCol = 4;
-
                             extDrives.forEach(function(grp) {
                                 var weight = 1 + grp.parts.length;
-
                                 if (currentCol.items.length > 0 && currentCol.weight + weight > maxWeightPerCol) {
                                     currentCard.cols.push(currentCol);
                                     currentCol = {
@@ -1965,36 +1987,28 @@ return view.extend({
                                         weight: 0
                                     };
                                 }
-
                                 if (currentCard.cols.length >= maxColsPerCard) {
                                     cards.push(currentCard);
                                     currentCard = {
                                         cols: []
                                     };
                                 }
-
                                 currentCol.items.push(grp);
                                 currentCol.weight += weight;
                             });
-
                             if (currentCol.items.length > 0) {
                                 currentCard.cols.push(currentCol);
                             }
                             if (currentCard.cols.length > 0) {
                                 cards.push(currentCard);
                             }
-
                             cards.forEach(function(cardData, cardIdx) {
                                 var colsCount = cardData.cols.length;
-
-                                // Proportional sizing: card grows proportionally to column count
                                 var flexStyle = 'flex: ' + colsCount + ' 1 ' + (colsCount * 280) + 'px;';
                                 if (colsCount >= maxColsPerCard) {
                                     flexStyle += ' flex-basis: 100%;';
                                 }
-
                                 var titleStr = cards.length > 1 ? 'External Storage (' + (cardIdx + 1) + '/' + cards.length + ')' : 'External Storage';
-
                                 var cardContainer = E('div', {
                                     class: 'hw-thermals-container',
                                     style: 'margin-top: 15px;'
@@ -2006,10 +2020,8 @@ return view.extend({
                                     E('h3', {}, titleStr),
                                     cardContainer
                                 ]);
-
                                 var domCols = [];
                                 for (var i = 0; i < colsCount; i++) {
-                                    // No min-width limit here! It naturally compresses to fit the row!
                                     domCols.push(E('div', {
                                         class: 'hw-thermals-col hw-thermals-col-mid'
                                     }));
@@ -2017,9 +2029,8 @@ return view.extend({
                                 if (domCols.length > 0) {
                                     domCols[0].className = 'hw-thermals-col hw-thermals-col-left';
                                     domCols[domCols.length - 1].className = 'hw-thermals-col hw-thermals-col-right';
-                                    if (domCols.length === 1) domCols[0].className = 'hw-thermals-col'; // clean if only 1
+                                    if (domCols.length === 1) domCols[0].className = 'hw-thermals-col';
                                 }
-
                                 cardData.cols.forEach(function(colData, colIdx) {
                                     colData.items.forEach(function(grp) {
                                         var main = grp.main;
@@ -2027,7 +2038,6 @@ return view.extend({
                                         var isUsb = main.removable === '1' || main.type === 'USB';
                                         var displayType = isUsb ? 'USB' : main.type;
                                         var mStats = getStats(main, now);
-
                                         var box = E('div', {
                                             class: 'hw-progress-item',
                                             style: 'background: rgba(128,128,128,0.05); border: 1px solid var(--border-color, rgba(128,128,128,0.1)); border-radius: 8px; padding: 12px; margin-bottom: 12px; overflow: hidden;'
@@ -2061,7 +2071,6 @@ return view.extend({
                                                 E('span', {}, displayType)
                                             ])
                                         ]);
-
                                         if (grp.parts.length > 0) {
                                             var partsContainer = E('div', {
                                                 style: 'margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.3));'
@@ -2070,7 +2079,6 @@ return view.extend({
                                                 var psz = part.size ? (parseInt(part.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : '';
                                                 var formatStr = (part.fs && part.fs !== 'Unknown') ? part.fs : 'Unmounted';
                                                 var pStats = getStats(part, now);
-
                                                 var pRow = E('div', {
                                                     style: 'margin-bottom: 12px;'
                                                 }, [
@@ -2128,7 +2136,6 @@ return view.extend({
                                         domCols[colIdx].appendChild(box);
                                     });
                                 });
-
                                 for (var i = 0; i < domCols.length; i++) {
                                     cardContainer.appendChild(domCols[i]);
                                     if (i < domCols.length - 1) {
@@ -2137,7 +2144,6 @@ return view.extend({
                                         }));
                                     }
                                 }
-
                                 extWrapper.appendChild(cardNode);
                             });
                         }
@@ -2152,7 +2158,6 @@ return view.extend({
                         var tEl = document.getElementById('title-cpu');
                         if (tEl && tEl.textContent !== title) tEl.textContent = title;
                     }
-                    // Normalize + de-duplicate sensors, sorted alphabetically.
                     var sensors = [];
                     var seenSensors = {};
                     if (!self.tempHist) self.tempHist = {};
@@ -2169,9 +2174,6 @@ return view.extend({
                         var pass = t.pass && t.pass !== 'null' ? parseInt(t.pass) : null;
                         if (crit && crit > 1000) crit = crit / 1000;
                         if (pass && pass > 1000) pass = pass / 1000;
-                        // Some drivers report nonsense trip points (-274 °C, 65000 °C
-                        // …). Since trips now drive the badge colors, only keep
-                        // physically plausible values.
                         if (crit !== null && (crit < 40 || crit > 150)) crit = null;
                         if (pass !== null && (pass <= 0 || pass > 150)) pass = null;
                         if (crit !== null && pass !== null && pass >= crit) pass = null;
@@ -2179,7 +2181,6 @@ return view.extend({
                         if (!th || Array.isArray(th) || !th.agg) th = self.tempHist[name] = { label: name, color: PING_COLORS[Object.keys(self.tempHist).length % PING_COLORS.length], hidden: false, data: [], agg: [], acc: { sum: 0, n: 0, cnt: 0 } };
                         th.data.push(tempC);
                         if (th.data.length > TEMP_WINDOW) th.data.shift();
-                        // 30s aggregation buckets feed the 1h/3h views
                         th.acc.cnt++; th.acc.sum += tempC; th.acc.n++;
                         if (th.acc.cnt >= 10) {
                             th.agg.push({ a: th.acc.n > 0 ? th.acc.sum / th.acc.n : null, n: th.acc.n, loss: 0 });
@@ -2188,11 +2189,6 @@ return view.extend({
                         }
                         sensors.push({ name: name, temp: tempC, crit: crit, pass: pass, color: th.color, hist: th.data });
                     });
-                    // Realtime temperature history — the same persistent graph
-                    // panel as the ping card (10m/1h/3h windows, hover crosshair,
-                    // CSV export). The panel element keeps its DOM identity and is
-                    // re-parented into the rebuilt card each tick, so buttons and
-                    // hover never lose pointer state.
                     var tGraph = null;
                     var tHistMap = {};
                     sensors.forEach(function(sn) {
@@ -2215,51 +2211,40 @@ return view.extend({
                             self.tempPanel.el.style.marginBottom = '16px';
                         }
                         tGraph = self.tempPanel.el;
-                        // update AFTER the cards are attached below — updating
-                        // while detached froze the hover tooltip on old values
                         self.tempPanelData = tHistMap;
                     }
-                    // Up to 3 columns per card, up to 4 sensors per column; when
-                    // the platform exposes more sensors, additional cards are added.
-                    var MAX_PER_CARD = 12;
-                    var cardCount = Math.ceil(sensors.length / MAX_PER_CARD);
-                    for (var off = 0; off < sensors.length; off += MAX_PER_CARD) {
-                        var chunk = sensors.slice(off, off + MAX_PER_CARD);
-                        var nCols = Math.min(3, chunk.length);
-                        var cols = [];
-                        for (var ci = 0; ci < nCols; ci++) cols.push([]);
-                        chunk.forEach(function(s, i) {
-                            cols[i % nCols].push(s);
+                    var nCols = Math.min(3, sensors.length);
+                    var cols = [];
+                    for (var ci = 0; ci < nCols; ci++) cols.push([]);
+                    sensors.forEach(function(s, i) { cols[i % nCols].push(s); });
+                    var rowEl = E('div', { class: 'hw-thermals-container' });
+                    cols.forEach(function(colSensors, cidx) {
+                        if (cidx > 0) rowEl.appendChild(E('div', { class: 'hw-thermals-divider' }));
+                        var colCls = 'hw-thermals-col';
+                        if (nCols > 1) {
+                            colCls += cidx === 0 ? ' hw-thermals-col-left' : cidx === nCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                        }
+                        var list = E('div', {
+                            class: 'hw-stats-list',
+                            style: 'margin-top: 0; padding-top: 0;'
                         });
-                        var rowEl = E('div', { class: 'hw-thermals-container' });
-                        cols.forEach(function(colSensors, cidx) {
-                            if (cidx > 0) rowEl.appendChild(E('div', { class: 'hw-thermals-divider' }));
-                            var colCls = 'hw-thermals-col';
-                            if (nCols > 1) {
-                                colCls += cidx === 0 ? ' hw-thermals-col-left' : cidx === nCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
-                            }
-                            var list = E('div', {
-                                class: 'hw-stats-list',
-                                style: 'margin-top: 0; padding-top: 0;'
-                            });
-                            colSensors.forEach(function(s) {
-                                list.appendChild(makeSensorRow(s));
-                            });
-                            if (list.lastChild) list.lastChild.style.borderBottom = 'none';
-                            rowEl.appendChild(E('div', { class: colCls }, [list]));
+                        colSensors.forEach(function(s) {
+                            list.appendChild(makeSensorRow(s));
                         });
-                        var cardTitle = cardCount > 1 ? 'Thermal Sensors (' + (off / MAX_PER_CARD + 1) + '/' + cardCount + ')' : 'Thermal Sensors';
-                        var cardKids = [E('h3', {}, cardTitle)];
-                        if (off === 0 && tGraph) cardKids.push(tGraph);
-                        cardKids.push(rowEl);
-                        thermWrap.appendChild(E('div', {
-                            class: 'hw-card wide'
-                        }, cardKids));
+                        if (list.lastChild) list.lastChild.style.borderBottom = 'none';
+                        rowEl.appendChild(E('div', { class: colCls }, [list]));
+                    });
+                    var cardKids = [E('h3', {}, 'Thermal Sensors')];
+                    if (tGraph) {
+                        thermGraphNode.innerHTML = '';
+                        thermGraphNode.appendChild(tGraph);
+                        cardKids.push(thermGraphNode);
                     }
+                    cardKids.push(rowEl);
+                    thermWrap.appendChild(E('div', {
+                        class: 'hw-card wide'
+                    }, cardKids));
                     if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
-                    // Cooling device states (cpufreq throttling, fans, ...) as a
-                    // chip row under the first thermal card. cur > 0 = the kernel
-                    // is actively limiting that device right now.
                     if (res.cooling && res.cooling.length > 0 && thermWrap.firstChild) {
                         var coolRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.15));' });
                         var coolShown = 0;
@@ -2276,16 +2261,12 @@ return view.extend({
                         }
                     }
                 }
-                // Ports Topology: ethernet links and the USB bus share one card.
                 var portsNode = document.getElementById('hw-eth-links');
                 var validPcie = [];
                 if (res.pcie_devs) {
                     validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
                 var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
-                // Physical USB port wiring can't be read reliably from the controller:
-                // a USB 3.0 controller often exposes a 2.0-only port. So the port spec
-                // is hardcoded per known JioRouter board and omitted for everything else.
                 var boardId = res.board || '';
                 var hwPortStr = '';
                 if (/JIDU6[J0-9]11/.test(boardId)) hwPortStr = 'USB 3.0 (1 Physical Port)';
@@ -2307,11 +2288,8 @@ return view.extend({
                             var col = '#9e9e9e';
                             if (st.indexOf('10000') >= 0 || st.indexOf('2500') >= 0 || st.indexOf('1000') >= 0) col = '#00bcd4';
                             else if (st.indexOf('100') >= 0 || st.indexOf('10') >= 0) col = '#ffea00';
-
                             var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
                             var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
-
-                            // Live throughput from rx/tx byte deltas between polls.
                             var dlMbps = null, ulMbps = null;
                             var curRx = parseInt(l.rx_bytes) || 0, curTx = parseInt(l.tx_bytes) || 0, nowT = Date.now();
                             var pe = self.prevEth[l.iface];
@@ -2321,7 +2299,6 @@ return view.extend({
                                 ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
                             }
                             self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
-
                             var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
                                 E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
                                     E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
@@ -2331,7 +2308,6 @@ return view.extend({
                                     E('span', { style: 'color:' + col + ';' }, st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')')
                                 ])
                             ]);
-
                             if (st !== 'Down') {
                                 if (dlMbps !== null) {
                                     box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [
@@ -2356,8 +2332,6 @@ return view.extend({
                             }
                             if (l.mac) {
                                 var flaps = parseInt(l.carrier_changes) || 0;
-                                // carrier_changes counts up+down edges; >2 means it
-                                // flapped after the initial link-up.
                                 var flapStr = flaps > 2 ? ' \u00b7 ' + flaps + ' link flaps' : '';
                                 box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 4px;' }, [
                                     E('span', {}, 'MAC / MTU:'),
@@ -2392,8 +2366,6 @@ return view.extend({
                 } else {
                     ethCard.style.display = 'none';
                 }
-
-                // PCI-e gets its own card, hidden entirely when nothing to show.
                 if (validPcie.length > 0) {
                     pcieCard.style.display = 'flex';
                     var pcNode = document.getElementById('hw-pcie');
@@ -2414,14 +2386,11 @@ return view.extend({
                 } else {
                     pcieCard.style.display = 'none';
                 }
-
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
                     var wfNode = document.getElementById('hw-wifi-radios');
                     if (wfNode) {
                         wfNode.innerHTML = '';
                         var wifiRendered = 0;
-                        // Group radios by band — one column per band, radios of
-                        // the same band stacked vertically inside it.
                         var WIFI_BANDS = ['2.4 GHz', '5 GHz', '6 GHz'];
                         var bandGroups = { '2.4 GHz': [], '5 GHz': [], '6 GHz': [], 'Other': [] };
                         if (!self.prevSurvey) self.prevSurvey = {};
@@ -2429,8 +2398,6 @@ return view.extend({
                             if ((!w.band || w.band === 'Unknown') && (!w.hwmode || w.hwmode === 'Unknown')) return;
                             var bKey = w.band.replace(' GHz', 'GHz');
                             var bCap = (w.phycap && w.phycap.bands && w.phycap.bands[bKey]) ? w.phycap.bands[bKey] : null;
-
-                            // Strictly real data from upstream kernel sources only
                             var phycapSp = w.phycap ? parseInt(w.phycap.max_spatial) : 0;
                             var hwMaxSp = phycapSp > 1 ? phycapSp : (parseInt(w.hw_nss) > 1 ? parseInt(w.hw_nss) : 0);
                             var hwMaxCw = (w.phycap && w.phycap.max_cw && parseInt(w.phycap.max_cw) >= 20) ? w.phycap.max_cw : null;
@@ -2438,11 +2405,7 @@ return view.extend({
                             var currCwNum = parseInt(w.curr_width) || 0;
                             var currCwStr = currCwNum > 0 ? currCwNum + ' MHz' : null;
                             var cfgNss = parseInt(w.cfg_nss) || 0;
-
-                            // Chip HW Max: only from iw list phycap — no guessing
                             var chipMaxBr = (hwMaxSp > 0 && hwMaxCw && w.hwmode) ? calcMaxBitrate(w.hwmode, hwMaxCw, hwMaxSp) : null;
-
-                            // Config Max: only shown when software config differs from hw max
                             var cfgMaxBr = null;
                             var cfgMaxLabel = null;
                             if (chipMaxBr) {
@@ -2454,21 +2417,12 @@ return view.extend({
                                     cfgMaxLabel = cfgSp + 'x' + cfgSp + ' MIMO @ ' + cfgCw;
                                 }
                             }
-
                             var suppChs = (w.channels && w.channels.length > 0) ? w.channels.split(',') : (bCap ? bCap.enabled : []);
                             var cleanHw = w.hardware ? w.hardware.replace(/^.*\[/, '').replace(/\]$/, '') : '';
                             var chStr = (w.channel && w.channel !== 'Unknown' && w.channel !== 'unknown' && w.channel !== '0') ? w.channel : null;
-
-                            // Regulatory domain (country code + DFS regime)
                             var regStr = '';
                             if (w.country && w.country !== '00' && w.country !== '') regStr = w.country + (w.dfs_region ? ' · ' + w.dfs_region : '');
                             else if (w.country === '00') regStr = '00 · World';
-                            // Channel survey — airtime load (busy %) + noise floor.
-                            // Prefer the between-poll delta so it tracks CURRENT
-                            // congestion (ath11k advances the counters every read). Some
-                            // mt76 builds only refresh the survey snapshot lazily, so the
-                            // counters don't move between polls — there, fall back to the
-                            // cumulative busy/active ratio so airtime is still shown.
                             var sv = (res.wifi_survey && res.wifi_survey[w.iface]) || null;
                             var busyPct = -1, surveyStr = '', noiseVal = 0;
                             if (sv) {
@@ -2477,11 +2431,11 @@ return view.extend({
                                 var curAct = parseInt(sv.active) || 0, curBusy = parseInt(sv.busy) || 0;
                                 var curTx = parseInt(sv.tx) || 0, curRx = parseInt(sv.rx) || 0;
                                 if (curAct > 0) {
-                                    var live = psv && curAct > psv.active;          // counters advanced
-                                    var stale = psv && curAct === psv.active;        // snapshot didn't move
+                                    var live = psv && curAct > psv.active;
+                                    var stale = psv && curAct === psv.active;
                                     var dA, dB, dT, dR;
                                     if (live)       { dA = curAct - psv.active; dB = curBusy - psv.busy; dT = curTx - psv.tx; dR = curRx - psv.rx; }
-                                    else if (stale) { dA = curAct; dB = curBusy; dT = curTx; dR = curRx; } // cumulative fallback
+                                    else if (stale) { dA = curAct; dB = curBusy; dT = curTx; dR = curRx; }
                                     if (dA > 0) {
                                         busyPct = Math.max(0, Math.min(100, Math.round(dB / dA * 100)));
                                         var txPct = Math.max(0, Math.min(100, Math.round(dT / dA * 100)));
@@ -2491,7 +2445,6 @@ return view.extend({
                                 }
                                 self.prevSurvey[w.iface] = { active: curAct, busy: curBusy, tx: curTx, rx: curRx };
                             }
-
                             wifiRendered++;
                             var bandKey = bandGroups[w.band] ? w.band : 'Other';
                             bandGroups[bandKey].push(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 8px;' }, [
@@ -2514,11 +2467,6 @@ return view.extend({
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
                         });
-                        // One column per band actually present (2.4 / 5 / 6 GHz,
-                        // plus Other for band-unknown radios); radios of a band
-                        // stack vertically inside their column. Missing bands are
-                        // simply not rendered. Collapses to a single column on
-                        // mobile via the shared container CSS.
                         var presentBands = WIFI_BANDS.concat(['Other']).filter(function(b) { return bandGroups[b].length > 0; });
                         if (presentBands.length > 0) {
                             var wNCols = presentBands.length;
@@ -2530,8 +2478,6 @@ return view.extend({
                                 var wCol = E('div', { class: wCls, style: 'min-width: 0; display: flex; flex-direction: column;' });
                                 wCol.appendChild(E('div', { class: 'hw-thermals-title' }, b === 'Other' ? 'OTHER' : b.toUpperCase()));
                                 bandGroups[b].forEach(function(box) {
-                                    // equal-height boxes: each radio stretches to share
-                                    // the column, so side-by-side bands line up.
                                     box.style.flex = '1 1 0';
                                     wCol.appendChild(box);
                                 });
@@ -2544,8 +2490,6 @@ return view.extend({
                 } else {
                     wifiCard.style.display = 'none';
                 }
-
-                // Interrupts card: top IRQ sources with per-core split + softnet backlog.
                 if (res.irqs && res.irqs.length > 0) {
                     var irqNode = document.getElementById('hw-irq');
                     if (!self.prevIrqs) self.prevIrqs = {};
@@ -2612,8 +2556,6 @@ return view.extend({
                 } else {
                     irqCard.style.display = 'none';
                 }
-
-                // Offload Engines — flowtable / PPE hardware NAT / WED status.
                 if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0)) {
                     var off = res.offload;
                     var offNode = document.getElementById('hw-offload');
@@ -2627,7 +2569,6 @@ return view.extend({
                         };
                         addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
                         addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
-                        // turboacc-style current/total bars
                         var mkOffBar = function(lbl, cur, tot, color) {
                             var pctB = tot > 0 ? Math.min(100, cur / tot * 100) : 0;
                             var valSpan = E('span', { class: 'hw-stat-value', style: 'color:' + color + ';' }, cur + ' / ' + tot);
@@ -2641,8 +2582,6 @@ return view.extend({
                         };
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
                         if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4');
-                        // vs the real hardware table: 16384 entries per PPE on the
-                        // upstream driver (turboacc-style bind/total display)
                         if (off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a');
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
@@ -2651,8 +2590,6 @@ return view.extend({
                 } else {
                     offloadCard.style.display = 'none';
                 }
-
-                // Hardware Events — filtered dmesg lines with relative timestamps.
                 if (res.hw_events && res.hw_events.length > 0) {
                     var evNode = document.getElementById('hw-events');
                     if (evNode) {
@@ -2676,9 +2613,6 @@ return view.extend({
                 } else {
                     eventsCard.style.display = 'none';
                 }
-
-                // Power & Fans — voltage rails / fans / power / current from
-                // hwmon; hidden when the platform exposes none.
                 if (res.hwmon_extra && res.hwmon_extra.length > 0) {
                     var hxNode = document.getElementById('hw-hwmon');
                     var hxShown = 0;
@@ -2702,13 +2636,10 @@ return view.extend({
                 } else {
                     hwmonCard.style.display = 'none';
                 }
-
-                // System Info card
                 var sysInfoGrid = document.getElementById('hw-sysinfo-grid');
                 if (sysInfoGrid && res.sys_info) {
                     sysInfoGrid.innerHTML = '';
                     var si = res.sys_info;
-                    // Header: board name + OS badge
                     var boardName = res.board || si.hostname || 'OpenWrt Device';
                     var siHeader = E('div', {style: 'display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--border-color,rgba(128,128,128,0.2));'});
                     var siTitle = E('div', {});
@@ -2719,7 +2650,6 @@ return view.extend({
                     if (si.revision) osStr += ' (' + si.revision + ')';
                     siHeader.appendChild(E('span', {style: 'font-size:0.85em; padding:4px 10px; border-radius:6px; background:rgba(0,188,212,0.1); border:1px solid rgba(0,188,212,0.3); color:#00bcd4; white-space:nowrap;'}, osStr));
                     sysInfoGrid.appendChild(siHeader);
-                    // Info grid — auto-fill columns, wraps gracefully on mobile
                     var siGrid = E('div', {style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:5px 20px; margin-bottom:12px;'});
                     var addSi = function(lbl, val) {
                         siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;'}, [
@@ -2758,7 +2688,6 @@ return view.extend({
                     if (si.l3 > 0) addSi('L3 Cache', fmtCacheBytes(si.l3));
                     if (si.l4 > 0) addSi('L4 Cache', fmtCacheBytes(si.l4));
                     sysInfoGrid.appendChild(siGrid);
-                    // CPU Security vulnerability chips
                     if (si.vulns && typeof si.vulns === 'object' && Object.keys(si.vulns).length > 0) {
                         var vulnDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
                         vulnDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Security'));
@@ -2776,22 +2705,16 @@ return view.extend({
                         sysInfoGrid.appendChild(vulnDiv);
                     }
                 }
-
                 applyCardVisibility();
             }).catch(function(err) {
                 console.error(err);
             }).then(function() { self.infoBusy = false; });
         };
         poll.add(infoTick, 3);
-        // First paint NOW — don't wait for LuCI's poll to align to its 3s
-        // boundary (that alignment is why the hardware cards used to appear
-        // seconds after the ping card).
         infoTick();
         pingTick();
-
         return container;
     },
-
     handleSaveApply: null,
     handleSave: null,
     handleReset: null
