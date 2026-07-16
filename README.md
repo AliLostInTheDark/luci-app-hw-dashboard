@@ -11,7 +11,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.1.6-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.1.7-r1.apk
 ```
 
 The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -148,7 +148,7 @@ A filtered `dmesg` view (10-second TTL) showing thermal, ECC, link-flap, USB, OO
 
 ### Settings
 
-The gear button (top right) opens a panel styled with standard LuCI `cbi` classes: per-card show/hide checkboxes, the ping-target editor, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in `/etc/hwdash-settings.json` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers.
+The gear button (top right) opens a panel styled with standard LuCI `cbi` classes: per-card show/hide checkboxes, the ping-target editor, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in the standard UCI configuration `/etc/config/hwdash` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers and survive sysupgrades and backups.
 
 ### WiFi PHY & Spectrum
 
@@ -177,7 +177,7 @@ The dashboard is deliberately conservative about process spawning. Shell forks a
 | `sys_static_v2.frag` | CPU cache sizes, SoC identity, kernel version, vulnerability status | On package upgrade |
 | `hw_identity_v1.sh` | Board name, CPU model, core/thread counts, max frequency | On package upgrade |
 
-Two files live outside `/etc/hwdash/` so they survive package upgrades: `/etc/hwdash-settings.json` (dashboard settings) and `/etc/hwdash-ecc.baseline` (the first-seen NAND ECC counter snapshot that powers the "+N since date" wear trend; auto-rebuilt if the counters reset after a reflash).
+Two files/configs live outside `/etc/hwdash/` so they survive package upgrades: `/etc/config/hwdash` (dashboard settings stored via UCI) and `/etc/hwdash-ecc.baseline` (the first-seen NAND ECC counter snapshot that powers the "+N since date" wear trend; auto-rebuilt if the counters reset after a reflash).
 
 **Volatile cache** (`/tmp/`) — cleared on reboot; represents live data with a short TTL:
 

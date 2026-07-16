@@ -79,27 +79,34 @@ case "$1" in
 	call)
 		case "$2" in
 			get_config)
-				# Dashboard settings (hidden cards, ping targets) persist on
-				# the router — LuCI-style — so they follow the device, not the
-				# browser. Kept outside /etc/hwdash so upgrades don't clear it.
+				# Dashboard settings (hidden cards, ping targets) persist in /etc/config/hwdash
+				# so they are preserved across sysupgrades and backups.
+				# Auto-migrate legacy settings if they exist.
 				if [ -f /etc/hwdash-settings.json ]; then
-					cat /etc/hwdash-settings.json
-				else
-					echo '{}'
+					_leg=""
+					_leg=$(cat /etc/hwdash-settings.json 2>/dev/null)
+					if [ -n "$_leg" ]; then
+						uci -q set hwdash.main=settings
+						uci -q set hwdash.main.settings_json="$_leg"
+						uci -q commit hwdash
+					fi
+					rm -f /etc/hwdash-settings.json
 				fi
+				_res=""
+				_res=$(uci -q get hwdash.main.settings_json 2>/dev/null)
+				[ -n "$_res" ] && echo "$_res" || echo '{}'
 				;;
 			set_config)
 				_IN=""
 				IFS= read -r _IN 2>/dev/null
 				_CFG=""
 				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					# jsonfilter re-serializes, so whatever lands in the file is
-					# valid JSON or nothing; size-capped to keep it sane.
 					_CFG=$(printf '%s' "$_IN" | head -c 16384 | jsonfilter -e '@.config' 2>/dev/null)
 				fi
 				if [ -n "$_CFG" ]; then
-					printf '%s\n' "$_CFG" > "/etc/hwdash-settings.json.$$" 2>/dev/null && \
-						mv "/etc/hwdash-settings.json.$$" /etc/hwdash-settings.json 2>/dev/null
+					uci -q set hwdash.main=settings
+					uci -q set hwdash.main.settings_json="$_CFG"
+					uci -q commit hwdash
 					echo '{"result":"ok"}'
 				else
 					echo '{"result":"invalid"}'
@@ -1100,6 +1107,7 @@ EOF
 				# the heavy read at most once per 5s.
 				_offload_refresh() {
 					local _ft=0 _swcfg=0 _hwcfg=0 _ppe=-1 _sw=-1 _wed=0 _ptot=0 _pl _p _w _hl _hv _pd _pn
+					local _qcom_json="null"
 					command -v nft >/dev/null && _ft=$(nft list flowtables 2>/dev/null | grep -c "flags offload")
 					_swcfg=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
 					_hwcfg=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
@@ -1125,29 +1133,114 @@ EOF
 						done < /sys/kernel/debug/hnat/hnat_stats
 					else
 						_pn=0; for _pd in /sys/kernel/debug/ppe[0-9]*; do [ -d "$_pd" ] && _pn=$((_pn + 1)); done
-						[ $_pn -gt 0 ] && _ptot=$((_pn * 16384))
+						if [ $_pn -gt 0 ]; then
+							_ptot=$((_pn * 16384))
+						elif [ -d /sys/kernel/debug/ppe ]; then
+							_ptot=4096
+							[ "$_sw" -ge 0 ] && _ppe=$_sw || _ppe=0
+							local _cpu_code_json="{}"
+							if [ -f /sys/kernel/debug/ppe/cpu_code ]; then
+								local _line _pkt _port _drop _first=1
+								_cpu_code_json="{"
+								while read -r _line; do
+									_line=$(echo "$_line" | sed 's/^[ \t]*//')
+									[ -z "$_line" ] && continue
+									case "$_line" in
+										"CPU CODE:"*)
+											_line=${_line#CPU CODE:}
+											_line=$(echo "$_line" | sed 's/^[ \t]*//')
+											;;
+									esac
+									[ -z "$_line" ] && continue
+									case "$_line" in
+										*\(port=*\),dropcode:*)
+											_pkt=${_line%%(port*}
+											_pkt=$(echo "$_pkt" | tr -d ' \t')
+											_port=${_line##*port=}
+											_port=${_port%%)*}
+											while [ "${_port#0}" != "$_port" ]; do
+												_port=${_port#0}
+											done
+											[ -z "$_port" ] && _port=0
+											_drop=${_line##*dropcode:}
+											_drop=$(echo "$_drop" | tr -d ' \t\r\n')
+											while [ "${_drop#0}" != "$_drop" ]; do
+												_drop=${_drop#0}
+											done
+											[ -z "$_drop" ] && _drop=0
+											[ $_first -eq 0 ] && _cpu_code_json="$_cpu_code_json,"
+											_cpu_code_json="$_cpu_code_json\"cpucode_port${_port}_drop${_drop}\":$_pkt"
+											_first=0
+											;;
+									esac
+								done < /sys/kernel/debug/ppe/cpu_code
+								_cpu_code_json="$_cpu_code_json}"
+							fi
+							local _bm_silent=0 _bm_overflow=0
+							if [ -f /sys/kernel/debug/ppe/bm ]; then
+								local _mode="" _line _p _v
+								while read -r _line; do
+									case "$_line" in
+										*"BM SILENT_DROP:"*) _mode="silent" ;;
+										*"BM OVERFLOW_DROP:"*) _mode="overflow" ;;
+										*"BM USED/REACT:"*) _mode="" ;;
+									esac
+									if [ -n "$_mode" ]; then
+										for _v in $_line; do
+											case "$_v" in
+												*port=*)
+													_p=${_v%%(*}
+													if [ "$_mode" = "silent" ]; then
+														_bm_silent=$((_bm_silent + _p))
+													else
+														_bm_overflow=$((_bm_overflow + _p))
+													fi
+													;;
+											esac
+										done
+									fi
+								done < /sys/kernel/debug/ppe/bm
+							fi
+							local _edma_err_json="{}"
+							if [ -f /sys/kernel/debug/ppe/edma/stats/err_stats ]; then
+								local _line _k _v _first=1
+								_edma_err_json="{"
+								while read -r _line; do
+									case "$_line" in
+										*"="*)
+											_k=${_line%%=*}
+											_k=$(echo $_k | tr 'A-Z' 'a-z' | tr ' ' '_' | tr -cd 'a-z0-9_')
+											_v=${_line##*=}
+											_v=$(echo $_v | tr -d ' \t')
+											[ $_first -eq 0 ] && _edma_err_json="$_edma_err_json,"
+											_edma_err_json="$_edma_err_json\"$_k\":$_v"
+											_first=0
+											;;
+									esac
+								done < /sys/kernel/debug/ppe/edma/stats/err_stats
+								_edma_err_json="$_edma_err_json}"
+							fi
+							_qcom_json="{\"qcom_ppe\":1,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
+						fi
 					fi
-					_cache_write /tmp/hwdash_offload.cache 5 "$_ft $_swcfg $_hwcfg $_ppe $_sw $_wed $_ptot"
+					_cache_write /tmp/hwdash_offload.json 5 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"qcom\":$_qcom_json}"
 				}
-				OFF_FT=0; OFF_SWCFG=0; OFF_HWCFG=0; PPE_FLOWS=-1; SW_FLOWS=-1; WED_CNT=0; PPE_TOTAL=0
-				if _cache_read /tmp/hwdash_offload.cache; then
-					set -- $C_VAL
-					OFF_FT=${1:-0}; OFF_SWCFG=${2:-0}; OFF_HWCFG=${3:-0}; PPE_FLOWS=${4:--1}; SW_FLOWS=${5:--1}; WED_CNT=${6:-0}; PPE_TOTAL=${7:-0}
+				OFFLOAD_JSON=""
+				if _cache_read /tmp/hwdash_offload.json; then
+					OFFLOAD_JSON="$C_VAL"
 				elif [ -n "$C_VAL" ]; then
-					set -- $C_VAL
-					OFF_FT=${1:-0}; OFF_SWCFG=${2:-0}; OFF_HWCFG=${3:-0}; PPE_FLOWS=${4:--1}; SW_FLOWS=${5:--1}; WED_CNT=${6:-0}; PPE_TOTAL=${7:-0}
+					OFFLOAD_JSON="$C_VAL"
 					if ! _cache_read /tmp/hwdash_offload.lock; then
 						_cache_write /tmp/hwdash_offload.lock 30 refreshing
 						( _offload_refresh ) >/dev/null 2>&1 &
 					fi
 				else
-					# first-ever call: build in the background, serve empty now
 					if ! _cache_read /tmp/hwdash_offload.lock; then
 						_cache_write /tmp/hwdash_offload.lock 30 refreshing
 						( _offload_refresh ) >/dev/null 2>&1 &
 					fi
+					OFFLOAD_JSON="{\"ft\":0,\"sw_cfg\":0,\"hw_cfg\":0,\"ppe_flows\":-1,\"sw_flows\":-1,\"ppe_total\":0,\"wed\":0,\"qcom\":null}"
 				fi
-				OFFLOAD_JSON="{\"ft\":$OFF_FT,\"sw_cfg\":$OFF_SWCFG,\"hw_cfg\":$OFF_HWCFG,\"ppe_flows\":$PPE_FLOWS,\"sw_flows\":$SW_FLOWS,\"ppe_total\":$PPE_TOTAL,\"wed\":$WED_CNT}"
 
 				# --- since-boot watermarks (peak temp / conntrack / PPE flows).
 				# Sourced from a /tmp file (clears on reboot); rewritten only

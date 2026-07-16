@@ -1186,11 +1186,11 @@ return view.extend({
                         var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
                         var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
                         var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
-                        var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em; table-layout: fixed;' });
+                        var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em;' });
                         tbl.appendChild(E('tr', {}, [
-                            E('th', { style: thStyle + 'text-align: left; width: 8%;' }, 'Protocol'),
-                            E('th', { style: thStyle + 'text-align: left; width: 15%;' + divS }, 'Target'),
-                            E('th', { style: thStyle + 'text-align: left; width: 16%;' + divS }, 'IP Address'),
+                            E('th', { style: thStyle + 'text-align: left; width: 1%; white-space: nowrap;' }, 'Protocol'),
+                            E('th', { style: thStyle + 'text-align: left; white-space: nowrap;' + divS }, 'Target'),
+                            E('th', { style: thStyle + 'text-align: left; white-space: nowrap;' + divS }, 'IP Address'),
                             E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
                             E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
                             E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
@@ -1212,10 +1212,9 @@ return view.extend({
                         keys.forEach(function(k) {
                             var t = hist[k];
                             var tdS = 'text-align: right; padding: 3px 8px; opacity: 0.85;';
-                            var ellip = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;';
                             var cells = {
-                                target: E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; ' + ellip + pt.divS }),
-                                ip: E('td', { style: 'padding: 3px 8px; opacity: 0.65; font-family: monospace; font-size: 0.95em; ' + ellip + pt.divS }),
+                                target: E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; white-space: nowrap; ' + pt.divS }),
+                                ip: E('td', { style: 'padding: 3px 8px; color: ' + t.color + '; opacity: 0.85; font-family: monospace; font-size: 0.95em; white-space: nowrap; ' + pt.divS }),
                                 cur: E('td', { style: tdS }), min: E('td', { style: tdS }),
                                 avg: E('td', { style: tdS }), p95: E('td', { style: tdS }),
                                 max: E('td', { style: tdS }), jit: E('td', { style: tdS }),
@@ -2569,7 +2568,7 @@ return view.extend({
                 } else {
                     irqCard.style.display = 'none';
                 }
-                if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0)) {
+                if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0 || res.offload.qcom)) {
                     var off = res.offload;
                     var offNode = document.getElementById('hw-offload');
                     if (offNode) {
@@ -2580,8 +2579,10 @@ return view.extend({
                                 E('span', { class: 'hw-stat-value', style: color ? 'color:' + color + ';' : '' }, val)
                             ]));
                         };
-                        addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
-                        addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
+                        if (!off.qcom) {
+                            addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
+                            addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
+                        }
                         var mkOffBar = function(lbl, cur, tot, color) {
                             var pctB = tot > 0 ? Math.min(100, cur / tot * 100) : 0;
                             var valSpan = E('span', { class: 'hw-stat-value', style: 'color:' + color + ';' }, cur + ' / ' + tot);
@@ -2594,9 +2595,47 @@ return view.extend({
                             ]));
                         };
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
-                        if (off.sw_flows >= 0) mkOffBar('Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4');
-                        if (off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a');
+                        if (off.sw_flows >= 0) mkOffBar(off.qcom ? 'PPE Offloaded Flows' : 'Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4');
+                        if (!off.qcom && off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a');
                         if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
+                        if (off.qcom) {
+                            var q = off.qcom;
+                            offNode.appendChild(E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
+                                E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, 'Qualcomm PPE Diagnostics'),
+                                E('span', { class: 'hw-stat-value' }, '')
+                            ]));
+                            var hits = 0, misses = 0;
+                            if (q.cpu_code) {
+                                Object.keys(q.cpu_code).forEach(function(k) {
+                                    var val = parseInt(q.cpu_code[k] || 0);
+                                    if (k.indexOf('_drop0') !== -1) {
+                                        hits += val;
+                                    } else if (k.indexOf('_drop') !== -1) {
+                                        misses += val;
+                                    } else {
+                                        // Old format: e.g. cpucode_152
+                                        var code = k.replace('cpucode_', '');
+                                        if (['152', '153', '154', '155'].indexOf(code) !== -1) {
+                                            hits += val;
+                                        } else if (['162', '163'].indexOf(code) !== -1) {
+                                            misses += val;
+                                        }
+                                    }
+                                });
+                            }
+                            addOff('Punted to CPU (No Drop)', hits, hits > 0 ? '#8bc34a' : '#9e9e9e');
+                            addOff('Punted to CPU (Dropped)', misses, misses > 0 ? '#ffb300' : '#9e9e9e');
+                            var silent = q.bm_silent || 0;
+                            var overflow = q.bm_overflow || 0;
+                            addOff('PPE Buffer Drops (Silent / Over)', silent + ' / ' + overflow, (silent > 0 || overflow > 0) ? '#ff5252' : '#9e9e9e');
+                            var edma_err_cnt = 0;
+                            if (q.edma_err) {
+                                Object.keys(q.edma_err).forEach(function(k) {
+                                    edma_err_cnt += parseInt(q.edma_err[k] || 0);
+                                });
+                            }
+                            addOff('EDMA AXI / Ring Errors', edma_err_cnt, edma_err_cnt > 0 ? '#ff5252' : '#9e9e9e');
+                        }
                         offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
                     }
                     offloadCard.style.display = 'flex';
