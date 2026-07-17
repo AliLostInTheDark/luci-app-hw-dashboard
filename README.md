@@ -11,7 +11,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.1.7-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.1.8-r1.apk
 ```
 
 The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -210,7 +210,9 @@ The AWK-based WiFi capability parser (`luci.hwdash_wifi_cap.awk`) handles the st
 
 ## Frontend
 
-The frontend is a single LuCI JavaScript view (`hw_dash.js`) with two poll loops: the main hardware readout every 3 seconds and the ping probes every second. Both stop entirely while the browser tab is hidden — the router does no collection work for a dashboard nobody is looking at — and resume on return. Hot fixed-shape sections (the per-core usage rows, the SVG dials) update in place rather than rebuilding their DOM subtree each tick.
+The frontend is a single LuCI JavaScript view (`hw_dash.js`) with two poll loops: the main hardware readout every 3 seconds and the ping probes every second. Both stop entirely while the browser tab is hidden — the router does no collection work for a dashboard nobody is looking at — and resume on return.
+
+Every card is built once as a persistent DOM skeleton and patched in place on each tick rather than torn down and rebuilt — CPU (dials, per-core rows, detailed load, frequency residency), Memory, Internal/External Storage, Thermal Sensors, Ports Topology, PCI-e, Offload Engines, Interrupts, WiFi PHY, Hardware Events, hwmon, and System Info all update via one of two mechanisms: a keyed row-diff that adds, removes, or reorders only the rows whose underlying item actually appeared, disappeared, or moved (everything else is a `textContent`/style write on an already-attached node), or a content-signature gate that skips the rebuild outright when the section's structural inputs are byte-identical to the previous tick — which is the common case for hardware topology that only changes when something is physically plugged in or unplugged. The net effect is that a dashboard tab left open indefinitely does a few dozen text/style writes per tick instead of thousands of `createElement` calls, which is what was driving rising memory/CPU use and jank the longer the page stayed open.
 
 Dynamic color scaling (`getDynColor`) maps utilization percentages to a green → amber → red gradient without hardcoded thresholds that would be wrong for different metric types. The inversion flag is used for metrics like Free memory and CPU Idle where high values are good.
 

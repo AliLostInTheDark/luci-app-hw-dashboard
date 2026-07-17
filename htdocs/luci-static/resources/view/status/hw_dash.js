@@ -222,25 +222,6 @@ return view.extend({
                 '<polygon points="' + area + '" fill="' + color + '22"/>' +
                 '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + poly + '"/></svg>';
         };
-        var makeMemBar = function(label, valueMb, totalMb) {
-            var pct = totalMb > 0 ? (valueMb / totalMb) * 100 : 0;
-            var colorMem = getDynColor(pct, label === 'Free');
-            var valStr = label === 'Used' || label === 'Free' || label === 'Cached' || label === 'Buffers' ? valueMb.toFixed(0) + ' MB' : valueMb.toFixed(0) + ' / ' + totalMb.toFixed(0) + ' MB';
-            return E('div', {
-                class: 'hw-progress-item'
-            }, [E('div', {
-                class: 'hw-progress-header'
-            }, [E('span', {
-                class: 'hw-stat-label'
-            }, label), E('span', {
-                class: 'hw-stat-value'
-            }, valStr)]), E('div', {
-                class: 'hw-bar-bg'
-            }, [E('div', {
-                class: 'hw-bar-fill',
-                style: 'width: ' + pct + '%; background: ' + colorMem + ';'
-            })])]);
-        };
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
         var PING_WINDOW = 120;
         var PING_AGG_KEEP = 1080;
@@ -616,7 +597,23 @@ return view.extend({
             };
             return { el: el, update: update, currentSeries: function() { return P.series; }, currentView: function() { return P.view; } };
         };
-        var makeSensorRow = function(s) {
+        var buildSensorRow = function() {
+            var dot = E('span', { style: 'width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;' });
+            var nameSpan = E('span', {});
+            var badge = E('span', { class: 'hw-temp-badge' });
+            var passSpan = E('span', { style: 'color: #ffb300; background: rgba(255,179,0,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px; display: none;' });
+            var critSpan = E('span', { style: 'color: #ff1744; background: rgba(255,23,68,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px; display: none;' });
+            var tripsDiv = E('div', { style: 'display: none; justify-content: flex-end; gap: 6px; font-size: 0.75em; padding-top: 6px;' }, [passSpan, critSpan]);
+            var el = E('div', { style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));' }, [
+                E('div', { class: 'hw-stat-row', style: 'border-bottom: none; padding-bottom: 0;' }, [
+                    E('span', { class: 'hw-stat-label', style: 'display: inline-flex; align-items: center; gap: 7px;' }, [dot, nameSpan]),
+                    badge
+                ]),
+                tripsDiv
+            ]);
+            return { el: el, dot: dot, name: nameSpan, badge: badge, tripsDiv: tripsDiv, passSpan: passSpan, critSpan: critSpan };
+        };
+        var patchSensorRow = function(entry, s) {
             var hot = s.crit ? s.crit * 0.85 : 80;
             var warm = s.pass ? Math.min(s.pass, hot - 5) : (s.crit ? s.crit * 0.65 : 60);
             var color = '#00bcd4', bgCol = 'rgba(0,188,212,0.14)';
@@ -631,35 +628,15 @@ return view.extend({
             }
             var tempDisplay = s.temp.toFixed(1) + ' °C';
             if (s.temp >= (s.crit || 90)) tempDisplay += ' ⚠️';
-            var rowContent = [E('div', {
-                class: 'hw-stat-row',
-                style: 'border-bottom: none; padding-bottom: 0;'
-            }, [E('span', {
-                class: 'hw-stat-label',
-                style: 'display: inline-flex; align-items: center; gap: 7px;'
-            }, [E('span', { style: 'width: 8px; height: 8px; border-radius: 50%; background: ' + (s.color || color) + '; flex-shrink: 0;' }), s.name]), E('span', {
-                class: 'hw-temp-badge' + hotCls,
-                style: 'color: ' + color + '; background: ' + bgCol + ';'
-            }, tempDisplay)])];
-            if (s.pass || s.crit) {
-                var tripsDiv = E('div', {
-                    style: 'display: flex; justify-content: flex-end; gap: 6px; font-size: 0.75em; padding-top: 6px;'
-                });
-                if (s.pass) {
-                    tripsDiv.appendChild(E('span', {
-                        style: 'color: #ffb300; background: rgba(255,179,0,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
-                    }, 'PASS ' + s.pass.toFixed(0) + '°'));
-                }
-                if (s.crit) {
-                    tripsDiv.appendChild(E('span', {
-                        style: 'color: #ff1744; background: rgba(255,23,68,0.15); padding: 2px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px;'
-                    }, 'CRIT ' + s.crit.toFixed(0) + '°'));
-                }
-                rowContent.push(tripsDiv);
-            }
-            return E('div', {
-                style: 'padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.1));'
-            }, rowContent);
+            entry.dot.style.background = s.color || color;
+            entry.name.textContent = s.name;
+            entry.badge.className = 'hw-temp-badge' + hotCls;
+            entry.badge.style.color = color;
+            entry.badge.style.background = bgCol;
+            entry.badge.textContent = tempDisplay;
+            entry.tripsDiv.style.display = (s.pass || s.crit) ? 'flex' : 'none';
+            if (s.pass) { entry.passSpan.style.display = ''; entry.passSpan.textContent = 'PASS ' + s.pass.toFixed(0) + '°'; } else { entry.passSpan.style.display = 'none'; }
+            if (s.crit) { entry.critSpan.style.display = ''; entry.critSpan.textContent = 'CRIT ' + s.crit.toFixed(0) + '°'; } else { entry.critSpan.style.display = 'none'; }
         };
         var fmtMbps = function(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' Gbps' : m >= 1 ? m.toFixed(1) + ' Mbps' : (m * 1000).toFixed(0) + ' Kbps'; };
         var fmtSpeedDf = function(bytes) {
@@ -1090,6 +1067,32 @@ return view.extend({
         container.insertBefore(settingsPanel, sysCard);
         container.insertBefore(settingsRow, settingsPanel);
         applyCardVisibility();
+        var syncRows = function(container, cache, items, keyFn, buildFn, patchFn) {
+            var seen = {};
+            var prev = null;
+            items.forEach(function(item, idx) {
+                var k = keyFn(item, idx);
+                seen[k] = true;
+                var entry = cache[k];
+                if (!entry) {
+                    entry = cache[k] = buildFn(item, idx);
+                    container.insertBefore(entry.el, prev ? prev.nextSibling : container.firstChild);
+                } else {
+                    var wantNext = prev ? prev.nextSibling : container.firstChild;
+                    if (entry.el !== wantNext) container.insertBefore(entry.el, wantNext);
+                }
+                patchFn(entry, item, idx);
+                prev = entry.el;
+            });
+            for (var k in cache) {
+                if (!seen[k]) { cache[k].el.remove(); delete cache[k]; }
+            }
+        };
+        var sigGate = function(cache, key, sig) {
+            if (cache[key] === sig) return false;
+            cache[key] = sig;
+            return true;
+        };
         var pingTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('ping') !== -1) return Promise.resolve();
@@ -1295,6 +1298,7 @@ return view.extend({
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 self.lastInfo = res;
+                if (!self._sig) self._sig = {};
                 var coresNode = document.getElementById('hw-cores');
                 var nCores = res.cpus.length - 1;
                 if (!self._coreEls || self._coreCount !== nCores) {
@@ -1335,21 +1339,9 @@ return view.extend({
                                 'Soft IRQ': calcPct('softirq')
                             };
                             var cpuStats = document.getElementById('stats-cpu');
-                            cpuStats.innerHTML = '';
                             var meta = res.cpu_meta || {};
-                            var addMeta = function(label, val) {
-                                cpuStats.appendChild(E('div', {
-                                    class: 'hw-stat-row',
-                                    style: 'margin-bottom: 2px;'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, label), E('span', {
-                                    class: 'hw-stat-value'
-                                }, val)]));
-                            };
                             var _cores = meta.cores || (res.cpus.length - 1);
                             var _threads = meta.threads || _cores;
-                            addMeta('Cores / Threads', _cores + 'C / ' + _threads + 'T');
                             var _si = res.sys_info || {};
                             var _cacheParts = [];
                             if (_si.l0 > 0) _cacheParts.push('L0 ' + fmtCacheBytes(_si.l0));
@@ -1358,7 +1350,6 @@ return view.extend({
                             if (_si.l2 > 0) _cacheParts.push('L2 ' + fmtCacheBytes(_si.l2));
                             if (_si.l3 > 0) _cacheParts.push('L3 ' + fmtCacheBytes(_si.l3));
                             if (_si.l4 > 0) _cacheParts.push('L4 ' + fmtCacheBytes(_si.l4));
-                            addMeta('Cache', _cacheParts.length > 0 ? _cacheParts.join(' + ') : '0 MB');
                             var curFreq = '';
                             if (res.freqs && res.freqs.length > 0) {
                                 var validFreqs = res.freqs.filter(function(f) {
@@ -1376,9 +1367,17 @@ return view.extend({
                                 if (meta.max_freq > 1000000) maxFreqStr = (meta.max_freq / 1000000).toFixed(2) + ' GHz';
                                 else maxFreqStr = (meta.max_freq / 1000).toFixed(0) + ' MHz';
                             }
-                            if (curFreq) addMeta('Current Freq', curFreq);
-                            if (maxFreqStr) addMeta('Max Freq', maxFreqStr);
-                            if (meta.tasks) addMeta('Tasks (Run/Total)', meta.tasks);
+                            var cpuStatRows = [{ k: 'cores', label: 'Cores / Threads', val: _cores + 'C / ' + _threads + 'T' }];
+                            cpuStatRows.push({ k: 'cache', label: 'Cache', val: _cacheParts.length > 0 ? _cacheParts.join(' + ') : '0 MB' });
+                            if (curFreq) cpuStatRows.push({ k: 'curfreq', label: 'Current Freq', val: curFreq });
+                            if (maxFreqStr) cpuStatRows.push({ k: 'maxfreq', label: 'Max Freq', val: maxFreqStr });
+                            if (meta.tasks) cpuStatRows.push({ k: 'tasks', label: 'Tasks (Run/Total)', val: meta.tasks });
+                            if (!self._cpuStatsCache) self._cpuStatsCache = {};
+                            syncRows(cpuStats, self._cpuStatsCache, cpuStatRows, function(r) { return r.k; }, function(r) {
+                                var val = E('span', { class: 'hw-stat-value' });
+                                var elr = E('div', { class: 'hw-stat-row', style: 'margin-bottom: 2px;' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
+                                return { el: elr, val: val };
+                            }, function(entry, r) { entry.val.textContent = r.val; });
                             var uptimeStr = '';
                             if (res.uptime) {
                                 var days = Math.floor(res.uptime / 86400);
@@ -1390,42 +1389,25 @@ return view.extend({
                             }
                             var metaNode = document.getElementById('hw-cpu-meta');
                             if (metaNode) {
-                                metaNode.innerHTML = '';
-                                metaNode.appendChild(E('div', {
-                                    class: 'hw-stat-row'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, 'Load Average'), E('span', {
-                                    class: 'hw-stat-value'
-                                }, (res.cpu_meta.load_1 || '0') + ', ' + (res.cpu_meta.load_5 || '0') + ', ' + (res.cpu_meta.load_15 || '0'))]));
+                                var cpuMetaRows = [{ k: 'load', label: 'Load Average', val: (res.cpu_meta.load_1 || '0') + ', ' + (res.cpu_meta.load_5 || '0') + ', ' + (res.cpu_meta.load_15 || '0') }];
                                 if (res.cpu_meta.governor && res.cpu_meta.governor.trim() !== '' && res.cpu_meta.governor !== 'null' && res.cpu_meta.governor.toLowerCase() !== 'unknown') {
-                                    metaNode.appendChild(E('div', {
-                                        class: 'hw-stat-row'
-                                    }, [E('span', {
-                                        class: 'hw-stat-label'
-                                    }, 'CPU Governor'), E('span', {
-                                        class: 'hw-stat-value',
-                                        style: 'text-transform: uppercase;'
-                                    }, res.cpu_meta.governor)]));
+                                    cpuMetaRows.push({ k: 'gov', label: 'CPU Governor', val: res.cpu_meta.governor, upper: true });
                                 }
-                                metaNode.appendChild(E('div', {
-                                    class: 'hw-stat-row'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, 'Uptime'), E('span', {
-                                    class: 'hw-stat-value'
-                                }, uptimeStr)]));
+                                cpuMetaRows.push({ k: 'uptime', label: 'Uptime', val: uptimeStr });
                                 var psi = res.cpu_meta && res.cpu_meta.psi;
                                 if (psi) {
-                                    metaNode.appendChild(E('div', {
-                                        class: 'hw-stat-row'
-                                    }, [E('span', {
-                                        class: 'hw-stat-label'
-                                    }, 'Pressure (CPU / IO, 10s)'), E('span', {
-                                        class: 'hw-stat-value',
-                                        style: (psi.cpu >= 20 || psi.io >= 20) ? 'color:#ffb300;' : ''
-                                    }, psi.cpu.toFixed(1) + '% / ' + psi.io.toFixed(1) + '%')]));
+                                    cpuMetaRows.push({ k: 'psi', label: 'Pressure (CPU / IO, 10s)', val: psi.cpu.toFixed(1) + '% / ' + psi.io.toFixed(1) + '%', color: (psi.cpu >= 20 || psi.io >= 20) ? '#ffb300' : '' });
                                 }
+                                if (!self._cpuMetaCache) self._cpuMetaCache = {};
+                                syncRows(metaNode, self._cpuMetaCache, cpuMetaRows, function(r) { return r.k; }, function(r) {
+                                    var val = E('span', { class: 'hw-stat-value' });
+                                    var elr = E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
+                                    return { el: elr, val: val };
+                                }, function(entry, r) {
+                                    entry.val.textContent = r.val;
+                                    entry.val.style.color = r.color || '';
+                                    entry.val.style.textTransform = r.upper ? 'uppercase' : '';
+                                });
                             }
                         } else {
                             var coreIdx = parseInt(stat.name.replace('cpu', ''));
@@ -1462,80 +1444,32 @@ return view.extend({
                 if (advStats) {
                     var advNode = document.getElementById('hw-adv');
                     if (advNode) {
-                        advNode.innerHTML = '';
-                        var addAdvBar = function(label, val) {
-                            var colorAdv = getDynColor(val, label === 'Idle');
-                            advNode.appendChild(E('div', {
-                                class: 'hw-progress-item'
-                            }, [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                class: 'hw-stat-label'
-                            }, label), E('span', {
-                                class: 'hw-stat-value',
-                                style: 'color: ' + colorAdv + ';'
-                            }, val.toFixed(1) + '%')]), E('div', {
-                                class: 'hw-bar-bg'
-                            }, [E('div', {
-                                class: 'hw-bar-fill',
-                                style: 'width: ' + val + '%; background: ' + colorAdv + ';'
-                            })])]));
-                        };
+                        var advRows = [];
                         for (var key in advStats) {
-                            addAdvBar(key, advStats[key]);
+                            advRows.push({ k: 'bar:' + key, type: 'bar', label: key, val: advStats[key], invert: key === 'Idle' });
                         }
-                        var addAdvRowText = function(label, val, color) {
-                            advNode.appendChild(E('div', {
-                                class: 'hw-progress-item',
-                                style: 'margin-top: 5px;'
-                            }, [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                class: 'hw-stat-label',
-                                style: 'font-size: 0.9em;'
-                            }, label), E('span', {
-                                class: 'hw-stat-value',
-                                style: (color ? 'color: ' + color + '; font-size: 0.9em;' : 'font-size: 0.9em;')
-                            }, val)])]));
-                        };
                         if (res.cpu_meta && res.cpu_meta.tasks) {
-                            addAdvRowText('System Tasks', res.cpu_meta.tasks, null);
+                            advRows.push({ k: 'tasks', type: 'text', label: 'System Tasks', val: res.cpu_meta.tasks });
                             var ctxt = res.cpu_meta.ctxt || 0;
                             var intr = res.cpu_meta.intr || 0;
                             if (self.prevCtxt !== undefined) {
                                 var ctxtRate = ctxt - self.prevCtxt;
                                 var intrRate = intr - self.prevIntr;
-                                addAdvRowText('Context Switches / s', ctxtRate + ' /s', null);
-                                addAdvRowText('Hardware Interrupts / s', intrRate + ' /s', null);
+                                advRows.push({ k: 'ctxt', type: 'text', label: 'Context Switches / s', val: ctxtRate + ' /s' });
+                                advRows.push({ k: 'intr', type: 'text', label: 'Hardware Interrupts / s', val: intrRate + ' /s' });
                             }
                             self.prevCtxt = ctxt;
                             self.prevIntr = intr;
                             var connCount = res.cpu_meta.conntrack || 0;
                             var connMax = res.cpu_meta.conntrack_max || 1;
                             var connPct = Math.min((connCount / connMax) * 100, 100);
-                            var colorConn = getDynColor(connPct, false);
-                            advNode.appendChild(E('div', {
-                                class: 'hw-progress-item',
-                                style: 'margin-top: 10px;'
-                            }, [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                class: 'hw-stat-label'
-                            }, 'Active Connections'), E('span', {
-                                class: 'hw-stat-value',
-                                style: 'color: ' + colorConn + ';'
-                            }, connCount + ' / ' + connMax)]), E('div', {
-                                class: 'hw-bar-bg'
-                            }, [E('div', {
-                                class: 'hw-bar-fill',
-                                style: 'width: ' + connPct + '%; background: ' + colorConn + ';'
-                            })])]));
+                            advRows.push({ k: 'conn', type: 'bar2', label: 'Active Connections', val: connPct, valStr: connCount + ' / ' + connMax, color: getDynColor(connPct, false) });
                         }
                         if (res.freq_stats && res.freq_stats.length > 1) {
                             var fsTotal = 0;
                             res.freq_stats.forEach(function(p) { fsTotal += p[1]; });
                             if (fsTotal > 0) {
-                                advNode.appendChild(E('div', { style: 'font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-top: 12px; margin-bottom: 6px;' }, 'Freq Residency (since boot)'));
+                                advRows.push({ k: 'freqhdr', type: 'header', label: 'Freq Residency (since boot)' });
                                 var fsList = res.freq_stats;
                                 if (fsList.length > 10) {
                                     fsList = fsList.slice().sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10)
@@ -1544,18 +1478,54 @@ return view.extend({
                                 fsList.forEach(function(p) {
                                     var pctF = p[1] / fsTotal * 100;
                                     var fLbl = p[0] >= 1000000 ? (p[0] / 1000000).toFixed(2) + ' GHz' : Math.round(p[0] / 1000) + ' MHz';
-                                    advNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [
-                                        E('div', { class: 'hw-progress-header' }, [
-                                            E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, fLbl),
-                                            E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, pctF.toFixed(1) + '%')
-                                        ]),
-                                        E('div', { class: 'hw-bar-bg', style: 'height: 4px;' }, [
-                                            E('div', { class: 'hw-bar-fill', style: 'width: ' + pctF + '%; background: #00bcd4;' })
-                                        ])
-                                    ]));
+                                    advRows.push({ k: 'freq:' + p[0], type: 'freqbar', label: fLbl, val: pctF });
                                 });
                             }
                         }
+                        if (!self._advCache) self._advCache = {};
+                        syncRows(advNode, self._advCache, advRows, function(r) { return r.k; }, function(r) {
+                            if (r.type === 'bar') {
+                                var val = E('span', { class: 'hw-stat-value' });
+                                var fill = E('div', { class: 'hw-bar-fill' });
+                                var elr = E('div', { class: 'hw-progress-item' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val]), E('div', { class: 'hw-bar-bg' }, [fill])]);
+                                return { el: elr, val: val, fill: fill };
+                            } else if (r.type === 'text') {
+                                var val2 = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
+                                var elr2 = E('div', { class: 'hw-progress-item', style: 'margin-top: 5px;' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, r.label), val2])]);
+                                return { el: elr2, val: val2 };
+                            } else if (r.type === 'bar2') {
+                                var val3 = E('span', { class: 'hw-stat-value' });
+                                var fill3 = E('div', { class: 'hw-bar-fill' });
+                                var elr3 = E('div', { class: 'hw-progress-item', style: 'margin-top: 10px;' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val3]), E('div', { class: 'hw-bar-bg' }, [fill3])]);
+                                return { el: elr3, val: val3, fill: fill3 };
+                            } else if (r.type === 'header') {
+                                var elr4 = E('div', { style: 'font-size: 0.8em; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; margin-top: 12px; margin-bottom: 6px;' }, r.label);
+                                return { el: elr4 };
+                            } else {
+                                var val5 = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
+                                var fill5 = E('div', { class: 'hw-bar-fill', style: 'background: #00bcd4;' });
+                                var elr5 = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, r.label), val5]), E('div', { class: 'hw-bar-bg', style: 'height: 4px;' }, [fill5])]);
+                                return { el: elr5, val: val5, fill: fill5 };
+                            }
+                        }, function(entry, r) {
+                            if (r.type === 'bar') {
+                                var colorAdv = getDynColor(r.val, r.invert);
+                                entry.val.textContent = r.val.toFixed(1) + '%';
+                                entry.val.style.color = colorAdv;
+                                entry.fill.style.width = r.val + '%';
+                                entry.fill.style.background = colorAdv;
+                            } else if (r.type === 'text') {
+                                entry.val.textContent = r.val;
+                            } else if (r.type === 'bar2') {
+                                entry.val.textContent = r.valStr;
+                                entry.val.style.color = r.color;
+                                entry.fill.style.width = r.val + '%';
+                                entry.fill.style.background = r.color;
+                            } else if (r.type === 'freqbar') {
+                                entry.val.textContent = r.val.toFixed(1) + '%';
+                                entry.fill.style.width = r.val + '%';
+                            }
+                        });
                     }
                 }
                 var mem = res.mem;
@@ -1567,59 +1537,64 @@ return view.extend({
                     var _dtMb = res.sys_info && res.sys_info.mem_phys_mb;
                     var physRamKB = (_dtMb > 0) ? _dtMb * 1024 : getPhysicalRamTotal(mem.total);
                     var ramStats = document.getElementById('stats-ram');
-                    ramStats.innerHTML = '';
-                    ramStats.appendChild(E('div', {
-                        class: 'hw-stat-row',
-                        style: 'margin-bottom: 5px;'
-                    }, [E('span', {
-                        class: 'hw-stat-label'
-                    }, 'Physical Total'), E('span', {
-                        class: 'hw-stat-value'
-                    }, (physRamKB / 1024).toFixed(0) + ' MB')]));
-                    ramStats.appendChild(E('div', {
-                        class: 'hw-stat-row',
-                        style: 'margin-bottom: 15px;'
-                    }, [E('span', {
-                        class: 'hw-stat-label'
-                    }, 'Usable Total'), E('span', {
-                        class: 'hw-stat-value'
-                    }, (mem.total / 1024).toFixed(0) + ' MB')]));
-                    ramStats.appendChild(makeMemBar('Used', used / 1024, mem.total / 1024));
-                    ramStats.appendChild(makeMemBar('Free', mem.free / 1024, mem.total / 1024));
-                    ramStats.appendChild(makeMemBar('Cached', mem.cached / 1024, mem.total / 1024));
-                    ramStats.appendChild(makeMemBar('Buffers', mem.buffers / 1024, mem.total / 1024));
+                    var ramRows = [];
+                    ramRows.push({ k: 'phys', type: 'stat', mb: '5px', label: 'Physical Total', val: (physRamKB / 1024).toFixed(0) + ' MB' });
+                    ramRows.push({ k: 'usable', type: 'stat', mb: '15px', label: 'Usable Total', val: (mem.total / 1024).toFixed(0) + ' MB' });
+                    var addMemBarRow = function(k, label, valueMb, totalMb) {
+                        var pct = totalMb > 0 ? (valueMb / totalMb) * 100 : 0;
+                        var colorMem = getDynColor(pct, label === 'Free');
+                        var valStr = (label === 'Used' || label === 'Free' || label === 'Cached' || label === 'Buffers') ? valueMb.toFixed(0) + ' MB' : valueMb.toFixed(0) + ' / ' + totalMb.toFixed(0) + ' MB';
+                        ramRows.push({ k: k, type: 'membar', label: label, pct: pct, valStr: valStr, color: colorMem });
+                    };
+                    addMemBarRow('used', 'Used', used / 1024, mem.total / 1024);
+                    addMemBarRow('free', 'Free', mem.free / 1024, mem.total / 1024);
+                    addMemBarRow('cached', 'Cached', mem.cached / 1024, mem.total / 1024);
+                    addMemBarRow('buffers', 'Buffers', mem.buffers / 1024, mem.total / 1024);
                     if (mem.swap_total > 0) {
                         var swapUsed = mem.swap_total - mem.swap_free;
-                        ramStats.appendChild(makeMemBar('Swap', swapUsed / 1024, mem.swap_total / 1024));
+                        addMemBarRow('swap', 'Swap', swapUsed / 1024, mem.swap_total / 1024);
                     }
                     if (mem.zram_total > 0) {
-                        ramStats.appendChild(makeMemBar('ZRAM', mem.zram_used / 1024, mem.zram_total / 1024));
-                    }
-                    if (mem.zram_total > 0) {
+                        addMemBarRow('zram', 'ZRAM', mem.zram_used / 1024, mem.zram_total / 1024);
                         var ratio = mem.zram_used > 0 ? (mem.zram_orig / mem.zram_used).toFixed(2) : 1.0;
-                        ramStats.appendChild(E('div', {style: 'text-align: center; font-size: 0.8em; opacity: 0.8; margin-top: -10px; margin-bottom: 10px;'}, 'Compression: ' + ratio + 'x'));
+                        ramRows.push({ k: 'zram_ratio', type: 'centertext', val: 'Compression: ' + ratio + 'x' });
                     }
-                    if (mem.slab > 0) {
-                        ramStats.appendChild(makeMemBar('Slab Kernel', mem.slab / 1024, mem.total / 1024));
-                    }
-                    if (mem.pagetables > 0) {
-                        ramStats.appendChild(makeMemBar('PageTables', mem.pagetables / 1024, mem.total / 1024));
-                    }
+                    if (mem.slab > 0) addMemBarRow('slab', 'Slab Kernel', mem.slab / 1024, mem.total / 1024);
+                    if (mem.pagetables > 0) addMemBarRow('pagetables', 'PageTables', mem.pagetables / 1024, mem.total / 1024);
                     if (mem.dirty > 0 || mem.writeback > 0) {
-                        ramStats.appendChild(E('div', { class: 'hw-stat-row' }, [
-                            E('span', { class: 'hw-stat-label' }, 'Dirty / Writeback'),
-                            E('span', { class: 'hw-stat-value', style: mem.writeback > 1024 ? 'color:#ffb300;' : '' },
-                                (mem.dirty / 1024).toFixed(1) + ' MB / ' + (mem.writeback / 1024).toFixed(1) + ' MB')
-                        ]));
+                        ramRows.push({ k: 'dirty', type: 'stat', label: 'Dirty / Writeback', val: (mem.dirty / 1024).toFixed(1) + ' MB / ' + (mem.writeback / 1024).toFixed(1) + ' MB', color: mem.writeback > 1024 ? '#ffb300' : '' });
                     }
                     var memPsi = res.cpu_meta && res.cpu_meta.psi;
                     if (memPsi && (memPsi.mem > 0 || memPsi.mem_full > 0)) {
-                        ramStats.appendChild(E('div', { class: 'hw-stat-row' }, [
-                            E('span', { class: 'hw-stat-label' }, 'Memory Pressure (10s)'),
-                            E('span', { class: 'hw-stat-value', style: memPsi.mem_full >= 5 ? 'color:#ff5252;' : memPsi.mem >= 10 ? 'color:#ffb300;' : '' },
-                                memPsi.mem.toFixed(1) + '%' + (memPsi.mem_full > 0 ? ' (full ' + memPsi.mem_full.toFixed(1) + '%)' : ''))
-                        ]));
+                        ramRows.push({ k: 'psi', type: 'stat', label: 'Memory Pressure (10s)', val: memPsi.mem.toFixed(1) + '%' + (memPsi.mem_full > 0 ? ' (full ' + memPsi.mem_full.toFixed(1) + '%)' : ''), color: memPsi.mem_full >= 5 ? '#ff5252' : memPsi.mem >= 10 ? '#ffb300' : '' });
                     }
+                    if (!self._ramCache) self._ramCache = {};
+                    syncRows(ramStats, self._ramCache, ramRows, function(r) { return r.k; }, function(r) {
+                        if (r.type === 'stat') {
+                            var val = E('span', { class: 'hw-stat-value' });
+                            var elr = E('div', { class: 'hw-stat-row', style: r.mb ? 'margin-bottom: ' + r.mb + ';' : '' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
+                            return { el: elr, val: val };
+                        } else if (r.type === 'membar') {
+                            var val2 = E('span', { class: 'hw-stat-value' });
+                            var fill = E('div', { class: 'hw-bar-fill' });
+                            var elr2 = E('div', { class: 'hw-progress-item' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val2]), E('div', { class: 'hw-bar-bg' }, [fill])]);
+                            return { el: elr2, val: val2, fill: fill };
+                        } else {
+                            var elr3 = E('div', { style: 'text-align: center; font-size: 0.8em; opacity: 0.8; margin-top: -10px; margin-bottom: 10px;' });
+                            return { el: elr3 };
+                        }
+                    }, function(entry, r) {
+                        if (r.type === 'stat') {
+                            entry.val.textContent = r.val;
+                            entry.val.style.color = r.color || '';
+                        } else if (r.type === 'membar') {
+                            entry.val.textContent = r.valStr;
+                            entry.fill.style.width = r.pct + '%';
+                            entry.fill.style.background = r.color;
+                        } else {
+                            entry.el.textContent = r.val;
+                        }
+                    });
                     if (!self.memHist) self.memHist = [];
                     self.memHist.push(pct);
                     if (self.memHist.length > 60) self.memHist.shift();
@@ -1636,7 +1611,7 @@ return view.extend({
                     var diskRootfsVol = 0;
                     var _seenDiskDev = {};
                     var dskNode = document.getElementById('stats-dsk');
-                    if (dskNode) dskNode.innerHTML = '';
+                    var dskItems = [];
                     res.df.forEach(function(fs) {
                         var isExt = (fs.hw_type === 'USB');
                         if (fs.total > 0 && !isExt) {
@@ -1699,67 +1674,67 @@ return view.extend({
                         var labelStr = fs.mount === '/' ? 'Root FS' : fs.mount.replace(/^\/mnt\//, '');
                         var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
                         var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
-                        if (dskNode) {
-                            var _isNand = fs.hw_type === 'NAND';
-                            var speedStr = _isNand ? fmtKb(fs.used) + ' / ' + fmtKb(fs.total) : 'R: ' + fmtSpeedDf(readSpeed) + ' | W: ' + fmtSpeedDf(writeSpeed);
-                            var iopsStr = _isNand ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
-                            var bars = [E('div', {
-                                class: 'hw-progress-header'
-                            }, [E('span', {
-                                style: 'display: flex; opacity: 0.8; font-size: 0.95em; flex-shrink: 1; min-width: 0; margin-right: 5px;'
-                            }, [E('span', {
-                                style: 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-                            }, labelStr), E('span', {
-                                style: 'opacity: 0.6; margin-left: 5px; flex-shrink: 0;'
-                            }, typeStr)]), E('span', {
-                                class: 'hw-stat-value',
-                                style: 'color: ' + colorDsk + '; flex-shrink: 0;'
-                            }, speedStr)]), E('div', {
-                                class: 'hw-bar-bg'
-                            }, [E('div', {
-                                class: 'hw-bar-fill',
-                                style: 'width: ' + pctNum + '%; background: ' + colorDsk + ';'
-                            })]), E('div', {
-                                style: 'width: 100%; display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.9em; opacity: 0.8;'
-                            }, [E('span', {}, iopsStr), E('span', {
-                                class: 'hw-stat-value'
-                            }, usedPctStr)])];
-                            if (inodesInfo && inodesInfo.ipct !== '-') {
-                                var ipctNum = parseInt(inodesInfo.ipct) || 0;
-                                var icolor = getDynColor(ipctNum);
-                                bars.push(E('div', {
-                                    class: 'hw-progress-header',
-                                    style: 'margin-top: 6px;'
-                                }, [E('span', {
-                                    class: 'hw-stat-label',
-                                    style: 'font-size: 0.8em; opacity: 0.7;'
-                                }, 'Inodes Used'), E('span', {
-                                    class: 'hw-stat-value',
-                                    style: 'font-size: 0.8em; color: ' + icolor + ';'
-                                }, inodesInfo.ipct)]), E('div', {
-                                    class: 'hw-bar-bg',
-                                    style: 'height: 4px;'
-                                }, [E('div', {
-                                    class: 'hw-bar-fill',
-                                    style: 'width: ' + ipctNum + '%; background: ' + icolor + ';'
-                                })]));
-                            }
-                            dskNode.appendChild(E('div', {
-                                class: 'hw-progress-item',
-                                style: 'margin-bottom: 15px;'
-                            }, bars));
-                        }
+                        var _isNand = fs.hw_type === 'NAND';
+                        var speedStr = _isNand ? fmtKb(fs.used) + ' / ' + fmtKb(fs.total) : 'R: ' + fmtSpeedDf(readSpeed) + ' | W: ' + fmtSpeedDf(writeSpeed);
+                        var iopsStr = _isNand ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
+                        var hasInodes = !!(inodesInfo && inodesInfo.ipct !== '-');
+                        var ipctNum = hasInodes ? (parseInt(inodesInfo.ipct) || 0) : 0;
+                        dskItems.push({
+                            k: fs.mount + '|' + (fs.dev || ''), labelStr: labelStr, typeStr: typeStr,
+                            speedStr: speedStr, colorDsk: colorDsk, pctNum: pctNum, iopsStr: iopsStr, usedPctStr: usedPctStr,
+                            hasInodes: hasInodes, ipctStr: hasInodes ? inodesInfo.ipct : '', ipctNum: ipctNum, icolor: hasInodes ? getDynColor(ipctNum) : ''
+                        });
                     });
+                    if (dskNode) {
+                        if (!self._dskCache) self._dskCache = {};
+                        syncRows(dskNode, self._dskCache, dskItems, function(r) { return r.k; }, function(r) {
+                            var lblSpan = E('span', { style: 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
+                            var typeSpan = E('span', { style: 'opacity: 0.6; margin-left: 5px; flex-shrink: 0;' });
+                            var valSpan = E('span', { class: 'hw-stat-value', style: 'flex-shrink: 0;' });
+                            var fill = E('div', { class: 'hw-bar-fill' });
+                            var iopsSpan = E('span', {});
+                            var pctSpan = E('span', { class: 'hw-stat-value' });
+                            var inVal = E('span', { class: 'hw-stat-value', style: 'font-size: 0.8em;' });
+                            var inFill = E('div', { class: 'hw-bar-fill' });
+                            var inodesBlock = E('div', {}, [
+                                E('div', { class: 'hw-progress-header', style: 'margin-top: 6px;' }, [E('span', { class: 'hw-stat-label', style: 'font-size: 0.8em; opacity: 0.7;' }, 'Inodes Used'), inVal]),
+                                E('div', { class: 'hw-bar-bg', style: 'height: 4px;' }, [inFill])
+                            ]);
+                            var elr = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 15px;' }, [
+                                E('div', { class: 'hw-progress-header' }, [
+                                    E('span', { style: 'display: flex; opacity: 0.8; font-size: 0.95em; flex-shrink: 1; min-width: 0; margin-right: 5px;' }, [lblSpan, typeSpan]),
+                                    valSpan
+                                ]),
+                                E('div', { class: 'hw-bar-bg' }, [fill]),
+                                E('div', { style: 'width: 100%; display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.9em; opacity: 0.8;' }, [iopsSpan, pctSpan]),
+                                inodesBlock
+                            ]);
+                            return { el: elr, lbl: lblSpan, type: typeSpan, val: valSpan, fill: fill, iops: iopsSpan, pct: pctSpan, inodesBlock: inodesBlock, inVal: inVal, inFill: inFill };
+                        }, function(entry, r) {
+                            entry.lbl.textContent = r.labelStr;
+                            entry.type.textContent = r.typeStr;
+                            entry.val.textContent = r.speedStr;
+                            entry.val.style.color = r.colorDsk;
+                            entry.fill.style.width = r.pctNum + '%';
+                            entry.fill.style.background = r.colorDsk;
+                            entry.iops.textContent = r.iopsStr;
+                            entry.pct.textContent = r.usedPctStr;
+                            entry.inodesBlock.style.display = r.hasInodes ? '' : 'none';
+                            if (r.hasInodes) {
+                                entry.inVal.textContent = r.ipctStr;
+                                entry.inVal.style.color = r.icolor;
+                                entry.inFill.style.width = r.ipctNum + '%';
+                                entry.inFill.style.background = r.icolor;
+                            }
+                        });
+                    }
                     var _ovSi = res.sys_info || {};
                     var dskMeta = document.getElementById('dial-meta-dsk');
                     if (dskMeta) {
+                        var dskMetaRows = [];
                         var addMR = function(lbl, val, color) {
-                            dskMeta.appendChild(E('div', {class: 'hw-stat-row'}, [
-                                E('span', {class: 'hw-stat-label'}, lbl),
-                                E('span', {class: 'hw-stat-value', style: color ? 'color:' + color + ';' : ''}, val)
-                            ]));
+                            dskMetaRows.push({ k: lbl, label: lbl, val: val, color: color || '' });
                         };
-                        dskMeta.innerHTML = '';
                         if (nandChipTotal > 0) {
                             addMR('Physical NAND Total', fmtSize(nandChipTotal));
                             if (nandRootfsVol > 0 && nandRootfsVol !== nandChipTotal) addMR('Rootfs Total', fmtSize(nandRootfsVol));
@@ -1781,6 +1756,15 @@ return view.extend({
                             addMR('Usable Free', fmtSize(totalSpace - totalUsed));
                         }
                         if (res.mtd_count > 0) addMR('MTD Partitions', String(res.mtd_count));
+                        if (!self._dskMetaCache) self._dskMetaCache = {};
+                        syncRows(dskMeta, self._dskMetaCache, dskMetaRows, function(r) { return r.k; }, function(r) {
+                            var val = E('span', { class: 'hw-stat-value' });
+                            var elr = E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
+                            return { el: elr, val: val };
+                        }, function(entry, r) {
+                            entry.val.textContent = r.val;
+                            entry.val.style.color = r.color;
+                        });
                     }
                     var extCardNode = document.getElementById('hw-ext-card');
                     if (extCardNode) extCardNode.style.display = 'none';
@@ -1788,6 +1772,9 @@ return view.extend({
                 (function() {
                     var extraNode = document.getElementById('hw-int-storage-extra');
                     if (!extraNode) return;
+                    var _ovS = res.sys_info || {};
+                    var extraSig = JSON.stringify([res.ubi_devs, res.mtd_parts, res.emmc_info, res.nvme_info, res.f2fs_info, _ovS.overlay_total, _ovS.overlay_used, _ovS.overlay_free, res.ecc_base_date]);
+                    if (!sigGate(self._sig, 'extra', extraSig)) return;
                     extraNode.innerHTML = '';
                     var hasUbi = res.ubi_devs && res.ubi_devs.length > 0;
                     var hasMtd = res.mtd_parts && res.mtd_parts.length > 0;
@@ -1976,9 +1963,23 @@ return view.extend({
                             extDrives.push(grp);
                         }
                     }
+                    var statsByDev = {};
+                    extDrives.forEach(function(grp) {
+                        statsByDev[grp.main.dev] = getStats(grp.main, now);
+                        grp.parts.forEach(function(part) { statsByDev[part.dev] = getStats(part, now); });
+                    });
                     if (extWrapper) {
-                        extWrapper.innerHTML = '';
-                        if (extDrives.length > 0) {
+                        if (extDrives.length === 0) {
+                            extWrapper.innerHTML = '';
+                            self._extDriveRefs = null;
+                            self._sig.extShape = null;
+                        }
+                        var extShapeSig = extDrives.length > 0 ? JSON.stringify(extDrives.map(function(grp) {
+                            return [grp.main.dev, grp.main.size, grp.main.model, grp.main.type, grp.main.removable, grp.parts.map(function(pt) { return [pt.dev, pt.size, pt.fs]; })];
+                        })) : null;
+                        if (extDrives.length > 0 && sigGate(self._sig, 'extShape', extShapeSig)) {
+                            extWrapper.innerHTML = '';
+                            self._extDriveRefs = {};
                             var dialsCount = document.querySelectorAll('.hw-dial').length;
                             var maxColsPerCard = dialsCount > 0 ? dialsCount : 3;
                             var cards = [];
@@ -2049,7 +2050,7 @@ return view.extend({
                                         var sz = main.size ? (parseInt(main.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : 'Unknown';
                                         var isUsb = main.removable === '1' || main.type === 'USB';
                                         var displayType = isUsb ? 'USB' : main.type;
-                                        var mStats = getStats(main, now);
+                                        var mStats = statsByDev[main.dev];
                                         var box = E('div', {
                                             class: 'hw-progress-item',
                                             style: 'background: rgba(128,128,128,0.05); border: 1px solid var(--border-color, rgba(128,128,128,0.1)); border-radius: 8px; padding: 12px; margin-bottom: 12px; overflow: hidden;'
@@ -2090,7 +2091,9 @@ return view.extend({
                                             grp.parts.forEach(function(part) {
                                                 var psz = part.size ? (parseInt(part.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : '';
                                                 var formatStr = (part.fs && part.fs !== 'Unknown') ? part.fs : 'Unmounted';
-                                                var pStats = getStats(part, now);
+                                                var pStats = statsByDev[part.dev];
+                                                var pSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(pStats.rSpeed) + ' / W: ' + fmtSpeedExt(pStats.wSpeed));
+                                                var pIopsSpan = E('span', {}, 'R: ' + Math.round(pStats.rIops) + ' / W: ' + Math.round(pStats.wIops));
                                                 var pRow = E('div', {
                                                     style: 'margin-bottom: 12px;'
                                                 }, [
@@ -2114,19 +2117,22 @@ return view.extend({
                                                         style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 6px;'
                                                     }, [
                                                         E('span', {}, 'Speed:'),
-                                                        E('span', {}, 'R: ' + fmtSpeedExt(pStats.rSpeed) + ' / W: ' + fmtSpeedExt(pStats.wSpeed))
+                                                        pSpeedSpan
                                                     ]),
                                                     E('div', {
                                                         style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 2px;'
                                                     }, [
                                                         E('span', {}, 'IOPS:'),
-                                                        E('span', {}, 'R: ' + Math.round(pStats.rIops) + ' / W: ' + Math.round(pStats.wIops))
+                                                        pIopsSpan
                                                     ])
                                                 ]);
                                                 partsContainer.appendChild(pRow);
+                                                self._extDriveRefs[part.dev] = { speed: pSpeedSpan, iops: pIopsSpan };
                                             });
                                             box.appendChild(partsContainer);
                                         } else {
+                                            var mSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(mStats.rSpeed) + ' / W: ' + fmtSpeedExt(mStats.wSpeed));
+                                            var mIopsSpan = E('span', {}, 'R: ' + Math.round(mStats.rIops) + ' / W: ' + Math.round(mStats.wIops));
                                             var footer = E('div', {
                                                 style: 'margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.3));'
                                             }, [
@@ -2134,16 +2140,17 @@ return view.extend({
                                                     style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;'
                                                 }, [
                                                     E('span', {}, 'Speed:'),
-                                                    E('span', {}, 'R: ' + fmtSpeedExt(mStats.rSpeed) + ' / W: ' + fmtSpeedExt(mStats.wSpeed))
+                                                    mSpeedSpan
                                                 ]),
                                                 E('div', {
                                                     style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 2px;'
                                                 }, [
                                                     E('span', {}, 'IOPS:'),
-                                                    E('span', {}, 'R: ' + Math.round(mStats.rIops) + ' / W: ' + Math.round(mStats.wIops))
+                                                    mIopsSpan
                                                 ])
                                             ]);
                                             box.appendChild(footer);
+                                            self._extDriveRefs[main.dev] = { speed: mSpeedSpan, iops: mIopsSpan };
                                         }
                                         domCols[colIdx].appendChild(box);
                                     });
@@ -2159,10 +2166,31 @@ return view.extend({
                                 extWrapper.appendChild(cardNode);
                             });
                         }
+                        if (extDrives.length > 0) {
+                            var extRefs = self._extDriveRefs || {};
+                            extDrives.forEach(function(grp) {
+                                var mr = extRefs[grp.main.dev];
+                                if (mr) {
+                                    var mStats2 = statsByDev[grp.main.dev];
+                                    mr.speed.textContent = 'R: ' + fmtSpeedExt(mStats2.rSpeed) + ' / W: ' + fmtSpeedExt(mStats2.wSpeed);
+                                    mr.iops.textContent = 'R: ' + Math.round(mStats2.rIops) + ' / W: ' + Math.round(mStats2.wIops);
+                                }
+                                grp.parts.forEach(function(part) {
+                                    var pr = extRefs[part.dev];
+                                    if (pr) {
+                                        var pStats2 = statsByDev[part.dev];
+                                        pr.speed.textContent = 'R: ' + fmtSpeedExt(pStats2.rSpeed) + ' / W: ' + fmtSpeedExt(pStats2.wSpeed);
+                                        pr.iops.textContent = 'R: ' + Math.round(pStats2.rIops) + ' / W: ' + Math.round(pStats2.wIops);
+                                    }
+                                });
+                            });
+                        }
                     }
                 }
                 var thermWrap = document.getElementById('hw-therm-wrapper');
-                if (thermWrap) thermWrap.innerHTML = '';
+                if (thermWrap && (!res.thermals || res.thermals.length === 0)) {
+                    if (self._sig.therm !== null) { thermWrap.innerHTML = ''; self._sig.therm = null; self._thermRefs = null; self._coolRefs = null; }
+                }
                 if (res.thermals && res.thermals.length > 0 && thermWrap) {
                     if (res.model) {
                         var title = res.model;
@@ -2225,53 +2253,72 @@ return view.extend({
                         tGraph = self.tempPanel.el;
                         self.tempPanelData = tHistMap;
                     }
-                    var nCols = Math.min(3, sensors.length);
-                    var cols = [];
-                    for (var ci = 0; ci < nCols; ci++) cols.push([]);
-                    sensors.forEach(function(s, i) { cols[i % nCols].push(s); });
-                    var rowEl = E('div', { class: 'hw-thermals-container' });
-                    cols.forEach(function(colSensors, cidx) {
-                        if (cidx > 0) rowEl.appendChild(E('div', { class: 'hw-thermals-divider' }));
-                        var colCls = 'hw-thermals-col';
-                        if (nCols > 1) {
-                            colCls += cidx === 0 ? ' hw-thermals-col-left' : cidx === nCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                    var validCooling = (res.cooling || []).filter(function(c) { return c.max; });
+                    var thermSig = sensors.map(function(s) { return s.name; }).join('|') + '|g' + (tGraph ? 1 : 0) + '|cool:' + validCooling.map(function(c) { return c.type; }).join(',');
+                    if (sigGate(self._sig, 'therm', thermSig)) {
+                        thermWrap.innerHTML = '';
+                        self._thermRefs = {};
+                        self._coolRefs = {};
+                        var nCols = Math.min(3, sensors.length);
+                        var cols = [];
+                        for (var ci = 0; ci < nCols; ci++) cols.push([]);
+                        sensors.forEach(function(s, i) { cols[i % nCols].push(s); });
+                        var rowEl = E('div', { class: 'hw-thermals-container' });
+                        cols.forEach(function(colSensors, cidx) {
+                            if (cidx > 0) rowEl.appendChild(E('div', { class: 'hw-thermals-divider' }));
+                            var colCls = 'hw-thermals-col';
+                            if (nCols > 1) {
+                                colCls += cidx === 0 ? ' hw-thermals-col-left' : cidx === nCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                            }
+                            var list = E('div', {
+                                class: 'hw-stats-list',
+                                style: 'margin-top: 0; padding-top: 0;'
+                            });
+                            colSensors.forEach(function(s) {
+                                var entry = buildSensorRow();
+                                self._thermRefs[s.name] = entry;
+                                list.appendChild(entry.el);
+                            });
+                            if (list.lastChild) list.lastChild.style.borderBottom = 'none';
+                            rowEl.appendChild(E('div', { class: colCls }, [list]));
+                        });
+                        var cardKids = [E('h3', {}, 'Thermal Sensors')];
+                        if (tGraph) {
+                            thermGraphNode.innerHTML = '';
+                            thermGraphNode.appendChild(tGraph);
+                            cardKids.push(thermGraphNode);
                         }
-                        var list = E('div', {
-                            class: 'hw-stats-list',
-                            style: 'margin-top: 0; padding-top: 0;'
-                        });
-                        colSensors.forEach(function(s) {
-                            list.appendChild(makeSensorRow(s));
-                        });
-                        if (list.lastChild) list.lastChild.style.borderBottom = 'none';
-                        rowEl.appendChild(E('div', { class: colCls }, [list]));
+                        cardKids.push(rowEl);
+                        var thermCard = E('div', {
+                            class: 'hw-card wide'
+                        }, cardKids);
+                        thermWrap.appendChild(thermCard);
+                        if (validCooling.length > 0) {
+                            var coolRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.15));' });
+                            coolRow.appendChild(E('span', { style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; align-self: center;' }, 'Cooling'));
+                            validCooling.forEach(function(c) {
+                                var chip = E('span', { style: 'font-size: 0.75em; padding: 3px 8px; border-radius: 4px; white-space: nowrap;' });
+                                self._coolRefs[c.type] = chip;
+                                coolRow.appendChild(chip);
+                            });
+                            thermCard.appendChild(coolRow);
+                        }
+                    }
+                    sensors.forEach(function(s) {
+                        var entry = self._thermRefs && self._thermRefs[s.name];
+                        if (entry) patchSensorRow(entry, s);
                     });
-                    var cardKids = [E('h3', {}, 'Thermal Sensors')];
-                    if (tGraph) {
-                        thermGraphNode.innerHTML = '';
-                        thermGraphNode.appendChild(tGraph);
-                        cardKids.push(thermGraphNode);
-                    }
-                    cardKids.push(rowEl);
-                    thermWrap.appendChild(E('div', {
-                        class: 'hw-card wide'
-                    }, cardKids));
-                    if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
-                    if (res.cooling && res.cooling.length > 0 && thermWrap.firstChild) {
-                        var coolRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.15));' });
-                        var coolShown = 0;
-                        res.cooling.forEach(function(c) {
-                            if (!c.max) return;
+                    validCooling.forEach(function(c) {
+                        var chip = self._coolRefs && self._coolRefs[c.type];
+                        if (chip) {
                             var cc = c.cur >= c.max ? '#ff1744' : c.cur > 0 ? '#ffb300' : '#00bcd4';
-                            var lbl = c.type + ': ' + (c.cur > 0 ? c.cur + '/' + c.max : 'idle');
-                            coolRow.appendChild(E('span', { style: 'font-size: 0.75em; padding: 3px 8px; border-radius: 4px; border: 1px solid ' + cc + '44; color: ' + cc + '; background: ' + cc + '18; white-space: nowrap;' }, lbl));
-                            coolShown++;
-                        });
-                        if (coolShown > 0) {
-                            coolRow.insertBefore(E('span', { style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; align-self: center;' }, 'Cooling'), coolRow.firstChild);
-                            thermWrap.firstChild.appendChild(coolRow);
+                            chip.style.border = '1px solid ' + cc + '44';
+                            chip.style.color = cc;
+                            chip.style.background = cc + '18';
+                            chip.textContent = c.type + ': ' + (c.cur > 0 ? c.cur + '/' + c.max : 'idle');
                         }
-                    }
+                    });
+                    if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                 }
                 var portsNode = document.getElementById('hw-eth-links');
                 var validPcie = [];
@@ -2286,113 +2333,150 @@ return view.extend({
                 else if (boardId.indexOf('JIDU6700') !== -1) hwPortStr = 'USB 2.0 (1 Physical Port)';
                 var hasUsb = hwPortStr !== '' || usbDevs.length > 0;
                 var hasEth = res.eth_links && res.eth_links.length > 0;
-                var portsSubH = function(txt, mt) {
-                    return E('h4', { style: 'margin: ' + (mt ? '10px' : '0') + ' 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, txt);
-                };
                 if ((hasEth || hasUsb) && portsNode) {
                     ethCard.style.display = 'flex';
-                    portsNode.innerHTML = '';
-                    if (hasEth) {
-                        portsNode.appendChild(portsSubH('Ethernet', false));
-                        if (!self.prevEth) self.prevEth = {};
-                        res.eth_links.forEach(function(l) {
-                            var st = l.speed;
-                            var col = '#9e9e9e';
-                            if (st.indexOf('10000') >= 0 || st.indexOf('2500') >= 0 || st.indexOf('1000') >= 0) col = '#00bcd4';
-                            else if (st.indexOf('100') >= 0 || st.indexOf('10') >= 0) col = '#ffea00';
-                            var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
-                            var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
-                            var dlMbps = null, ulMbps = null;
-                            var curRx = parseInt(l.rx_bytes) || 0, curTx = parseInt(l.tx_bytes) || 0, nowT = Date.now();
-                            var pe = self.prevEth[l.iface];
-                            if (pe && nowT > pe.t && curRx >= pe.rx && curTx >= pe.tx) {
-                                var dt = (nowT - pe.t) / 1000;
-                                dlMbps = (curRx - pe.rx) * 8 / 1e6 / dt;
-                                ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
-                            }
-                            self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
-                            var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; border-left: 4px solid ' + col + '; margin-bottom: 4px;' }, [
-                                E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
-                                    E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
-                                        E('div', { style: 'width: 10px; height: 10px; border-radius: 50%; background-color: ' + col + '; box-shadow: 0 0 5px ' + col + '; flex-shrink: 0;' }),
-                                        E('span', { style: 'font-weight: bold;' }, l.iface.toUpperCase())
-                                    ]),
-                                    E('span', { style: 'color:' + col + ';' }, st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')')
-                                ])
-                            ]);
-                            if (st !== 'Down') {
-                                if (dlMbps !== null) {
-                                    box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [
-                                        E('span', {}, 'Throughput:'),
-                                        E('span', { style: 'color:#00bcd4;' }, '↓ ' + fmtMbps(dlMbps) + '   ↑ ' + fmtMbps(ulMbps))
-                                    ]));
-                                }
-                                var errColor = (rxErr > 0 || txErr > 0 || rxDrop > 0 || txDrop > 0) ? '#ff5252' : 'currentColor';
-                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px;' }, [
-                                    E('span', {}, 'Errors/Drops:'),
-                                    E('span', { style: 'color:' + errColor + ';' }, 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop)
-                                ]));
-                            }
-                            var et = res.ethtool && res.ethtool[l.iface];
-                            if (et && st !== 'Down') {
-                                var eeeCol = et.eee === 'active' ? '#ffb300' : '';
-                                var etStr = 'autoneg ' + et.an + ' \u00b7 pause ' + et.pause + (et.eee !== 'n/a' ? ' \u00b7 EEE ' + et.eee : '') + (et.drv ? ' \u00b7 ' + et.drv + (et.fw && et.fw !== 'N/A' ? ' fw ' + et.fw : '') : '');
-                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;' }, [
-                                    E('span', {}, 'PHY:'),
-                                    E('span', { style: eeeCol ? 'color:' + eeeCol + ';' : '' }, etStr)
-                                ]));
-                            }
-                            if (l.mac) {
-                                var flaps = parseInt(l.carrier_changes) || 0;
-                                var flapStr = flaps > 2 ? ' \u00b7 ' + flaps + ' link flaps' : '';
-                                box.appendChild(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 4px;' }, [
-                                    E('span', {}, 'MAC / MTU:'),
-                                    E('span', { style: flaps > 2 ? 'color:#ffb300;' : '' }, l.mac.toUpperCase() + ' \u00b7 ' + l.mtu + flapStr)
-                                ]));
-                            }
-                            portsNode.appendChild(box);
-                        });
+                    if (!self._portsRefs) {
+                        portsNode.innerHTML = '';
+                        var ethSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'Ethernet');
+                        var ethListWrap = E('div', {});
+                        var usbSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'USB');
+                        var hwPortVal = E('span', { style: 'color:#00bcd4; font-weight: bold;' });
+                        var hwPortBox = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px; display: none;' }, [
+                            E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [E('span', {}, 'Physical Port:'), hwPortVal])
+                        ]);
+                        var usbListWrap = E('div', {});
+                        portsNode.appendChild(ethSubH);
+                        portsNode.appendChild(ethListWrap);
+                        portsNode.appendChild(usbSubH);
+                        portsNode.appendChild(hwPortBox);
+                        portsNode.appendChild(usbListWrap);
+                        self._portsRefs = { ethSubH: ethSubH, ethListWrap: ethListWrap, usbSubH: usbSubH, hwPortBox: hwPortBox, hwPortVal: hwPortVal, usbListWrap: usbListWrap, ethCache: {}, usbCache: {} };
                     }
-                    if (hasUsb) {
-                        portsNode.appendChild(portsSubH('USB', hasEth));
-                        if (hwPortStr) {
-                            portsNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [
-                                    E('span', {}, 'Physical Port:'),
-                                    E('span', { style: 'color:#00bcd4; font-weight: bold;' }, hwPortStr)
-                                ])
-                            ]));
+                    var pr = self._portsRefs;
+                    pr.ethSubH.style.display = hasEth ? '' : 'none';
+                    pr.usbSubH.style.display = hasUsb ? '' : 'none';
+                    pr.usbSubH.style.margin = hasEth ? '10px 0 4px 0' : '0 0 4px 0';
+                    if (hasEth && !self.prevEth) self.prevEth = {};
+                    syncRows(pr.ethListWrap, pr.ethCache, hasEth ? res.eth_links : [], function(l) { return l.iface; }, function(l) {
+                        var dot = E('div', { style: 'width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;' });
+                        var ifaceSpan = E('span', { style: 'font-weight: bold;' }, l.iface.toUpperCase());
+                        var statusSpan = E('span', {});
+                        var throughVal = E('span', { style: 'color:#00bcd4;' });
+                        var throughRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [E('span', {}, 'Throughput:'), throughVal]);
+                        var errVal = E('span', {});
+                        var errRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px;' }, [E('span', {}, 'Errors/Drops:'), errVal]);
+                        var phyVal = E('span', {});
+                        var phyRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;' }, [E('span', {}, 'PHY:'), phyVal]);
+                        var macVal = E('span', {});
+                        var macRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 4px;' }, [E('span', {}, 'MAC / MTU:'), macVal]);
+                        var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 4px;' }, [
+                            E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
+                                E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [dot, ifaceSpan]),
+                                statusSpan
+                            ]),
+                            throughRow, errRow, phyRow, macRow
+                        ]);
+                        return { el: box, dot: dot, statusSpan: statusSpan, throughRow: throughRow, throughVal: throughVal, errRow: errRow, errVal: errVal, phyRow: phyRow, phyVal: phyVal, macRow: macRow, macVal: macVal };
+                    }, function(entry, l) {
+                        var st = l.speed;
+                        var col = '#9e9e9e';
+                        if (st.indexOf('10000') >= 0 || st.indexOf('2500') >= 0 || st.indexOf('1000') >= 0) col = '#00bcd4';
+                        else if (st.indexOf('100') >= 0 || st.indexOf('10') >= 0) col = '#ffea00';
+                        entry.el.style.borderLeft = '4px solid ' + col;
+                        entry.dot.style.background = col;
+                        entry.dot.style.boxShadow = '0 0 5px ' + col;
+                        entry.statusSpan.style.color = col;
+                        entry.statusSpan.textContent = st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')';
+                        var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
+                        var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
+                        var dlMbps = null, ulMbps = null;
+                        var curRx = parseInt(l.rx_bytes) || 0, curTx = parseInt(l.tx_bytes) || 0, nowT = Date.now();
+                        var pe = self.prevEth[l.iface];
+                        if (pe && nowT > pe.t && curRx >= pe.rx && curTx >= pe.tx) {
+                            var dt = (nowT - pe.t) / 1000;
+                            dlMbps = (curRx - pe.rx) * 8 / 1e6 / dt;
+                            ulMbps = (curTx - pe.tx) * 8 / 1e6 / dt;
                         }
-                        usbDevs.forEach(function(u) {
-                            var spd = parseInt(u.speed) || 0;
-                            var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
-                            var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
-                            var rows = [E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, u.name)];
-                            if (spdLabel) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), E('span', { style: 'color:' + col + ';' }, spdLabel)]));
-                            var ver = u.version ? u.version.trim() : '';
-                            if (ver) rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), E('span', {}, ver)]));
-                            if (u.max_power && u.max_power !== '0mA') rows.push(E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Max Power Draw:'), E('span', {}, u.max_power)]));
-                            portsNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, rows));
-                        });
-                    }
+                        self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
+                        if (st !== 'Down') {
+                            entry.throughRow.style.display = dlMbps !== null ? 'flex' : 'none';
+                            if (dlMbps !== null) entry.throughVal.textContent = '↓ ' + fmtMbps(dlMbps) + '   ↑ ' + fmtMbps(ulMbps);
+                            var errColor = (rxErr > 0 || txErr > 0 || rxDrop > 0 || txDrop > 0) ? '#ff5252' : 'currentColor';
+                            entry.errRow.style.display = 'flex';
+                            entry.errVal.style.color = errColor;
+                            entry.errVal.textContent = 'Rx: ' + rxErr + '/' + rxDrop + ' | Tx: ' + txErr + '/' + txDrop;
+                            var et = res.ethtool && res.ethtool[l.iface];
+                            if (et) {
+                                var eeeCol = et.eee === 'active' ? '#ffb300' : '';
+                                entry.phyRow.style.display = 'flex';
+                                entry.phyVal.style.color = eeeCol;
+                                entry.phyVal.textContent = 'autoneg ' + et.an + ' · pause ' + et.pause + (et.eee !== 'n/a' ? ' · EEE ' + et.eee : '') + (et.drv ? ' · ' + et.drv + (et.fw && et.fw !== 'N/A' ? ' fw ' + et.fw : '') : '');
+                            } else {
+                                entry.phyRow.style.display = 'none';
+                            }
+                        } else {
+                            entry.throughRow.style.display = 'none';
+                            entry.errRow.style.display = 'none';
+                            entry.phyRow.style.display = 'none';
+                        }
+                        if (l.mac) {
+                            var flaps = parseInt(l.carrier_changes) || 0;
+                            var flapStr = flaps > 2 ? ' · ' + flaps + ' link flaps' : '';
+                            entry.macRow.style.display = 'flex';
+                            entry.macVal.style.color = flaps > 2 ? '#ffb300' : '';
+                            entry.macVal.textContent = l.mac.toUpperCase() + ' · ' + l.mtu + flapStr;
+                        } else {
+                            entry.macRow.style.display = 'none';
+                        }
+                    });
+                    pr.hwPortBox.style.display = (hasUsb && hwPortStr) ? '' : 'none';
+                    if (hasUsb && hwPortStr) pr.hwPortVal.textContent = hwPortStr;
+                    syncRows(pr.usbListWrap, pr.usbCache, hasUsb ? usbDevs : [], function(u, i) { return u.name + '|' + i; }, function(u) {
+                        var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' });
+                        var speedVal = E('span', {});
+                        var speedRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), speedVal]);
+                        var verVal = E('span', {});
+                        var verRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), verVal]);
+                        var pwrVal = E('span', {});
+                        var pwrRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Max Power Draw:'), pwrVal]);
+                        var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [nameDiv, speedRow, verRow, pwrRow]);
+                        return { el: el, nameDiv: nameDiv, speedRow: speedRow, speedVal: speedVal, verRow: verRow, verVal: verVal, pwrRow: pwrRow, pwrVal: pwrVal };
+                    }, function(entry, u) {
+                        entry.nameDiv.textContent = u.name;
+                        var spd = parseInt(u.speed) || 0;
+                        var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
+                        var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
+                        entry.speedRow.style.display = spdLabel ? 'flex' : 'none';
+                        if (spdLabel) { entry.speedVal.style.color = col; entry.speedVal.textContent = spdLabel; }
+                        var ver = u.version ? u.version.trim() : '';
+                        entry.verRow.style.display = ver ? 'flex' : 'none';
+                        if (ver) entry.verVal.textContent = ver;
+                        var hasPwr = u.max_power && u.max_power !== '0mA';
+                        entry.pwrRow.style.display = hasPwr ? 'flex' : 'none';
+                        if (hasPwr) entry.pwrVal.textContent = u.max_power;
+                    });
                 } else {
                     ethCard.style.display = 'none';
+                    self._portsRefs = null;
                 }
                 if (validPcie.length > 0) {
                     pcieCard.style.display = 'flex';
                     var pcNode = document.getElementById('hw-pcie');
                     if (pcNode) {
-                        pcNode.innerHTML = '';
-                        validPcie.forEach(function(p) {
+                        if (!self._pcieCache) self._pcieCache = {};
+                        syncRows(pcNode, self._pcieCache, validPcie, function(p, i) { return p.name + '|' + i; }, function(p) {
+                            var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name);
+                            var speedVal = E('span', {});
+                            var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
+                                nameDiv,
+                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Link Speed:'), speedVal])
+                            ]);
+                            return { el: el, speedVal: speedVal };
+                        }, function(entry, p) {
                             var speedStr = p.speed + ' ' + p.width;
                             if (p.max_speed && p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
-                            pcNode.appendChild(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name),
-                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [
-                                    E('span', {}, 'Link Speed:'),
-                                    E('span', { style: p.speed !== p.max_speed ? 'color:#ffea00;' : '' }, speedStr)
-                                ])
-                            ]));
+                            entry.speedVal.style.color = p.speed !== p.max_speed ? '#ffea00' : '';
+                            entry.speedVal.textContent = speedStr;
                         });
                     }
                 } else {
@@ -2401,10 +2485,10 @@ return view.extend({
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
                     var wfNode = document.getElementById('hw-wifi-radios');
                     if (wfNode) {
-                        wfNode.innerHTML = '';
                         var wifiRendered = 0;
                         var WIFI_BANDS = ['2.4 GHz', '5 GHz', '6 GHz'];
                         var bandGroups = { '2.4 GHz': [], '5 GHz': [], '6 GHz': [], 'Other': [] };
+                        var wifiSigParts = [];
                         if (!self.prevSurvey) self.prevSurvey = {};
                         res.wifi_radios.forEach(function(w) {
                             if ((!w.band || w.band === 'Unknown') && (!w.hwmode || w.hwmode === 'Unknown')) return;
@@ -2478,24 +2562,28 @@ return view.extend({
                                 bCap && bCap.disabled && bCap.disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')) : '',
                                 bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
                             ]));
+                            wifiSigParts.push(w.iface + '|' + chStr + '|' + surveyStr + '|' + noiseVal + '|' + regStr + '|' + cfgMaxBr + '|' + chipMaxBr);
                         });
-                        var presentBands = WIFI_BANDS.concat(['Other']).filter(function(b) { return bandGroups[b].length > 0; });
-                        if (presentBands.length > 0) {
-                            var wNCols = presentBands.length;
-                            var wRow = E('div', { class: 'hw-thermals-container' });
-                            presentBands.forEach(function(b, wc) {
-                                if (wc > 0) wRow.appendChild(E('div', { class: 'hw-thermals-divider' }));
-                                var wCls = 'hw-thermals-col';
-                                if (wNCols > 1) wCls += wc === 0 ? ' hw-thermals-col-left' : wc === wNCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
-                                var wCol = E('div', { class: wCls, style: 'min-width: 0; display: flex; flex-direction: column;' });
-                                wCol.appendChild(E('div', { class: 'hw-thermals-title' }, b === 'Other' ? 'OTHER' : b.toUpperCase()));
-                                bandGroups[b].forEach(function(box) {
-                                    box.style.flex = '1 1 0';
-                                    wCol.appendChild(box);
+                        if (sigGate(self._sig, 'wifi', wifiSigParts.join(';'))) {
+                            wfNode.innerHTML = '';
+                            var presentBands = WIFI_BANDS.concat(['Other']).filter(function(b) { return bandGroups[b].length > 0; });
+                            if (presentBands.length > 0) {
+                                var wNCols = presentBands.length;
+                                var wRow = E('div', { class: 'hw-thermals-container' });
+                                presentBands.forEach(function(b, wc) {
+                                    if (wc > 0) wRow.appendChild(E('div', { class: 'hw-thermals-divider' }));
+                                    var wCls = 'hw-thermals-col';
+                                    if (wNCols > 1) wCls += wc === 0 ? ' hw-thermals-col-left' : wc === wNCols - 1 ? ' hw-thermals-col-right' : ' hw-thermals-col-mid';
+                                    var wCol = E('div', { class: wCls, style: 'min-width: 0; display: flex; flex-direction: column;' });
+                                    wCol.appendChild(E('div', { class: 'hw-thermals-title' }, b === 'Other' ? 'OTHER' : b.toUpperCase()));
+                                    bandGroups[b].forEach(function(box) {
+                                        box.style.flex = '1 1 0';
+                                        wCol.appendChild(box);
+                                    });
+                                    wRow.appendChild(wCol);
                                 });
-                                wRow.appendChild(wCol);
-                            });
-                            wfNode.appendChild(wRow);
+                                wfNode.appendChild(wRow);
+                            }
                         }
                         wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
                     }
@@ -2524,30 +2612,49 @@ return view.extend({
                     });
                     irqRates.sort(function(a, b) { return b.rate - a.rate; });
                     if (irqNode && irqRates.length > 0) {
-                        irqNode.innerHTML = '';
-                        irqRates.slice(0, 6).forEach(function(q) {
+                        if (!self._irqRefs) {
+                            irqNode.innerHTML = '';
+                            var irqListWrap = E('div', {});
+                            var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin: 4px 0 8px 0; flex-wrap: wrap;' });
+                            var snVal = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
+                            var softnetRow = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); padding-top: 8px; display: none;' }, [
+                                E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
+                                snVal
+                            ]);
+                            irqNode.appendChild(irqListWrap);
+                            irqNode.appendChild(legendCores);
+                            irqNode.appendChild(softnetRow);
+                            self._irqRefs = { irqListWrap: irqListWrap, legendCores: legendCores, snVal: snVal, softnetRow: softnetRow, cache: {}, legendCoreCount: -1 };
+                        }
+                        var ir = self._irqRefs;
+                        syncRows(ir.irqListWrap, ir.cache, irqRates.slice(0, 6), function(q) { return q.name; }, function(q) {
+                            var val = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
+                            var barBg = E('div', { class: 'hw-bar-bg', style: 'height: 5px; display: flex;' });
+                            var el = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
+                                E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name), val]),
+                                barBg
+                            ]);
+                            return { el: el, val: val, barBg: barBg };
+                        }, function(entry, q) {
+                            entry.val.textContent = Math.round(q.rate) + ' /s';
+                            entry.barBg.innerHTML = '';
                             var total = q.cores.reduce(function(a, b) { return a + b; }, 0) || 1;
-                            var segs = [];
                             q.cores.forEach(function(cv, ci) {
                                 if (cv <= 0) return;
-                                segs.push(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
+                                entry.barBg.appendChild(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
                             });
-                            irqNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
-                                E('div', { class: 'hw-progress-header' }, [
-                                    E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name),
-                                    E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' }, Math.round(q.rate) + ' /s')
-                                ]),
-                                E('div', { class: 'hw-bar-bg', style: 'height: 5px; display: flex;' }, segs)
-                            ]));
                         });
-                        var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin: 4px 0 8px 0; flex-wrap: wrap;' });
-                        for (var lc = 0; lc < Math.min(res.cpus.length - 1, 8); lc++) {
-                            legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
-                                E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
-                                'C' + lc
-                            ]));
+                        var coreCount = Math.min(res.cpus.length - 1, 8);
+                        if (ir.legendCoreCount !== coreCount) {
+                            ir.legendCoreCount = coreCount;
+                            ir.legendCores.innerHTML = '';
+                            for (var lc = 0; lc < coreCount; lc++) {
+                                ir.legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
+                                    E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
+                                    'C' + lc
+                                ]));
+                            }
                         }
-                        irqNode.appendChild(legendCores);
                         if (res.softnet && res.softnet.length > 0) {
                             var snD = 0, snS = 0;
                             if (self.prevSoftnet) {
@@ -2556,10 +2663,9 @@ return view.extend({
                                     if (p) { snD += Math.max(0, sn.d - p.d); snS += Math.max(0, sn.s - p.s); }
                                 });
                                 var snColor = snD > 0 ? '#ff5252' : snS > 0 ? '#ffb300' : 'currentColor';
-                                irqNode.appendChild(E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); padding-top: 8px;' }, [
-                                    E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
-                                    E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em; color: ' + snColor + ';' }, snD + ' / ' + snS + ' per 3s')
-                                ]));
+                                ir.softnetRow.style.display = '';
+                                ir.snVal.style.color = snColor;
+                                ir.snVal.textContent = snD + ' / ' + snS + ' per 3s';
                             }
                             self.prevSoftnet = res.softnet;
                         }
@@ -2572,38 +2678,18 @@ return view.extend({
                     var off = res.offload;
                     var offNode = document.getElementById('hw-offload');
                     if (offNode) {
-                        offNode.innerHTML = '';
-                        var addOff = function(lbl, val, color) {
-                            offNode.appendChild(E('div', { class: 'hw-stat-row' }, [
-                                E('span', { class: 'hw-stat-label' }, lbl),
-                                E('span', { class: 'hw-stat-value', style: color ? 'color:' + color + ';' : '' }, val)
-                            ]));
-                        };
+                        var offRows = [];
                         if (!off.qcom) {
-                            addOff('Flowtable Fast Path', off.ft > 0 ? 'Active' : 'Not configured', off.ft > 0 ? '#00bcd4' : '#9e9e9e');
-                            addOff('Config (SW / HW)', (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), (off.sw_cfg > 0 || off.hw_cfg > 0) ? null : '#9e9e9e');
+                            offRows.push({ k: 'ft', type: 'row', label: 'Flowtable Fast Path', val: off.ft > 0 ? 'Active' : 'Not configured', color: off.ft > 0 ? '#00bcd4' : '#9e9e9e' });
+                            offRows.push({ k: 'cfg', type: 'row', label: 'Config (SW / HW)', val: (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), color: (off.sw_cfg > 0 || off.hw_cfg > 0) ? '' : '#9e9e9e' });
                         }
-                        var mkOffBar = function(lbl, cur, tot, color) {
-                            var pctB = tot > 0 ? Math.min(100, cur / tot * 100) : 0;
-                            var valSpan = E('span', { class: 'hw-stat-value', style: 'color:' + color + ';' }, cur + ' / ' + tot);
-                            offNode.appendChild(E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
-                                E('div', { class: 'hw-progress-header' }, [
-                                    E('span', { class: 'hw-stat-label' }, lbl),
-                                    valSpan
-                                ]),
-                                E('div', { class: 'hw-bar-bg' }, [E('div', { class: 'hw-bar-fill', style: 'width: ' + pctB + '%; background: ' + color + ';' })])
-                            ]));
-                        };
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
-                        if (off.sw_flows >= 0) mkOffBar(off.qcom ? 'PPE Offloaded Flows' : 'Offloaded / Active Flows', off.sw_flows, connNow, '#00bcd4');
-                        if (!off.qcom && off.ppe_flows >= 0) mkOffBar('PPE Bind Entries', off.ppe_flows, off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), '#8bc34a');
-                        if (off.wed > 0) addOff('WED (Wi-Fi offload)', off.wed + ' engine' + (off.wed > 1 ? 's' : ''), '#00bcd4');
+                        if (off.sw_flows >= 0) offRows.push({ k: 'swflows', type: 'bar', label: off.qcom ? 'PPE Offloaded Flows' : 'Offloaded / Active Flows', cur: off.sw_flows, tot: connNow, color: '#00bcd4' });
+                        if (!off.qcom && off.ppe_flows >= 0) offRows.push({ k: 'ppeflows', type: 'bar', label: 'PPE Bind Entries', cur: off.ppe_flows, tot: off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), color: '#8bc34a' });
+                        if (off.wed > 0) offRows.push({ k: 'wed', type: 'row', label: 'WED (Wi-Fi offload)', val: off.wed + ' engine' + (off.wed > 1 ? 's' : ''), color: '#00bcd4' });
                         if (off.qcom) {
                             var q = off.qcom;
-                            offNode.appendChild(E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
-                                E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, 'Qualcomm PPE Diagnostics'),
-                                E('span', { class: 'hw-stat-value' }, '')
-                            ]));
+                            offRows.push({ k: 'qcomhdr', type: 'header', label: 'Qualcomm PPE Diagnostics' });
                             var hits = 0, misses = 0;
                             if (q.cpu_code) {
                                 Object.keys(q.cpu_code).forEach(function(k) {
@@ -2613,7 +2699,6 @@ return view.extend({
                                     } else if (k.indexOf('_drop') !== -1) {
                                         misses += val;
                                     } else {
-                                        // Old format: e.g. cpucode_152
                                         var code = k.replace('cpucode_', '');
                                         if (['152', '153', '154', '155'].indexOf(code) !== -1) {
                                             hits += val;
@@ -2623,20 +2708,53 @@ return view.extend({
                                     }
                                 });
                             }
-                            addOff('Punted to CPU (No Drop)', hits, hits > 0 ? '#8bc34a' : '#9e9e9e');
-                            addOff('Punted to CPU (Dropped)', misses, misses > 0 ? '#ffb300' : '#9e9e9e');
+                            offRows.push({ k: 'hits', type: 'row', label: 'Punted to CPU (No Drop)', val: hits, color: hits > 0 ? '#8bc34a' : '#9e9e9e' });
+                            offRows.push({ k: 'misses', type: 'row', label: 'Punted to CPU (Dropped)', val: misses, color: misses > 0 ? '#ffb300' : '#9e9e9e' });
                             var silent = q.bm_silent || 0;
                             var overflow = q.bm_overflow || 0;
-                            addOff('PPE Buffer Drops (Silent / Over)', silent + ' / ' + overflow, (silent > 0 || overflow > 0) ? '#ff5252' : '#9e9e9e');
+                            offRows.push({ k: 'bmdrops', type: 'row', label: 'PPE Buffer Drops (Silent / Over)', val: silent + ' / ' + overflow, color: (silent > 0 || overflow > 0) ? '#ff5252' : '#9e9e9e' });
                             var edma_err_cnt = 0;
                             if (q.edma_err) {
                                 Object.keys(q.edma_err).forEach(function(k) {
                                     edma_err_cnt += parseInt(q.edma_err[k] || 0);
                                 });
                             }
-                            addOff('EDMA AXI / Ring Errors', edma_err_cnt, edma_err_cnt > 0 ? '#ff5252' : '#9e9e9e');
+                            offRows.push({ k: 'edma', type: 'row', label: 'EDMA AXI / Ring Errors', val: edma_err_cnt, color: edma_err_cnt > 0 ? '#ff5252' : '#9e9e9e' });
                         }
-                        offNode.appendChild(E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU'));
+                        offRows.push({ k: 'footer', type: 'footer' });
+                        if (!self._offCache) self._offCache = {};
+                        syncRows(offNode, self._offCache, offRows, function(r) { return r.k; }, function(r) {
+                            if (r.type === 'row') {
+                                var val = E('span', { class: 'hw-stat-value' });
+                                var elr = E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
+                                return { el: elr, val: val };
+                            } else if (r.type === 'bar') {
+                                var val2 = E('span', { class: 'hw-stat-value' });
+                                var fill = E('div', { class: 'hw-bar-fill' });
+                                var elr2 = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val2]), E('div', { class: 'hw-bar-bg' }, [fill])]);
+                                return { el: elr2, val: val2, fill: fill };
+                            } else if (r.type === 'header') {
+                                var elr3 = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
+                                    E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, r.label),
+                                    E('span', { class: 'hw-stat-value' }, '')
+                                ]);
+                                return { el: elr3 };
+                            } else {
+                                var elr4 = E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU');
+                                return { el: elr4 };
+                            }
+                        }, function(entry, r) {
+                            if (r.type === 'row') {
+                                entry.val.textContent = r.val;
+                                entry.val.style.color = r.color || '';
+                            } else if (r.type === 'bar') {
+                                var pctB = r.tot > 0 ? Math.min(100, r.cur / r.tot * 100) : 0;
+                                entry.val.textContent = r.cur + ' / ' + r.tot;
+                                entry.val.style.color = r.color;
+                                entry.fill.style.width = pctB + '%';
+                                entry.fill.style.background = r.color;
+                            }
+                        });
                     }
                     offloadCard.style.display = 'flex';
                 } else {
@@ -2645,8 +2763,13 @@ return view.extend({
                 if (res.hw_events && res.hw_events.length > 0) {
                     var evNode = document.getElementById('hw-events');
                     if (evNode) {
-                        evNode.innerHTML = '';
-                        res.hw_events.slice().reverse().forEach(function(line) {
+                        if (!self._evCache) self._evCache = {};
+                        syncRows(evNode, self._evCache, res.hw_events.slice().reverse(), function(line) { return line; }, function(line) {
+                            var relSpan = E('span', { style: 'flex-shrink: 0; min-width: 62px; opacity: 0.55; font-size: 0.9em;' });
+                            var msgSpan = E('span', { style: 'font-family: monospace; font-size: 0.92em; opacity: 0.85; word-break: break-word; min-width: 0;' });
+                            var el = E('div', { style: 'display: flex; gap: 10px; align-items: baseline; font-size: 0.85em; padding: 4px 8px; background: rgba(128,128,128,0.05); border-radius: 4px;' }, [relSpan, msgSpan]);
+                            return { el: el, relSpan: relSpan, msgSpan: msgSpan };
+                        }, function(entry, line) {
                             var rel = '';
                             var m = line.match(/^\[\s*(\d+)\./);
                             if (m && res.uptime) {
@@ -2654,11 +2777,8 @@ return view.extend({
                                 if (ago < 0) ago = 0;
                                 rel = ago < 60 ? ago + 's ago' : ago < 3600 ? Math.floor(ago / 60) + 'm ago' : ago < 86400 ? Math.floor(ago / 3600) + 'h ago' : Math.floor(ago / 86400) + 'd ago';
                             }
-                            var msg = line.replace(/^\[\s*[\d.]+\]\s*/, '');
-                            evNode.appendChild(E('div', { style: 'display: flex; gap: 10px; align-items: baseline; font-size: 0.85em; padding: 4px 8px; background: rgba(128,128,128,0.05); border-radius: 4px;' }, [
-                                E('span', { style: 'flex-shrink: 0; min-width: 62px; opacity: 0.55; font-size: 0.9em;' }, rel),
-                                E('span', { style: 'font-family: monospace; font-size: 0.92em; opacity: 0.85; word-break: break-word; min-width: 0;' }, msg)
-                            ]));
+                            entry.relSpan.textContent = rel;
+                            entry.msgSpan.textContent = line.replace(/^\[\s*[\d.]+\]\s*/, '');
                         });
                     }
                     eventsCard.style.display = 'flex';
@@ -2669,19 +2789,22 @@ return view.extend({
                     var hxNode = document.getElementById('hw-hwmon');
                     var hxShown = 0;
                     if (hxNode) {
-                        hxNode.innerHTML = '';
-                        res.hwmon_extra.forEach(function(hx) {
+                        var hxItems = res.hwmon_extra.filter(function(hx) {
+                            return hx.unit === 'V' || hx.unit === 'RPM' || hx.unit === 'W' || hx.unit === 'A';
+                        });
+                        hxShown = hxItems.length;
+                        if (!self._hxCache) self._hxCache = {};
+                        syncRows(hxNode, self._hxCache, hxItems, function(hx, i) { return hx.name + '|' + i; }, function(hx) {
+                            var val = E('span', { class: 'hw-stat-value' });
+                            var el = E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, hx.name), val]);
+                            return { el: el, val: val };
+                        }, function(entry, hx) {
                             var txt = '';
                             if (hx.unit === 'V') txt = (hx.val / 1000).toFixed(2) + ' V';
                             else if (hx.unit === 'RPM') txt = hx.val + ' RPM';
                             else if (hx.unit === 'W') txt = (hx.val / 1e6).toFixed(2) + ' W';
                             else if (hx.unit === 'A') txt = (hx.val / 1000).toFixed(2) + ' A';
-                            if (!txt) return;
-                            hxShown++;
-                            hxNode.appendChild(E('div', { class: 'hw-stat-row' }, [
-                                E('span', { class: 'hw-stat-label' }, hx.name),
-                                E('span', { class: 'hw-stat-value' }, txt)
-                            ]));
+                            entry.val.textContent = txt;
                         });
                     }
                     hwmonCard.style.display = hxShown > 0 ? 'flex' : 'none';
@@ -2689,7 +2812,7 @@ return view.extend({
                     hwmonCard.style.display = 'none';
                 }
                 var sysInfoGrid = document.getElementById('hw-sysinfo-grid');
-                if (sysInfoGrid && res.sys_info) {
+                if (sysInfoGrid && res.sys_info && sigGate(self._sig, 'sysinfo', JSON.stringify(res.sys_info) + '|' + res.board + '|' + res.model)) {
                     sysInfoGrid.innerHTML = '';
                     var si = res.sys_info;
                     var boardName = res.board || si.hostname || 'OpenWrt Device';
