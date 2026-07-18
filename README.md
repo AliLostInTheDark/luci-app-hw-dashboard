@@ -11,7 +11,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.1.9-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.2.0-r1.apk
 ```
 
 The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -56,7 +56,8 @@ An SVG arc dial shows aggregate CPU utilization at a glance. Below it:
 - **Load Average** — 1 / 5 / 15 minute averages
 - **CPU Governor** — active scaling governor
 - **Uptime** — formatted as days, hours, minutes
-- **Per-core bars** — individual utilization bar and frequency for every logical CPU
+
+Per-core utilization lives in its own dedicated full-width **Per-Core Usage** card below the CPU/Memory/Detailed-Load row, laid out as a responsive grid of bordered per-core cells (name, live frequency, utilization bar) rather than a single tall list — on low core-count boards it's a short single row, on high thread-count CPUs (e.g. 6C/12T desktop-class x86) it wraps into a clean multi-row grid instead of dwarfing its siblings in height.
 
 The advanced CPU panel (shown alongside) breaks down aggregate time into: Idle, User, Nice, System, I/O Wait, IRQ, Soft IRQ, and tracks Context Switches/s, Hardware Interrupts/s, System Tasks (running / total), and Active Connections against the conntrack limit (with the since-boot peak). It also shows:
 
@@ -116,7 +117,11 @@ Below the filesystem bars, a summary section shows hardware-accurate storage siz
 
 ### External Storage
 
-USB mass storage devices are detected by scanning block devices for the `removable` flag. Each detected drive shows its filesystem type, mount point, and capacity.
+USB mass storage devices are detected by scanning block devices for the `removable` flag. Each partition shows its **Format** (detected filesystem type, or `—` when none is detected) and **Mounted** state (the mountpoint, or `No`) as two separate rows — a partition with no recognized filesystem is not the same thing as one that's unmounted, and the two used to be conflated into a single misleading "Unmounted" label.
+
+### Power & Fans
+
+Voltage, current, fan and power rails from generic `hwmon` channels (present on boards with a PMIC or Super I/O chip) are shown here when available. On x86 targets with an Intel CPU, package/core/DRAM power draw is additionally read from `/sys/class/powercap/intel-rapl*` (RAPL) — the backend reports the raw cumulative energy counter each poll, and the frontend derives instantaneous Watts from the delta between polls, the same client-side pattern used for disk I/O speed. The card is hidden entirely when neither source has anything to report (most embedded routers have no fan or power telemetry at all).
 
 ### Thermal Sensors
 
@@ -150,7 +155,9 @@ A filtered `dmesg` view (10-second TTL) showing thermal, ECC, link-flap, USB, OO
 
 ### Settings
 
-The gear button (top right) opens a panel styled with standard LuCI `cbi` classes: per-card show/hide checkboxes, the ping-target editor, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in the standard UCI configuration `/etc/config/hwdash` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers and survive sysupgrades and backups.
+The gear button (top right) opens a panel styled with standard LuCI `cbi` classes and row structure (`cbi-value` / `cbi-value-title` / `cbi-value-field`): per-card show/hide checkboxes, the ping-target editor, CPU Performance controls, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in the standard UCI configuration `/etc/config/hwdash` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers and survive sysupgrades and backups.
+
+**CPU Performance** — reads and writes the live `cpufreq` policy (governor, min/max frequency, turbo/boost) directly via `/sys`, the same interface `luci-app-cpu-perf` uses. The governor dropdown and frequency range are populated from the hardware's own reported bounds and available governors, so the same UI works whether the box exposes `performance`/`powersave` (Intel `intel_pstate`) or the full `ondemand`/`schedutil`/`conservative` set (generic `cpufreq-dt`). Changes apply immediately via an explicit **Apply** button (never automatically on every keystroke, since this is a live production setting) and are additionally synced into `/etc/config/cpu-perf` when that file already exists on the router, so a reboot doesn't silently revert what was just set — but the file is never created by the dashboard itself, since that package owns its own defaults.
 
 ### WiFi PHY & Spectrum
 
@@ -201,9 +208,9 @@ On package upgrade or reinstall, all caches are cleared by the postinst script s
 
 ## Backend
 
-The backend is a single POSIX shell script registered as an `rpcd` call object at `/usr/libexec/rpcd/luci.hwdash` with four methods: `info` (the full hardware readout in one round-trip), `ping` (parallel latency probes, accepting a target list as arguments with hosts validated against a character whitelist before they reach a command line), and `get_config`/`set_config` (router-side settings persistence, size-capped and re-serialized through `jsonfilter` so only valid JSON is ever written).
+The backend is a single POSIX shell script registered as an `rpcd` call object at `/usr/libexec/rpcd/luci.hwdash` with six methods: `info` (the full hardware readout in one round-trip), `ping` (parallel latency probes, accepting a target list as arguments with hosts validated against a character whitelist before they reach a command line), `get_config`/`set_config` (router-side settings persistence, size-capped and re-serialized through `jsonfilter` so only valid JSON is ever written), and `get_cpu_perf`/`set_cpu_perf` (reads and writes the live `cpufreq` policy). `set_cpu_perf` validates the requested governor against `scaling_available_governors` and the frequency range against the hardware's own `cpuinfo_min_freq`/`cpuinfo_max_freq` before writing anything to `/sys` — an out-of-range or unrecognized value is rejected outright rather than silently clamped.
 
-Data collection covers: CPU statistics, context switches and interrupts from a single pass over `/proc/stat`, per-IRQ per-core counters from `/proc/interrupts`, softnet backlog from `/proc/net/softnet_stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout and ECC counters from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones and cooling devices from `/sys/class/thermal/`, temperatures plus voltage/fan/power/current rails from `hwmon`, cpufreq residency from `time_in_state`, ethernet link state from sysfs plus `ethtool`, offload state from `nft`/`uci`/PPE debugfs, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw` (including per-channel airtime survey), eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/`, F2FS statistics from `/sys/fs/f2fs/`, and hardware events from `dmesg`.
+Data collection covers: CPU statistics, context switches and interrupts from a single pass over `/proc/stat`, per-IRQ per-core counters from `/proc/interrupts`, softnet backlog from `/proc/net/softnet_stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout and ECC counters from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones and cooling devices from `/sys/class/thermal/`, temperatures plus voltage/fan/power/current rails from `hwmon`, package/core/DRAM energy counters from `/sys/class/powercap/intel-rapl*` (x86 RAPL), cpufreq residency from `time_in_state`, ethernet link state from sysfs plus `ethtool`, offload state from `nft`/`uci`/PPE debugfs, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw` (including per-channel airtime survey), eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/`, F2FS statistics from `/sys/fs/f2fs/`, and hardware events from `dmesg`.
 
 The script is written to minimize process spawning on embedded hardware: `/proc/stat` is parsed in a single pass for all CPU-tick, context-switch and interrupt counters; per-device `/sys` stat files are read with shell builtins rather than `cat`/`awk` pipelines; and the slow-changing storage inventory is served from cache (see Caching Architecture above) so the per-poll fork count stays low.
 
@@ -214,7 +221,7 @@ The AWK-based WiFi capability parser (`luci.hwdash_wifi_cap.awk`) handles the st
 
 The frontend is a single LuCI JavaScript view (`hw_dash.js`) with two poll loops: the main hardware readout every 3 seconds and the ping probes every second. Both stop entirely while the browser tab is hidden — the router does no collection work for a dashboard nobody is looking at — and resume on return.
 
-Every card is built once as a persistent DOM skeleton and patched in place on each tick rather than torn down and rebuilt — CPU (dials, per-core rows, detailed load, frequency residency), Memory, Internal/External Storage, Thermal Sensors, Ports Topology, PCI-e, Offload Engines, Interrupts, WiFi PHY, Hardware Events, hwmon, and System Info all update via one of two mechanisms: a keyed row-diff that adds, removes, or reorders only the rows whose underlying item actually appeared, disappeared, or moved (everything else is a `textContent`/style write on an already-attached node), or a content-signature gate that skips the rebuild outright when the section's structural inputs are byte-identical to the previous tick — which is the common case for hardware topology that only changes when something is physically plugged in or unplugged. The net effect is that a dashboard tab left open indefinitely does a few dozen text/style writes per tick instead of thousands of `createElement` calls, which is what was driving rising memory/CPU use and jank the longer the page stayed open.
+Every card is built once as a persistent DOM skeleton and patched in place on each tick rather than torn down and rebuilt — CPU (dials, detailed load, frequency residency), Per-Core Usage (its own dedicated grid card), Memory, Internal/External Storage, Thermal Sensors, Ports Topology, PCI-e, Offload Engines, Interrupts, WiFi PHY, Hardware Events, hwmon/RAPL power, and System Info all update via one of two mechanisms: a keyed row-diff that adds, removes, or reorders only the rows whose underlying item actually appeared, disappeared, or moved (everything else is a `textContent`/style write on an already-attached node), or a content-signature gate that skips the rebuild outright when the section's structural inputs are byte-identical to the previous tick — which is the common case for hardware topology that only changes when something is physically plugged in or unplugged. The net effect is that a dashboard tab left open indefinitely does a few dozen text/style writes per tick instead of thousands of `createElement` calls, which is what was driving rising memory/CPU use and jank the longer the page stayed open.
 
 Dynamic color scaling (`getDynColor`) maps utilization percentages to a green → amber → red gradient without hardcoded thresholds that would be wrong for different metric types. The inversion flag is used for metrics like Free memory and CPU Idle where high values are good.
 

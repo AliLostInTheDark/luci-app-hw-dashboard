@@ -3,13 +3,13 @@
 		"description": "Grant access to Hardware Dashboard",
 		"read": {
 			"ubus": {
-				"luci.hwdash": [ "info", "ping", "get_config" ]
+				"luci.hwdash": [ "info", "ping", "get_config", "get_cpu_perf" ]
 			},
 			"cgi-io": [ "exec" ]
 		},
 		"write": {
 			"ubus": {
-				"luci.hwdash": [ "set_config" ]
+				"luci.hwdash": [ "set_config", "set_cpu_perf" ]
 			}
 		}
 	}

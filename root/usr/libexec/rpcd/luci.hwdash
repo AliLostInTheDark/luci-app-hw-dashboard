@@ -74,7 +74,7 @@ _cache_write() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "get_config": { }, "set_config": { "config": {} } }'
+		echo '{ "info": { }, "ping": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} } }'
 		;;
 	call)
 		case "$2" in
@@ -107,6 +107,122 @@ case "$1" in
 					uci -q set hwdash.main=settings
 					uci -q set hwdash.main.settings_json="$_CFG"
 					uci -q commit hwdash
+					echo '{"result":"ok"}'
+				else
+					echo '{"result":"invalid"}'
+				fi
+				;;
+			get_cpu_perf)
+				# Reported as a single global "profile" off cpu0's cpufreq
+				# policy — every board this package targets so far (Qualcomm
+				# ARM, x86 desktop-class) exposes one uniform policy across
+				# all cores, so cpu0 is representative. Read straight from
+				# /sys each call (cheap, no caching needed) so it never lags
+				# behind a change made outside the dashboard.
+				_CF=/sys/devices/system/cpu/cpu0/cpufreq
+				CPF_GOV="unknown"; CPF_AVAIL=""; CPF_MIN=0; CPF_MAX=0; CPF_IMIN=0; CPF_IMAX=0; CPF_CUR=0
+				if [ -d "$_CF" ]; then
+					read_file CPF_GOV "$_CF/scaling_governor" "unknown"
+					read_file CPF_AVAIL "$_CF/scaling_available_governors" ""
+					read_file CPF_MIN "$_CF/scaling_min_freq" 0
+					read_file CPF_MAX "$_CF/scaling_max_freq" 0
+					read_file CPF_IMIN "$_CF/cpuinfo_min_freq" 0
+					read_file CPF_IMAX "$_CF/cpuinfo_max_freq" 0
+					read_file CPF_CUR "$_CF/scaling_cur_freq" 0
+				fi
+				CPF_AVAIL_JSON="["
+				_first=1
+				for _g in $CPF_AVAIL; do
+					[ $_first -eq 0 ] && CPF_AVAIL_JSON="$CPF_AVAIL_JSON,"
+					CPF_AVAIL_JSON="$CPF_AVAIL_JSON\"$_g\""
+					_first=0
+				done
+				CPF_AVAIL_JSON="$CPF_AVAIL_JSON]"
+				# Turbo/boost lives behind two incompatible sysfs knobs
+				# depending on the driver: intel_pstate's "no_turbo" is
+				# inverted (0 = turbo on), the generic cpufreq core (e.g.
+				# cpufreq-dt) exposes a plain "boost" (1 = on). Normalize
+				# both into one boolean for the frontend.
+				CPF_TURBO_AVAIL=0; CPF_TURBO_ON=0
+				if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
+					CPF_TURBO_AVAIL=1
+					read_file _nt /sys/devices/system/cpu/intel_pstate/no_turbo 1
+					[ "$_nt" = "0" ] && CPF_TURBO_ON=1
+				elif [ -f "$_CF/boost" ]; then
+					CPF_TURBO_AVAIL=1
+					read_file _bo "$_CF/boost" 0
+					[ "$_bo" = "1" ] && CPF_TURBO_ON=1
+				fi
+				CPF_PERSIST=0
+				[ -f /etc/config/cpu-perf ] && CPF_PERSIST=1
+				echo "{\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
+				;;
+			set_cpu_perf)
+				_IN=""
+				IFS= read -r _IN 2>/dev/null
+				_GOV=""; _MIN=""; _MAX=""; _TURBO=""
+				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
+					_IN=$(printf '%s' "$_IN" | head -c 2048)
+					_GOV=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.governor' 2>/dev/null)
+					_MIN=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.min_freq' 2>/dev/null)
+					_MAX=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.max_freq' 2>/dev/null)
+					_TURBO=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.turbo_enabled' 2>/dev/null)
+				fi
+				_CF=/sys/devices/system/cpu/cpu0/cpufreq
+				_OK=1
+				[ -d "$_CF" ] || _OK=0
+				if [ $_OK -eq 1 ] && [ -n "$_GOV" ]; then
+					read_file _AVAIL "$_CF/scaling_available_governors" ""
+					case " $_AVAIL " in
+						*" $_GOV "*) ;;
+						*) _OK=0 ;;
+					esac
+				fi
+				case "$_MIN" in ''|*[!0-9]*) _OK=0 ;; esac
+				case "$_MAX" in ''|*[!0-9]*) _OK=0 ;; esac
+				if [ $_OK -eq 1 ]; then
+					read_file _IMIN "$_CF/cpuinfo_min_freq" 0
+					read_file _IMAX "$_CF/cpuinfo_max_freq" 0
+					if [ "$_MIN" -lt "$_IMIN" ] || [ "$_MAX" -gt "$_IMAX" ] || [ "$_MIN" -gt "$_MAX" ]; then
+						_OK=0
+					fi
+				fi
+				if [ $_OK -eq 1 ]; then
+					for _pf in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
+						[ -d "$_pf" ] || continue
+						[ -w "$_pf/scaling_governor" ] && echo "$_GOV" > "$_pf/scaling_governor" 2>/dev/null
+						[ -w "$_pf/scaling_min_freq" ] && echo "$_MIN" > "$_pf/scaling_min_freq" 2>/dev/null
+						[ -w "$_pf/scaling_max_freq" ] && echo "$_MAX" > "$_pf/scaling_max_freq" 2>/dev/null
+					done
+					case "$_TURBO" in
+						true|1) _TWANT=on ;;
+						false|0) _TWANT=off ;;
+						*) _TWANT="" ;;
+					esac
+					if [ -n "$_TWANT" ]; then
+						if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
+							[ "$_TWANT" = on ] && echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
+							[ "$_TWANT" = off ] && echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
+						elif [ -f "$_CF/boost" ]; then
+							[ "$_TWANT" = on ] && echo 1 > "$_CF/boost" 2>/dev/null
+							[ "$_TWANT" = off ] && echo 0 > "$_CF/boost" 2>/dev/null
+						fi
+					fi
+					# Best-effort persistence: only touch /etc/config/cpu-perf if
+					# it's already there (that package owns its own defaults and
+					# init script; we just keep it in sync so a reboot doesn't
+					# silently revert what was just applied here). Never create
+					# the file — that's the package's job if the user installs it.
+					if [ -f /etc/config/cpu-perf ]; then
+						uci -q show cpu-perf 2>/dev/null | grep '=cpu_freq_policy$' | cut -d. -f2 | cut -d= -f1 |
+						while read -r _sec; do
+							[ -z "$_sec" ] && continue
+							uci -q set cpu-perf."$_sec".scaling_governor="$_GOV"
+							uci -q set cpu-perf."$_sec".scaling_min_freq="$_MIN"
+							uci -q set cpu-perf."$_sec".scaling_max_freq="$_MAX"
+						done
+						uci -q commit cpu-perf
+					fi
 					echo '{"result":"ok"}'
 				else
 					echo '{"result":"invalid"}'
@@ -1001,6 +1117,25 @@ EOF
 					done
 				done
 				HWMON_EXTRA="$HWMON_EXTRA]"
+
+				# RAPL package/core/dram energy counters (x86 only — the
+				# directory simply doesn't exist on ARM/MIPS boards, no
+				# special-casing needed). Raw cumulative microjoules; the
+				# frontend derives Watts from the delta between polls, the
+				# same client-side pattern already used for disk I/O speed.
+				RAPL="["
+				_RP_FIRST=1
+				for _rp in /sys/class/powercap/intel-rapl:[0-9]*; do
+					[ -f "$_rp/energy_uj" ] || continue
+					read_file _rpn "$_rp/name" "rapl"
+					read_file _rpe "$_rp/energy_uj" 0
+					case "$_rpe" in ''|*[!0-9]*) continue ;; esac
+					json_esc "$_rpn"
+					[ $_RP_FIRST -eq 0 ] && RAPL="$RAPL,"
+					RAPL="$RAPL{\"name\":\"$JSV\",\"energy_uj\":$_rpe}"
+					_RP_FIRST=0
+				done
+				RAPL="$RAPL]"
 
 				# LOGICAL_CPUS / PHYSICAL_CORES / MAX_FREQ_KHZ are resolved once and
 				# cached together with the board identity above (hw_identity_v1.sh).
@@ -2070,7 +2205,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

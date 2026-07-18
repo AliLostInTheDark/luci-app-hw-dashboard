@@ -25,6 +25,17 @@ var callHwSetConfig = rpc.declare({
     params: ['config'],
     expect: {}
 });
+var callHwGetCpuPerf = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'get_cpu_perf',
+    expect: {}
+});
+var callHwSetCpuPerf = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'set_cpu_perf',
+    params: ['perf'],
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -65,7 +76,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; } .hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -745,13 +756,12 @@ return view.extend({
         var dskCard = {node: _dskNode};
         var coresNode = E('div', {
             id: 'hw-cores',
-            class: 'hw-stats-list',
-            style: 'margin-top: 0; padding-top: 0;'
+            class: 'hw-core-grid'
         });
-        cpuCard.node.appendChild(E('h4', {
-            style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 15px 0 10px 0; text-transform: uppercase;'
-        }, 'PER-CORE USAGE'));
-        cpuCard.node.appendChild(coresNode);
+        var coresCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'}, [
+            E('h3', {}, 'Per-Core Usage'),
+            coresNode
+        ]);
         cpuCard.node.appendChild(E('div', {
             style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
         }));
@@ -819,6 +829,7 @@ return view.extend({
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
+        container.appendChild(coresCard);
         container.appendChild(irqCard);
         container.appendChild(hwmonCard);
         container.appendChild(offloadCard);
@@ -894,6 +905,7 @@ return view.extend({
             cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
             ram: { nodes: [ramCard.node], label: 'Memory', show: 'flex' },
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
+            cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
             offload: { nodes: [offloadCard], label: 'Offload Engines', show: null },
             irq: { nodes: [irqCard], label: 'Interrupts', show: null },
@@ -923,7 +935,7 @@ return view.extend({
             style: 'display: none; width: 100%; padding: 14px 18px; border: 1px solid var(--border-color, rgba(128,128,128,0.25)); border-radius: 8px; background: var(--background-color-high, rgba(128,128,128,0.05));'
         });
         settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Visible Cards'));
-        var cardChecks = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' });
+        var cardChecks = E('div', { class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' });
         Object.keys(cardRegistry).forEach(function(key) {
             var cb = E('input', {
                 type: 'checkbox',
@@ -940,7 +952,7 @@ return view.extend({
         });
         settingsPanel.appendChild(cardChecks);
         settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Ping Targets'));
-        var targetList = E('div', { style: 'margin-bottom: 10px;' });
+        var targetList = E('div', { class: 'cbi-value-field', style: 'margin-bottom: 10px;' });
         var makePingToggle = function(host, fam, label, isCustom, customIdx) {
             var dKey = host + '|' + fam;
             var cb = E('input', {
@@ -1037,6 +1049,103 @@ return view.extend({
                 }
             }, 'Reset to defaults')
         ]));
+        settingsPanel.appendChild(E('h4', {
+            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
+        }, 'CPU Performance'));
+        var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
+        var cpuPerfSection = E('div', {}, [cpuPerfBody]);
+        settingsPanel.appendChild(cpuPerfSection);
+        var cbiRow = function(labelTxt, field) {
+            return E('div', { class: 'cbi-value', style: 'display: flex; align-items: center; gap: 12px; margin-bottom: 8px;' }, [
+                E('label', { class: 'cbi-value-title', style: 'min-width: 160px; opacity: 0.8;' }, labelTxt),
+                E('div', { class: 'cbi-value-field' }, field)
+            ]);
+        };
+        var buildCpuPerfForm = function(perf) {
+            cpuPerfBody.innerHTML = '';
+            cpuPerfBody.style.opacity = '1';
+            var mhz = function(khz) { return Math.round(khz / 1000); };
+            var govSel = E('select', { class: 'cbi-input-select' });
+            (perf.available_governors || []).forEach(function(g) {
+                govSel.appendChild(E('option', { value: g }, g));
+            });
+            govSel.value = perf.governor;
+            var infoMinMhz = mhz(perf.cpuinfo_min_freq || 0);
+            var infoMaxMhz = mhz(perf.cpuinfo_max_freq || perf.max_freq || 0);
+            var minInput = E('input', {
+                type: 'number', class: 'cbi-input-text', style: 'width: 100px;',
+                min: infoMinMhz, max: infoMaxMhz, value: mhz(perf.min_freq)
+            });
+            var maxInput = E('input', {
+                type: 'number', class: 'cbi-input-text', style: 'width: 100px;',
+                min: infoMinMhz, max: infoMaxMhz, value: mhz(perf.max_freq)
+            });
+            var turboCb = E('input', { type: 'checkbox' });
+            turboCb.checked = !!perf.turbo_enabled;
+            var msg = E('span', { style: 'font-size: 0.85em; margin-left: 10px;' });
+            var applyBtn = E('button', {
+                class: 'cbi-button cbi-button-apply',
+                click: function() {
+                    var minV = parseInt(minInput.value), maxV = parseInt(maxInput.value);
+                    if (isNaN(minV) || isNaN(maxV) || minV < infoMinMhz || maxV > infoMaxMhz || minV > maxV) {
+                        msg.textContent = 'Invalid range (' + infoMinMhz + '–' + infoMaxMhz + ' MHz, min ≤ max)';
+                        msg.style.color = '#ff5252';
+                        return;
+                    }
+                    applyBtn.disabled = true;
+                    msg.textContent = 'Applying…';
+                    msg.style.color = '';
+                    callHwSetCpuPerf({
+                        perf: {
+                            governor: govSel.value,
+                            min_freq: minV * 1000,
+                            max_freq: maxV * 1000,
+                            turbo_enabled: turboCb.checked
+                        }
+                    }).then(function(res) {
+                        applyBtn.disabled = false;
+                        if (res && res.result === 'ok') {
+                            msg.textContent = '✓ Applied';
+                            msg.style.color = '#8bc34a';
+                            return callHwGetCpuPerf().then(function(p) { if (p) buildCpuPerfForm(p); });
+                        } else {
+                            msg.textContent = 'Rejected — check governor/frequency range';
+                            msg.style.color = '#ff5252';
+                        }
+                    }).catch(function() {
+                        applyBtn.disabled = false;
+                        msg.textContent = 'Request failed';
+                        msg.style.color = '#ff5252';
+                    });
+                }
+            }, 'Apply');
+            cpuPerfBody.appendChild(cbiRow('Current Frequency:', E('span', {}, mhz(perf.cur_freq) + ' MHz')));
+            cpuPerfBody.appendChild(cbiRow('Governor:', govSel));
+            cpuPerfBody.appendChild(cbiRow('Min Frequency (MHz):', minInput));
+            cpuPerfBody.appendChild(cbiRow('Max Frequency (MHz):', maxInput));
+            if (perf.turbo_available) {
+                cpuPerfBody.appendChild(cbiRow('Turbo / Boost:', turboCb));
+            }
+            cpuPerfBody.appendChild(cbiRow('', [applyBtn, msg]));
+            cpuPerfBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px;' },
+                perf.persist_available
+                    ? 'Applies immediately and persists across reboot (synced to /etc/config/cpu-perf).'
+                    : 'Applies immediately; resets after reboot. Install luci-app-cpu-perf to persist.'));
+        };
+        var cpuPerfLoaded = false;
+        var loadCpuPerf = function() {
+            if (cpuPerfLoaded) return;
+            cpuPerfLoaded = true;
+            callHwGetCpuPerf().then(function(perf) {
+                if (perf && perf.governor) {
+                    buildCpuPerfForm(perf);
+                } else {
+                    cpuPerfBody.textContent = 'CPU frequency scaling not available on this device.';
+                }
+            }).catch(function() {
+                cpuPerfBody.textContent = 'Failed to read CPU performance state.';
+            });
+        };
         settingsPanel.appendChild(E('div', { style: 'margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2));' }, [
             E('button', {
                 class: 'cbi-button cbi-button-action',
@@ -1061,6 +1170,7 @@ return view.extend({
             style: 'padding: 4px 14px;',
             click: function() {
                 settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
+                if (settingsPanel.style.display !== 'none') loadCpuPerf();
             }
         }, '\u2699 Settings');
         var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
@@ -1423,14 +1533,16 @@ return view.extend({
                                 var ceVal = E('span', { class: 'hw-stat-value' });
                                 var ceFill = E('div', { class: 'hw-bar-fill' });
                                 coresNode.appendChild(E('div', {
-                                    class: 'hw-progress-item'
+                                    class: 'hw-core-cell'
+                                }, [E('div', {
+                                    class: 'hw-progress-item', style: 'margin-bottom: 0;'
                                 }, [E('div', {
                                     class: 'hw-progress-header'
                                 }, [E('span', {
                                     class: 'hw-stat-label'
                                 }, coreName), ceVal]), E('div', {
                                     class: 'hw-bar-bg'
-                                }, [ceFill])]));
+                                }, [ceFill])])]));
                                 ce = self._coreEls[coreIdx] = { val: ceVal, fill: ceFill };
                             }
                             ce.val.textContent = freqStr + pct.toFixed(2) + '%';
@@ -2100,7 +2212,8 @@ return view.extend({
                                             });
                                             grp.parts.forEach(function(part) {
                                                 var psz = part.size ? (parseInt(part.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : '';
-                                                var formatStr = (part.fs && part.fs !== 'Unknown') ? part.fs : 'Unmounted';
+                                                var formatStr = (part.fs && part.fs !== 'Unknown') ? part.fs : '—';
+                                                var mountedStr = part.mount ? part.mount : 'No';
                                                 var pStats = statsByDev[part.dev];
                                                 var pSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(pStats.rSpeed) + ' / W: ' + fmtSpeedExt(pStats.wSpeed));
                                                 var pIopsSpan = E('span', {}, 'R: ' + Math.round(pStats.rIops) + ' / W: ' + Math.round(pStats.wIops));
@@ -2124,6 +2237,14 @@ return view.extend({
                                                         }, formatStr)
                                                     ]),
                                                     E('div', {
+                                                        style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 4px;'
+                                                    }, [
+                                                        E('span', {}, 'Mounted:'),
+                                                        E('span', {
+                                                            style: part.mount ? 'color: #8bc34a;' : 'opacity: 0.6;'
+                                                        }, mountedStr)
+                                                    ]),
+                                                    E('div', {
                                                         style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 6px;'
                                                     }, [
                                                         E('span', {}, 'Speed:'),
@@ -2141,13 +2262,31 @@ return view.extend({
                                             });
                                             box.appendChild(partsContainer);
                                         } else {
+                                            var mFormatStr = (main.fs && main.fs !== 'Unknown') ? main.fs : '—';
+                                            var mMountedStr = main.mount ? main.mount : 'No';
                                             var mSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(mStats.rSpeed) + ' / W: ' + fmtSpeedExt(mStats.wSpeed));
                                             var mIopsSpan = E('span', {}, 'R: ' + Math.round(mStats.rIops) + ' / W: ' + Math.round(mStats.wIops));
                                             var footer = E('div', {
                                                 style: 'margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.3));'
                                             }, [
                                                 E('div', {
-                                                    style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 4px;'
+                                                    style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;'
+                                                }, [
+                                                    E('span', {}, 'Format:'),
+                                                    E('span', {
+                                                        style: 'color: #00bcd4;'
+                                                    }, mFormatStr)
+                                                ]),
+                                                E('div', {
+                                                    style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 4px;'
+                                                }, [
+                                                    E('span', {}, 'Mounted:'),
+                                                    E('span', {
+                                                        style: main.mount ? 'color: #8bc34a;' : 'opacity: 0.6;'
+                                                    }, mMountedStr)
+                                                ]),
+                                                E('div', {
+                                                    style: 'display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 6px;'
                                                 }, [
                                                     E('span', {}, 'Speed:'),
                                                     mSpeedSpan
@@ -2204,7 +2343,6 @@ return view.extend({
                 if (res.thermals && res.thermals.length > 0 && thermWrap) {
                     if (res.model) {
                         var title = res.model;
-                        if (title.length > 30) title = title.substring(0, 30);
                         var tEl = document.getElementById('title-cpu');
                         if (tEl && tEl.textContent !== title) tEl.textContent = title;
                     }
@@ -2795,13 +2933,35 @@ return view.extend({
                 } else {
                     eventsCard.style.display = 'none';
                 }
-                if (res.hwmon_extra && res.hwmon_extra.length > 0) {
+                if ((res.hwmon_extra && res.hwmon_extra.length > 0) || (res.rapl && res.rapl.length > 0)) {
                     var hxNode = document.getElementById('hw-hwmon');
                     var hxShown = 0;
                     if (hxNode) {
-                        var hxItems = res.hwmon_extra.filter(function(hx) {
+                        var hxItems = (res.hwmon_extra || []).filter(function(hx) {
                             return hx.unit === 'V' || hx.unit === 'RPM' || hx.unit === 'W' || hx.unit === 'A';
                         });
+                        // RAPL reports cumulative microjoules, not an instantaneous
+                        // power reading — derive Watts from the delta between polls,
+                        // the same client-side pattern already used for disk I/O
+                        // speed (self.prevDisk). Re-expressed as synthetic µW so it
+                        // rides the existing 'W' formatting path below unchanged.
+                        if (res.rapl && res.rapl.length > 0) {
+                            var raplNow = Date.now();
+                            if (!self.prevRapl) self.prevRapl = {};
+                            var raplLabels = { 'package-0': 'Package Power', 'package-1': 'Package Power (1)', core: 'Core Power', dram: 'DRAM Power' };
+                            res.rapl.forEach(function(rz) {
+                                var prev = self.prevRapl[rz.name];
+                                var watts = 0;
+                                if (prev) {
+                                    var tDiff = (raplNow - prev.time) / 1000.0;
+                                    if (tDiff > 0) watts = Math.max(0, (rz.energy_uj - prev.energy_uj) / 1e6 / tDiff);
+                                }
+                                self.prevRapl[rz.name] = { energy_uj: rz.energy_uj, time: raplNow };
+                                if (prev) {
+                                    hxItems.push({ name: raplLabels[rz.name] || (rz.name + ' Power'), val: watts * 1e6, unit: 'W' });
+                                }
+                            });
+                        }
                         hxShown = hxItems.length;
                         if (!self._hxCache) self._hxCache = {};
                         syncRows(hxNode, self._hxCache, hxItems, function(hx, i) { return hx.name + '|' + i; }, function(hx) {
