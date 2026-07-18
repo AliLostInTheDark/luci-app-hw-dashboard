@@ -1723,6 +1723,7 @@ return view.extend({
                     var _seenDiskDev = {};
                     var dskNode = document.getElementById('stats-dsk');
                     var dskItems = [];
+                    var _dfNow = Date.now();
                     res.df.forEach(function(fs) {
                         var isExt = (fs.hw_type === 'USB');
                         // /rom (squashfs) isn't additional usable capacity — it's the
@@ -1753,24 +1754,31 @@ return view.extend({
                         var wIops = 0;
                         if (fs.mount === '/' && fs.iodev && res.diskstats && res.diskstats[fs.iodev]) {
                             var stat = res.diskstats[fs.iodev];
-                            // Namespaced "df:" key: res.diskstats entries (raw
-                            // sector deltas, {r,w,r_io,w_io}) and getStats()'s
-                            // res.block_devs entries ({read,write,...,time})
-                            // can share the same bare device name (e.g. a
-                            // direct-partition x86 NVMe root also appears as
-                            // its own External Storage row) — an unprefixed
-                            // shared key lets whichever ran last in a tick
-                            // clobber the other's cache with an incompatible
-                            // shape, producing NaN speeds.
+                            // Namespaced "df:" key: res.diskstats entries and
+                            // getStats()'s res.block_devs entries can share the
+                            // same bare device name (e.g. a direct-partition
+                            // x86 NVMe root also appears as its own External
+                            // Storage row) — an unprefixed shared key lets
+                            // whichever ran last in a tick clobber the other's
+                            // cache with an incompatible shape, producing NaN
+                            // speeds. The stored snapshot also carries its own
+                            // timestamp so the rate is a real bytes/sec figure
+                            // rather than raw counts-since-last-poll mislabeled
+                            // as "/s" — poll ticks aren't a precise 3s
+                            // metronome (tab throttling, slow ubus round-trips
+                            // under heavy I/O contention all skew it).
                             var _dpKey = 'df:' + fs.iodev;
                             if (self.prevDisk[_dpKey]) {
                                 var prev = self.prevDisk[_dpKey];
-                                readSpeed = (stat.r - prev.r) * 512;
-                                writeSpeed = (stat.w - prev.w) * 512;
-                                rIops = (stat.r_io - prev.r_io);
-                                wIops = (stat.w_io - prev.w_io);
+                                var _dpDt = (_dfNow - prev.t) / 1000;
+                                if (_dpDt > 0) {
+                                    readSpeed = Math.max(0, (stat.r - prev.r) * 512 / _dpDt);
+                                    writeSpeed = Math.max(0, (stat.w - prev.w) * 512 / _dpDt);
+                                    rIops = Math.max(0, (stat.r_io - prev.r_io) / _dpDt);
+                                    wIops = Math.max(0, (stat.w_io - prev.w_io) / _dpDt);
+                                }
                             }
-                            self.prevDisk[_dpKey] = stat;
+                            self.prevDisk[_dpKey] = { r: stat.r, w: stat.w, r_io: stat.r_io, w_io: stat.w_io, t: _dfNow };
                         } else if (fs.mount === '/') {
                             var intRead = 0,
                                 intWrite = 0,
@@ -1782,12 +1790,15 @@ return view.extend({
                                     var _dpKeyK = 'df:' + k;
                                     if (self.prevDisk[_dpKeyK]) {
                                         var prev = self.prevDisk[_dpKeyK];
-                                        intRead += (stat.r - prev.r) * 512;
-                                        intWrite += (stat.w - prev.w) * 512;
-                                        intR_io += (stat.r_io - prev.r_io);
-                                        intW_io += (stat.w_io - prev.w_io);
+                                        var _dpDtK = (_dfNow - prev.t) / 1000;
+                                        if (_dpDtK > 0) {
+                                            intRead += Math.max(0, (stat.r - prev.r) * 512 / _dpDtK);
+                                            intWrite += Math.max(0, (stat.w - prev.w) * 512 / _dpDtK);
+                                            intR_io += Math.max(0, (stat.r_io - prev.r_io) / _dpDtK);
+                                            intW_io += Math.max(0, (stat.w_io - prev.w_io) / _dpDtK);
+                                        }
                                     }
-                                    self.prevDisk[_dpKeyK] = stat;
+                                    self.prevDisk[_dpKeyK] = { r: stat.r, w: stat.w, r_io: stat.r_io, w_io: stat.w_io, t: _dfNow };
                                 }
                             }
                             readSpeed = intRead;
@@ -1799,12 +1810,15 @@ return view.extend({
                             var _dpKeyD = 'df:' + fs.dev;
                             if (self.prevDisk[_dpKeyD]) {
                                 var prev = self.prevDisk[_dpKeyD];
-                                readSpeed = (stat.r - prev.r) * 512;
-                                writeSpeed = (stat.w - prev.w) * 512;
-                                rIops = (stat.r_io - prev.r_io);
-                                wIops = (stat.w_io - prev.w_io);
+                                var _dpDtD = (_dfNow - prev.t) / 1000;
+                                if (_dpDtD > 0) {
+                                    readSpeed = Math.max(0, (stat.r - prev.r) * 512 / _dpDtD);
+                                    writeSpeed = Math.max(0, (stat.w - prev.w) * 512 / _dpDtD);
+                                    rIops = Math.max(0, (stat.r_io - prev.r_io) / _dpDtD);
+                                    wIops = Math.max(0, (stat.w_io - prev.w_io) / _dpDtD);
+                                }
                             }
-                            self.prevDisk[_dpKeyD] = stat;
+                            self.prevDisk[_dpKeyD] = { r: stat.r, w: stat.w, r_io: stat.r_io, w_io: stat.w_io, t: _dfNow };
                         }
                         var usedPctStr = fs.pct;
                         var pctNum = parseInt(usedPctStr) || 0;
@@ -1818,7 +1832,7 @@ return view.extend({
                         var _isNand = fs.hw_type === 'NAND';
                         var _isStatic = _isNand || fs.hw_type === 'SquashFS';
                         var speedStr = _isStatic ? fmtKb(fs.used) + ' / ' + fmtKb(fs.total) : 'R: ' + fmtSpeedDf(readSpeed) + ' | W: ' + fmtSpeedDf(writeSpeed);
-                        var iopsStr = _isStatic ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
+                        var iopsStr = _isStatic ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + Math.round(rIops) + 'R / ' + Math.round(wIops) + 'W) IOPS';
                         var hasInodes = !!(inodesInfo && inodesInfo.ipct !== '-');
                         var ipctNum = hasInodes ? (parseInt(inodesInfo.ipct) || 0) : 0;
                         dskItems.push({
@@ -2071,6 +2085,10 @@ return view.extend({
                         if (sm) {
                             var wearColor = sm.percent_used >= 100 ? '#ff1744' : sm.percent_used >= 90 ? '#ffb300' : '#00bcd4';
                             nvBox.appendChild(makeBar2('Wear (Percentage Used)', Math.min(sm.percent_used, 100), sm.percent_used + '%', wearColor));
+                            // TBW (Total Bytes Written) — the standard SSD
+                            // endurance/warranty figure, shown alongside wear %
+                            // rather than folded into a generic read+write row.
+                            nvBox.appendChild(makeRow('TBW (Total Bytes Written)', fmtBytesS(sm.data_units_written * 512000), null));
                             var spareColor = sm.avail_spare <= sm.spare_thresh ? '#ff1744' : sm.avail_spare <= sm.spare_thresh + 10 ? '#ffb300' : '#00bcd4';
                             nvBox.appendChild(makeBar2('Available Spare', sm.avail_spare, sm.avail_spare + '% (threshold ' + sm.spare_thresh + '%)', spareColor));
                             if (sm.ns_capacity > 0) {
@@ -2094,9 +2112,7 @@ return view.extend({
                             nvBox.appendChild(makeRow('Unsafe Shutdowns', sm.unsafe_shutdowns.toLocaleString(), sm.unsafe_shutdowns > 0 ? '#ffb300' : null));
                             nvBox.appendChild(makeRow('Media Errors', sm.media_errors.toLocaleString(), sm.media_errors > 0 ? '#ff1744' : null));
                             if (sm.err_log_entries > 0) nvBox.appendChild(makeRow('Error Log Entries', sm.err_log_entries.toLocaleString(), '#ffb300'));
-                            var dataRead = fmtBytesS(sm.data_units_read * 512000);
-                            var dataWritten = fmtBytesS(sm.data_units_written * 512000);
-                            nvBox.appendChild(makeRow('Data Read / Written', dataRead + ' / ' + dataWritten, null, true));
+                            nvBox.appendChild(makeRow('Data Read', fmtBytesS(sm.data_units_read * 512000), null));
                             nvBox.appendChild(makeRow('Host Read / Write Commands', sm.host_reads.toLocaleString() + ' / ' + sm.host_writes.toLocaleString(), null, true));
                             if (sm.critical_warning > 0) {
                                 var cw = sm.critical_warning;
