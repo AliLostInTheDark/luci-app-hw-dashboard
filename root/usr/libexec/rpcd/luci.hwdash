@@ -2307,6 +2307,10 @@ EOF_DMESG
 								_nv_unsafe=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.unsafe_shutdowns' 2>/dev/null)
 								_nv_merr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.media_errors' 2>/dev/null)
 								_nv_errlog=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.num_err_log_entries' 2>/dev/null)
+								_nv_hreads=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.host_reads' 2>/dev/null)
+								_nv_hwrites=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.host_writes' 2>/dev/null)
+								_nv_nsutil=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_namespaces[0].utilization.bytes' 2>/dev/null)
+								_nv_nscap=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_namespaces[0].capacity.bytes' 2>/dev/null)
 								[ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
 								case "$_nv_tempcur" in ''|*[!0-9]*) _nv_tempcur=0 ;; esac
 								case "$_nv_tempwarn" in ''|*[!0-9]*) _nv_tempwarn=0 ;; esac
@@ -2322,7 +2326,11 @@ EOF_DMESG
 								case "$_nv_unsafe" in ''|*[!0-9]*) _nv_unsafe=0 ;; esac
 								case "$_nv_merr" in ''|*[!0-9]*) _nv_merr=0 ;; esac
 								case "$_nv_errlog" in ''|*[!0-9]*) _nv_errlog=0 ;; esac
-								NVME_SMART="{\"passed\":$_nv_pass,\"temp_c\":$_nv_tempcur,\"temp_warn\":$_nv_tempwarn,\"temp_crit\":$_nv_tempcrit,\"critical_warning\":$_nv_crit,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr,\"err_log_entries\":$_nv_errlog}"
+								case "$_nv_hreads" in ''|*[!0-9]*) _nv_hreads=0 ;; esac
+								case "$_nv_hwrites" in ''|*[!0-9]*) _nv_hwrites=0 ;; esac
+								case "$_nv_nsutil" in ''|*[!0-9]*) _nv_nsutil=0 ;; esac
+								case "$_nv_nscap" in ''|*[!0-9]*) _nv_nscap=0 ;; esac
+								NVME_SMART="{\"passed\":$_nv_pass,\"temp_c\":$_nv_tempcur,\"temp_warn\":$_nv_tempwarn,\"temp_crit\":$_nv_tempcrit,\"critical_warning\":$_nv_crit,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr,\"err_log_entries\":$_nv_errlog,\"host_reads\":$_nv_hreads,\"host_writes\":$_nv_hwrites,\"ns_utilization\":$_nv_nsutil,\"ns_capacity\":$_nv_nscap}"
 							fi
 							_cache_write "$_nvsm_cache" 30 "$NVME_SMART"
 						fi

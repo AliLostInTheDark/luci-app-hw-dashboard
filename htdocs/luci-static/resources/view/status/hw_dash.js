@@ -661,6 +661,7 @@ return view.extend({
             return (kb / 1024).toFixed(0) + ' MB';
         };
         var fmtBytesS = function(b) {
+            if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + ' TB';
             if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
             if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
             if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
@@ -2072,6 +2073,10 @@ return view.extend({
                             nvBox.appendChild(makeBar2('Wear (Percentage Used)', Math.min(sm.percent_used, 100), sm.percent_used + '%', wearColor));
                             var spareColor = sm.avail_spare <= sm.spare_thresh ? '#ff1744' : sm.avail_spare <= sm.spare_thresh + 10 ? '#ffb300' : '#00bcd4';
                             nvBox.appendChild(makeBar2('Available Spare', sm.avail_spare, sm.avail_spare + '% (threshold ' + sm.spare_thresh + '%)', spareColor));
+                            if (sm.ns_capacity > 0) {
+                                var nsPct = Math.min(100, (sm.ns_utilization / sm.ns_capacity) * 100);
+                                nvBox.appendChild(makeBar2('Namespace Utilization', nsPct, fmtBytesS(sm.ns_utilization) + ' / ' + fmtBytesS(sm.ns_capacity), getDynColor(nsPct)));
+                            }
                             if (sm.temp_c > 0) {
                                 // Real per-drive thresholds when reported, falling
                                 // back to conservative generic guesses otherwise.
@@ -2092,6 +2097,7 @@ return view.extend({
                             var dataRead = fmtBytesS(sm.data_units_read * 512000);
                             var dataWritten = fmtBytesS(sm.data_units_written * 512000);
                             nvBox.appendChild(makeRow('Data Read / Written', dataRead + ' / ' + dataWritten, null, true));
+                            nvBox.appendChild(makeRow('Host Read / Write Commands', sm.host_reads.toLocaleString() + ' / ' + sm.host_writes.toLocaleString(), null, true));
                             if (sm.critical_warning > 0) {
                                 var cw = sm.critical_warning;
                                 var cwFlags = [];
