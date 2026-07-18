@@ -1795,7 +1795,10 @@ return view.extend({
                         }
                         var usedPctStr = fs.pct;
                         var pctNum = parseInt(usedPctStr) || 0;
-                        var colorDsk = getDynColor(pctNum);
+                        // SquashFS is read-only and by definition always 100% used —
+                        // that's normal, not a "storage nearly full" warning, so it
+                        // doesn't get the usual percentage-driven red/amber/cyan scale.
+                        var colorDsk = fs.hw_type === 'SquashFS' ? '#00bcd4' : getDynColor(pctNum);
                         var labelStr = fs.mount === '/' ? 'Root FS' : fs.mount.replace(/^\/mnt\//, '');
                         var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
                         var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
@@ -1899,13 +1902,14 @@ return view.extend({
                     var extraNode = document.getElementById('hw-int-storage-extra');
                     if (!extraNode) return;
                     var _ovS = res.sys_info || {};
-                    var extraSig = JSON.stringify([res.ubi_devs, res.mtd_parts, res.emmc_info, res.nvme_info, res.f2fs_info, _ovS.overlay_total, _ovS.overlay_used, _ovS.overlay_free, res.ecc_base_date]);
+                    var extraSig = JSON.stringify([res.ubi_devs, res.mtd_parts, res.emmc_info, res.nvme_info, res.squashfs_info, res.f2fs_info, _ovS.overlay_total, _ovS.overlay_used, _ovS.overlay_free, res.ecc_base_date]);
                     if (!sigGate(self._sig, 'extra', extraSig)) return;
                     extraNode.innerHTML = '';
                     var hasUbi = res.ubi_devs && res.ubi_devs.length > 0;
                     var hasMtd = res.mtd_parts && res.mtd_parts.length > 0;
                     var hasEmmc = !!res.emmc_info;
                     var hasNvme = !!res.nvme_info;
+                    var hasSquashfs = !!res.squashfs_info;
                     var hasF2fs = res.f2fs_info && res.f2fs_info.length > 0;
                     if (hasUbi || hasMtd) {
                         var nandRow = E('div', {id: 'hw-nand-row', class: 'hw-thermals-container'});
@@ -2040,8 +2044,18 @@ return view.extend({
                         if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
                         extraNode.appendChild(nvBox);
                     }
-                    if (hasF2fs) {
+                    if (hasSquashfs) {
                         if (hasUbi || hasMtd || hasEmmc || hasNvme) extraNode.appendChild(hRule());
+                        extraNode.appendChild(secH('SquashFS Root Image'));
+                        var sq = res.squashfs_info;
+                        var sqBox = makeDevBox(sq.dev.toUpperCase(), '');
+                        if (sq.compression) sqBox.appendChild(makeRow('Compression', sq.compression.toUpperCase(), null));
+                        if (sq.block_size > 0) sqBox.appendChild(makeRow('Block Size', fmtBytesS(sq.block_size), null));
+                        if (sq.bytes_used > 0) sqBox.appendChild(makeRow('Compressed Size', fmtBytesS(sq.bytes_used), null));
+                        extraNode.appendChild(sqBox);
+                    }
+                    if (hasF2fs) {
+                        if (hasUbi || hasMtd || hasEmmc || hasNvme || hasSquashfs) extraNode.appendChild(hRule());
                         extraNode.appendChild(secH('f2fs Statistics'));
                         res.f2fs_info.forEach(function(f) {
                             var lwStr = fmtBytesS(f.lifetime_write_kb * 1024);

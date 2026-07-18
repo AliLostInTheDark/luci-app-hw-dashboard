@@ -2164,6 +2164,63 @@ EOF
 					break
 				done
 
+				# SquashFS (/rom) superblock details. Its mount source is the
+				# synthetic /dev/root node (not a stat-able /sys/block entry),
+				# so the real backing device is resolved via the kernel's own
+				# early-boot mount line ("...squashfs filesystem) readonly on
+				# device MAJ:MIN") cross-referenced against /proc/diskstats —
+				# the same major:minor technique already used elsewhere in
+				# this script for non-canonical device nodes. Compression/
+				# block-size/exact-size are read straight from the superblock
+				# (fixed little-endian layout, stable since squashfs 4.0) when
+				# `od` is available; a full coreutils od isn't always present
+				# on a minimal busybox userland, so this degrades to null
+				# rather than guessing. Genuinely static once mounted, so it's
+				# cached for a full day like the other slow/static lookups.
+				SQUASHFS_INFO="null"
+				_sqfs_cache="/tmp/hwdash_squashfs_info"
+				if _cache_read "$_sqfs_cache"; then
+					[ -n "$C_VAL" ] && SQUASHFS_INFO="$C_VAL"
+				else
+					_sqfs_maj=""; _sqfs_min=""
+					while read -r _sl; do
+						case "$_sl" in
+							*"squashfs filesystem"*"on device "*)
+								_sqfs_mm=${_sl##*on device }
+								_sqfs_mm=${_sqfs_mm%.}
+								_sqfs_maj=${_sqfs_mm%%:*}
+								_sqfs_min=${_sqfs_mm#*:}
+								;;
+						esac
+					done <<EOF_DMESG
+$(dmesg 2>/dev/null)
+EOF_DMESG
+					if [ -n "$_sqfs_maj" ] && [ -n "$_sqfs_min" ]; then
+						_sqfs_dev=$(awk -v maj="$_sqfs_maj" -v min="$_sqfs_min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
+						if [ -n "$_sqfs_dev" ] && [ -b "/dev/$_sqfs_dev" ] && command -v od >/dev/null; then
+							_sq_magic=$(od -An -tx1 -j0 -N4 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+							if [ "$_sq_magic" = "68737173" ]; then
+								_sq_bsize=$(od -An -tu4 -j12 -N4 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+								_sq_comp=$(od -An -tu2 -j20 -N2 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+								_sq_used=$(od -An -tu8 -j40 -N8 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+								case "$_sq_comp" in
+									1) _sq_comp_name="gzip" ;;
+									2) _sq_comp_name="lzma" ;;
+									3) _sq_comp_name="lzo" ;;
+									4) _sq_comp_name="xz" ;;
+									5) _sq_comp_name="lz4" ;;
+									6) _sq_comp_name="zstd" ;;
+									*) _sq_comp_name="" ;;
+								esac
+								case "$_sq_bsize" in ''|*[!0-9]*) _sq_bsize=0 ;; esac
+								case "$_sq_used" in ''|*[!0-9]*) _sq_used=0 ;; esac
+								SQUASHFS_INFO="{\"dev\":\"$_sqfs_dev\",\"compression\":\"$_sq_comp_name\",\"block_size\":$_sq_bsize,\"bytes_used\":$_sq_used}"
+							fi
+						fi
+					fi
+					_cache_write "$_sqfs_cache" 86400 "$SQUASHFS_INFO"
+				fi
+
 				# NVMe sysfs info
 				NVME_INFO="null"
 				for nvme in /sys/class/block/nvme[0-9]*n[0-9]*; do
@@ -2292,7 +2349,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
