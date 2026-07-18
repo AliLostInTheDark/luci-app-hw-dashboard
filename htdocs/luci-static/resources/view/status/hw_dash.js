@@ -1724,11 +1724,16 @@ return view.extend({
                     var dskItems = [];
                     res.df.forEach(function(fs) {
                         var isExt = (fs.hw_type === 'USB');
-                        if (fs.total > 0 && !isExt) {
+                        // /rom (squashfs) isn't additional usable capacity — it's the
+                        // static, always-100%-full base image layered under the real
+                        // writable overlay, which is already counted via mount '/'.
+                        // Folding it into the headline totals would double-count.
+                        var excludeFromTotals = isExt || fs.hw_type === 'SquashFS';
+                        if (fs.total > 0 && !excludeFromTotals) {
                             totalSpace += fs.total;
                             totalUsed += fs.used;
                         }
-                        if (fs.hw_size > 0 && !isExt) totalPhys += fs.hw_size;
+                        if (fs.hw_size > 0 && !excludeFromTotals) totalPhys += fs.hw_size;
                         if (fs.hw_type === 'NAND' && !isExt && fs.mount === '/' && fs.hw_size > 0) {
                             nandRootfsVol = fs.hw_size;
                         }
@@ -1795,8 +1800,9 @@ return view.extend({
                         var typeStr = fs.hw_type ? '[' + fs.hw_type + (fs.hw_model ? ' - ' + fs.hw_model : '') + ']' : '';
                         var inodesInfo = res.inodes ? res.inodes[fs.mount] : null;
                         var _isNand = fs.hw_type === 'NAND';
-                        var speedStr = _isNand ? fmtKb(fs.used) + ' / ' + fmtKb(fs.total) : 'R: ' + fmtSpeedDf(readSpeed) + ' | W: ' + fmtSpeedDf(writeSpeed);
-                        var iopsStr = _isNand ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
+                        var _isStatic = _isNand || fs.hw_type === 'SquashFS';
+                        var speedStr = _isStatic ? fmtKb(fs.used) + ' / ' + fmtKb(fs.total) : 'R: ' + fmtSpeedDf(readSpeed) + ' | W: ' + fmtSpeedDf(writeSpeed);
+                        var iopsStr = _isStatic ? (fs.total > 0 ? ((fs.used/fs.total)*100).toFixed(1)+'% filesystem used' : '') : '(' + rIops + 'R / ' + wIops + 'W) IOPS';
                         var hasInodes = !!(inodesInfo && inodesInfo.ipct !== '-');
                         var ipctNum = hasInodes ? (parseInt(inodesInfo.ipct) || 0) : 0;
                         dskItems.push({

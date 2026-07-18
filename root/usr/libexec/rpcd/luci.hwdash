@@ -819,7 +819,7 @@ EOF
 						esac
 						continue
 					fi
-					if [ "$mountpoint" != "/" ] && [ "${mountpoint#/mnt/}" = "$mountpoint" ] && [ "${mountpoint#/run/media/}" = "$mountpoint" ]; then
+					if [ "$mountpoint" != "/" ] && [ "$mountpoint" != "/rom" ] && [ "${mountpoint#/mnt/}" = "$mountpoint" ] && [ "${mountpoint#/run/media/}" = "$mountpoint" ]; then
 						continue
 					fi
 					case "$fs" in
@@ -888,6 +888,12 @@ EOF
 					hw_model=${tmp_meta#*:}
 					case "$hw_size" in ''|*[!0-9]*) hw_size=$blocks ;; esac
 					[ "$hw_size" -eq 0 ] && hw_size=$blocks
+					# /rom is always the read-only squashfs base image on a
+					# standard OpenWrt layout — its source is the synthetic
+					# "/dev/root" node (not a real /sys/block entry, so
+					# get_disk_meta above can't identify it), so the type is
+					# known outright rather than guessed.
+					[ "$mountpoint" = "/rom" ] && hw_type="SquashFS"
 
 					if [ $FIRST_DF -eq 0 ]; then DF_JSON="$DF_JSON,"; fi
 					json_esc "$hw_model"

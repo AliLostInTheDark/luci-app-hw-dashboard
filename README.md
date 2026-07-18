@@ -93,6 +93,8 @@ The card leads with the rootfs filesystem as a progress bar showing used vs. usa
 
 Root's I/O speed is read from whichever block device actually backs `/overlay` — resolved server-side (UBI block device, loop device, or raw partition, in that order) rather than guessed from the device name. This matters on layouts where the naming convention differs from the typical embedded assumption, e.g. x86 images that boot from and overlay onto a USB/SATA drive.
 
+`/rom` — the read-only squashfs base image every OpenWrt device boots from underneath its writable overlay — gets its own bar, labeled `[SquashFS]`, showing size and percentage used (it's always 100%, being read-only) rather than a meaningless "0 B/s" speed readout. It's excluded from the headline Usable Total/Free figures since it isn't extra capacity — it's the static layer the overlay sits on top of, already accounted for via the root mount.
+
 Below the filesystem bars, a summary section shows hardware-accurate storage sizes. The content is dynamic based on the detected underlying storage type:
 
 | Storage type | Summary rows shown |
