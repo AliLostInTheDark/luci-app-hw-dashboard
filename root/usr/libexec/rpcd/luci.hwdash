@@ -2279,31 +2279,39 @@ EOF_DMESG
 					break
 				done
 
-				# NVMe SMART / health log (requires nvme-cli, optional package)
+				# NVMe SMART / health log (requires smartmontools, optional
+				# package — protocol-universal, so the same tool/shape can
+				# extend to SATA SSD/HDD SMART later without a rewrite).
 				NVME_SMART="null"
-				if [ "$NVME_INFO" != "null" ] && command -v nvme >/dev/null && command -v jsonfilter >/dev/null; then
+				if [ "$NVME_INFO" != "null" ] && command -v smartctl >/dev/null && command -v jsonfilter >/dev/null; then
 					_nvme_ns=$(printf '%s' "$NVME_INFO" | jsonfilter -e '@.dev' 2>/dev/null)
-					_nvme_ctrl=${_nvme_ns%n[0-9]*}
-					if [ -n "$_nvme_ctrl" ] && [ -c "/dev/$_nvme_ctrl" ]; then
-						_nvsm_cache="/tmp/hwdash_nvme_smart_${_nvme_ctrl}"
+					if [ -n "$_nvme_ns" ] && [ -b "/dev/$_nvme_ns" ]; then
+						_nvsm_cache="/tmp/hwdash_nvme_smart_${_nvme_ns}"
 						if _cache_read "$_nvsm_cache"; then
 							[ -n "$C_VAL" ] && NVME_SMART="$C_VAL"
 						else
-							_nv_json=$(nvme smart-log "/dev/$_nvme_ctrl" -o json 2>/dev/null)
+							_nv_json=$(smartctl -a "/dev/$_nvme_ns" -j 2>/dev/null)
 							if [ -n "$_nv_json" ]; then
-								_nv_crit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.critical_warning' 2>/dev/null)
-								_nv_temp=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature' 2>/dev/null)
-								_nv_spare=$(printf '%s' "$_nv_json" | jsonfilter -e '@.avail_spare' 2>/dev/null)
-								_nv_sparethr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.spare_thresh' 2>/dev/null)
-								_nv_used=$(printf '%s' "$_nv_json" | jsonfilter -e '@.percent_used' 2>/dev/null)
-								_nv_dread=$(printf '%s' "$_nv_json" | jsonfilter -e '@.data_units_read' 2>/dev/null)
-								_nv_dwrite=$(printf '%s' "$_nv_json" | jsonfilter -e '@.data_units_written' 2>/dev/null)
-								_nv_poh=$(printf '%s' "$_nv_json" | jsonfilter -e '@.power_on_hours' 2>/dev/null)
-								_nv_pcyc=$(printf '%s' "$_nv_json" | jsonfilter -e '@.power_cycles' 2>/dev/null)
-								_nv_unsafe=$(printf '%s' "$_nv_json" | jsonfilter -e '@.unsafe_shutdowns' 2>/dev/null)
-								_nv_merr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.media_errors' 2>/dev/null)
+								_nv_pass=$(printf '%s' "$_nv_json" | jsonfilter -e '@.smart_status.passed' 2>/dev/null)
+								_nv_tempcur=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.current' 2>/dev/null)
+								_nv_tempwarn=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.op_limit_max' 2>/dev/null)
+								_nv_tempcrit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.critical_limit_max' 2>/dev/null)
+								_nv_crit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.critical_warning' 2>/dev/null)
+								_nv_spare=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.available_spare' 2>/dev/null)
+								_nv_sparethr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.available_spare_threshold' 2>/dev/null)
+								_nv_used=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.percentage_used' 2>/dev/null)
+								_nv_dread=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.data_units_read' 2>/dev/null)
+								_nv_dwrite=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.data_units_written' 2>/dev/null)
+								_nv_poh=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.power_on_hours' 2>/dev/null)
+								_nv_pcyc=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.power_cycles' 2>/dev/null)
+								_nv_unsafe=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.unsafe_shutdowns' 2>/dev/null)
+								_nv_merr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.media_errors' 2>/dev/null)
+								_nv_errlog=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.num_err_log_entries' 2>/dev/null)
+								[ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
+								case "$_nv_tempcur" in ''|*[!0-9]*) _nv_tempcur=0 ;; esac
+								case "$_nv_tempwarn" in ''|*[!0-9]*) _nv_tempwarn=0 ;; esac
+								case "$_nv_tempcrit" in ''|*[!0-9]*) _nv_tempcrit=0 ;; esac
 								case "$_nv_crit" in ''|*[!0-9]*) _nv_crit=0 ;; esac
-								case "$_nv_temp" in ''|*[!0-9]*) _nv_temp=0 ;; esac
 								case "$_nv_spare" in ''|*[!0-9]*) _nv_spare=0 ;; esac
 								case "$_nv_sparethr" in ''|*[!0-9]*) _nv_sparethr=0 ;; esac
 								case "$_nv_used" in ''|*[!0-9]*) _nv_used=0 ;; esac
@@ -2313,7 +2321,8 @@ EOF_DMESG
 								case "$_nv_pcyc" in ''|*[!0-9]*) _nv_pcyc=0 ;; esac
 								case "$_nv_unsafe" in ''|*[!0-9]*) _nv_unsafe=0 ;; esac
 								case "$_nv_merr" in ''|*[!0-9]*) _nv_merr=0 ;; esac
-								NVME_SMART="{\"critical_warning\":$_nv_crit,\"temp_k\":$_nv_temp,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr}"
+								case "$_nv_errlog" in ''|*[!0-9]*) _nv_errlog=0 ;; esac
+								NVME_SMART="{\"passed\":$_nv_pass,\"temp_c\":$_nv_tempcur,\"temp_warn\":$_nv_tempwarn,\"temp_crit\":$_nv_tempcrit,\"critical_warning\":$_nv_crit,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr,\"err_log_entries\":$_nv_errlog}"
 							fi
 							_cache_write "$_nvsm_cache" 30 "$NVME_SMART"
 						fi

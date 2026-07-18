@@ -2053,10 +2053,14 @@ return view.extend({
                         var sm = res.nvme_smart;
                         var nvBadge = '';
                         if (sm) {
-                            var nvOk = sm.critical_warning === 0 && sm.percent_used < 90 && sm.media_errors === 0;
-                            var nvWarn = !nvOk && sm.critical_warning === 0 && sm.percent_used < 100 && sm.media_errors === 0;
-                            var nvColor = nvOk ? '#00bcd4' : nvWarn ? '#ffb300' : '#ff1744';
-                            var nvLbl = nvOk ? 'Healthy' : nvWarn ? 'Warning' : 'Critical';
+                            // sm.passed is the drive firmware's own SMART
+                            // overall-health verdict (smartctl -H) — the
+                            // authoritative "Critical" signal. "Warning" is
+                            // our own judgment call for things trending bad
+                            // but not yet a firmware-flagged failure.
+                            var nvWarn = sm.critical_warning > 0 || sm.media_errors > 0 || sm.percent_used >= 90;
+                            var nvColor = !sm.passed ? '#ff1744' : nvWarn ? '#ffb300' : '#00bcd4';
+                            var nvLbl = !sm.passed ? 'Critical' : nvWarn ? 'Warning' : 'Healthy';
                             nvBadge = E('span', {style: 'padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color:' + nvColor + '; background:' + nvColor + '22;'}, nvLbl);
                         }
                         var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), nvBadge);
@@ -2068,10 +2072,14 @@ return view.extend({
                             nvBox.appendChild(makeBar2('Wear (Percentage Used)', Math.min(sm.percent_used, 100), sm.percent_used + '%', wearColor));
                             var spareColor = sm.avail_spare <= sm.spare_thresh ? '#ff1744' : sm.avail_spare <= sm.spare_thresh + 10 ? '#ffb300' : '#00bcd4';
                             nvBox.appendChild(makeBar2('Available Spare', sm.avail_spare, sm.avail_spare + '% (threshold ' + sm.spare_thresh + '%)', spareColor));
-                            if (sm.temp_k > 0) {
-                                var tempC = Math.round(sm.temp_k - 273.15);
-                                var tempColor = tempC >= 80 ? '#ff1744' : tempC >= 70 ? '#ffb300' : null;
-                                nvBox.appendChild(makeRow('Temperature', tempC + ' °C', tempColor));
+                            if (sm.temp_c > 0) {
+                                // Real per-drive thresholds when reported, falling
+                                // back to conservative generic guesses otherwise.
+                                var tWarn = sm.temp_warn > 0 ? sm.temp_warn : 70;
+                                var tCrit = sm.temp_crit > 0 ? sm.temp_crit : 80;
+                                var tempColor = sm.temp_c >= tCrit ? '#ff1744' : sm.temp_c >= tWarn ? '#ffb300' : null;
+                                var tempThreshStr = sm.temp_warn > 0 ? ' (warn ' + sm.temp_warn + '°C / crit ' + sm.temp_crit + '°C)' : '';
+                                nvBox.appendChild(makeRow('Temperature', sm.temp_c + ' °C' + tempThreshStr, tempColor));
                             }
                             if (sm.power_on_hours > 0) {
                                 var poDays = Math.floor(sm.power_on_hours / 24);
@@ -2080,6 +2088,7 @@ return view.extend({
                             nvBox.appendChild(makeRow('Power Cycles', sm.power_cycles.toLocaleString(), null));
                             nvBox.appendChild(makeRow('Unsafe Shutdowns', sm.unsafe_shutdowns.toLocaleString(), sm.unsafe_shutdowns > 0 ? '#ffb300' : null));
                             nvBox.appendChild(makeRow('Media Errors', sm.media_errors.toLocaleString(), sm.media_errors > 0 ? '#ff1744' : null));
+                            if (sm.err_log_entries > 0) nvBox.appendChild(makeRow('Error Log Entries', sm.err_log_entries.toLocaleString(), '#ffb300'));
                             var dataRead = fmtBytesS(sm.data_units_read * 512000);
                             var dataWritten = fmtBytesS(sm.data_units_written * 512000);
                             nvBox.appendChild(makeRow('Data Read / Written', dataRead + ' / ' + dataWritten, null, true));
