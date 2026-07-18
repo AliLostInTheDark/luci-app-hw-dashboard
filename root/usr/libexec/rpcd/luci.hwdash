@@ -775,7 +775,7 @@ EOF
 
 					if [ $FIRST_DF -eq 0 ]; then DF_JSON="$DF_JSON,"; fi
 					json_esc "$hw_model"
-					DF_JSON="$DF_JSON{\"fs\":\"$fs\",\"mount\":\"$mountpoint\",\"total\":$blocks,\"used\":$used,\"avail\":$avail,\"pct\":\"$pct\",\"dev\":\"$devname\",\"hw_type\":\"$hw_type\",\"hw_size\":$hw_size,\"hw_model\":\"$JSV\"}"
+					DF_JSON="$DF_JSON{\"fs\":\"$fs\",\"mount\":\"$mountpoint\",\"total\":$blocks,\"used\":$used,\"avail\":$avail,\"pct\":\"$pct\",\"dev\":\"$devname\",\"iodev\":\"$realdev\",\"hw_type\":\"$hw_type\",\"hw_size\":$hw_size,\"hw_model\":\"$JSV\"}"
 					FIRST_DF=0
 				done <<EOF
 $(df -k 2>/dev/null | tail -n +2)

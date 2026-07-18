@@ -11,7 +11,7 @@ The dashboard is designed to be genuinely informative rather than decorative. It
 Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.1.8-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-1.1.9-r1.apk
 ```
 
 The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
@@ -88,6 +88,8 @@ Static system identity collected once and persisted:
 ### Internal Storage
 
 The card leads with the rootfs filesystem as a progress bar showing used vs. usable space, with read/write I/O speed for disk-backed filesystems and percentage utilization for NAND/flash. Additional mounted filesystems appear as separate bars.
+
+Root's I/O speed is read from whichever block device actually backs `/overlay` — resolved server-side (UBI block device, loop device, or raw partition, in that order) rather than guessed from the device name. This matters on layouts where the naming convention differs from the typical embedded assumption, e.g. x86 images that boot from and overlay onto a USB/SATA drive.
 
 Below the filesystem bars, a summary section shows hardware-accurate storage sizes. The content is dynamic based on the detected underlying storage type:
 

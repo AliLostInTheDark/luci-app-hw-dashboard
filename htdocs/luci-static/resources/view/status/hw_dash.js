@@ -1635,7 +1635,17 @@ return view.extend({
                         var writeSpeed = 0;
                         var rIops = 0;
                         var wIops = 0;
-                        if (fs.mount === '/') {
+                        if (fs.mount === '/' && fs.iodev && res.diskstats && res.diskstats[fs.iodev]) {
+                            var stat = res.diskstats[fs.iodev];
+                            if (self.prevDisk[fs.iodev]) {
+                                var prev = self.prevDisk[fs.iodev];
+                                readSpeed = (stat.r - prev.r) * 512;
+                                writeSpeed = (stat.w - prev.w) * 512;
+                                rIops = (stat.r_io - prev.r_io);
+                                wIops = (stat.w_io - prev.w_io);
+                            }
+                            self.prevDisk[fs.iodev] = stat;
+                        } else if (fs.mount === '/') {
                             var intRead = 0,
                                 intWrite = 0,
                                 intR_io = 0,
