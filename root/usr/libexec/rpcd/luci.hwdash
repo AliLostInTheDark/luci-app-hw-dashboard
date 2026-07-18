@@ -846,6 +846,21 @@ EOF
 								fi
 							done < /proc/mounts
 						fi
+						# No squashfs+overlay split — root itself is the
+						# writable filesystem (plain ext4/f2fs/etc. image,
+						# e.g. an x86 NVMe/SSD install) and /dev/root often
+						# isn't even a real devnode. Resolve via the mount's
+						# major:minor from mountinfo instead of guessing a
+						# name — same diskstats cross-reference technique
+						# already used for /rom's synthetic /dev/root above.
+						if [ -z "$realdev" ] && [ -f /proc/self/mountinfo ]; then
+							_root_mm=$(awk '$5=="/" {print $3; exit}' /proc/self/mountinfo 2>/dev/null)
+							if [ -n "$_root_mm" ]; then
+								_root_maj=${_root_mm%%:*}
+								_root_min=${_root_mm#*:}
+								realdev=$(awk -v maj="$_root_maj" -v min="$_root_min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
+							fi
+						fi
 					fi
 
 					if [ -b "$fs" ] || [ -c "$fs" ]; then
@@ -1643,6 +1658,26 @@ EOF
 "
 				done
 
+				# Real device + fs type backing "/" — /proc/mounts lists root's
+				# source as the synthetic "/dev/root" alias, not the real
+				# partition name, so the per-device /proc/mounts match below
+				# can never find it on its own (same aliasing issue already
+				# resolved for the df loop's iodev, via the same mountinfo
+				# major:minor technique). Without this, the partition that IS
+				# root shows up in External Storage as unmounted with no
+				# detected filesystem.
+				ROOT_REALDEV=""
+				ROOT_FSTYPE=""
+				if [ -f /proc/self/mountinfo ]; then
+					_root_mm=$(awk '$5=="/" {print $3; exit}' /proc/self/mountinfo 2>/dev/null)
+					ROOT_FSTYPE=$(awk '$5=="/" {for(i=6;i<=NF;i++) if($i=="-") {print $(i+1); exit}}' /proc/self/mountinfo 2>/dev/null)
+					if [ -n "$_root_mm" ]; then
+						_root_maj=${_root_mm%%:*}
+						_root_min=${_root_mm#*:}
+						ROOT_REALDEV=$(awk -v maj="$_root_maj" -v min="$_root_min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
+					fi
+				fi
+
 				BLOCK_DEVS="["
 				FIRST_BDEV=1
 				for dev in /sys/class/block/*; do
@@ -1717,6 +1752,10 @@ EOF
 							break
 						fi
 					done < /proc/mounts
+					if [ -z "$mount_point" ] && [ -n "$ROOT_REALDEV" ] && [ "$devname" = "$ROOT_REALDEV" ]; then
+						mount_point="/"
+						fs_type="$ROOT_FSTYPE"
+					fi
 					if [ -z "$fs_type" ]; then
 						# A device's fs type only changes on reformat — 10 min TTL
 						# is still conservative, and /tmp clears it on reboot.
@@ -2240,6 +2279,47 @@ EOF_DMESG
 					break
 				done
 
+				# NVMe SMART / health log (requires nvme-cli, optional package)
+				NVME_SMART="null"
+				if [ "$NVME_INFO" != "null" ] && command -v nvme >/dev/null && command -v jsonfilter >/dev/null; then
+					_nvme_ns=$(printf '%s' "$NVME_INFO" | jsonfilter -e '@.dev' 2>/dev/null)
+					_nvme_ctrl=${_nvme_ns%n[0-9]*}
+					if [ -n "$_nvme_ctrl" ] && [ -c "/dev/$_nvme_ctrl" ]; then
+						_nvsm_cache="/tmp/hwdash_nvme_smart_${_nvme_ctrl}"
+						if _cache_read "$_nvsm_cache"; then
+							[ -n "$C_VAL" ] && NVME_SMART="$C_VAL"
+						else
+							_nv_json=$(nvme smart-log "/dev/$_nvme_ctrl" -o json 2>/dev/null)
+							if [ -n "$_nv_json" ]; then
+								_nv_crit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.critical_warning' 2>/dev/null)
+								_nv_temp=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature' 2>/dev/null)
+								_nv_spare=$(printf '%s' "$_nv_json" | jsonfilter -e '@.avail_spare' 2>/dev/null)
+								_nv_sparethr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.spare_thresh' 2>/dev/null)
+								_nv_used=$(printf '%s' "$_nv_json" | jsonfilter -e '@.percent_used' 2>/dev/null)
+								_nv_dread=$(printf '%s' "$_nv_json" | jsonfilter -e '@.data_units_read' 2>/dev/null)
+								_nv_dwrite=$(printf '%s' "$_nv_json" | jsonfilter -e '@.data_units_written' 2>/dev/null)
+								_nv_poh=$(printf '%s' "$_nv_json" | jsonfilter -e '@.power_on_hours' 2>/dev/null)
+								_nv_pcyc=$(printf '%s' "$_nv_json" | jsonfilter -e '@.power_cycles' 2>/dev/null)
+								_nv_unsafe=$(printf '%s' "$_nv_json" | jsonfilter -e '@.unsafe_shutdowns' 2>/dev/null)
+								_nv_merr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.media_errors' 2>/dev/null)
+								case "$_nv_crit" in ''|*[!0-9]*) _nv_crit=0 ;; esac
+								case "$_nv_temp" in ''|*[!0-9]*) _nv_temp=0 ;; esac
+								case "$_nv_spare" in ''|*[!0-9]*) _nv_spare=0 ;; esac
+								case "$_nv_sparethr" in ''|*[!0-9]*) _nv_sparethr=0 ;; esac
+								case "$_nv_used" in ''|*[!0-9]*) _nv_used=0 ;; esac
+								case "$_nv_dread" in ''|*[!0-9]*) _nv_dread=0 ;; esac
+								case "$_nv_dwrite" in ''|*[!0-9]*) _nv_dwrite=0 ;; esac
+								case "$_nv_poh" in ''|*[!0-9]*) _nv_poh=0 ;; esac
+								case "$_nv_pcyc" in ''|*[!0-9]*) _nv_pcyc=0 ;; esac
+								case "$_nv_unsafe" in ''|*[!0-9]*) _nv_unsafe=0 ;; esac
+								case "$_nv_merr" in ''|*[!0-9]*) _nv_merr=0 ;; esac
+								NVME_SMART="{\"critical_warning\":$_nv_crit,\"temp_k\":$_nv_temp,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr}"
+							fi
+							_cache_write "$_nvsm_cache" 30 "$NVME_SMART"
+						fi
+					fi
+				fi
+
 				# f2fs filesystem stats
 				F2FS_INFO="["
 				FF=1
@@ -2349,7 +2429,7 @@ EOF_DMESG
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

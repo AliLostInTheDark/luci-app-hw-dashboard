@@ -1752,14 +1752,24 @@ return view.extend({
                         var wIops = 0;
                         if (fs.mount === '/' && fs.iodev && res.diskstats && res.diskstats[fs.iodev]) {
                             var stat = res.diskstats[fs.iodev];
-                            if (self.prevDisk[fs.iodev]) {
-                                var prev = self.prevDisk[fs.iodev];
+                            // Namespaced "df:" key: res.diskstats entries (raw
+                            // sector deltas, {r,w,r_io,w_io}) and getStats()'s
+                            // res.block_devs entries ({read,write,...,time})
+                            // can share the same bare device name (e.g. a
+                            // direct-partition x86 NVMe root also appears as
+                            // its own External Storage row) — an unprefixed
+                            // shared key lets whichever ran last in a tick
+                            // clobber the other's cache with an incompatible
+                            // shape, producing NaN speeds.
+                            var _dpKey = 'df:' + fs.iodev;
+                            if (self.prevDisk[_dpKey]) {
+                                var prev = self.prevDisk[_dpKey];
                                 readSpeed = (stat.r - prev.r) * 512;
                                 writeSpeed = (stat.w - prev.w) * 512;
                                 rIops = (stat.r_io - prev.r_io);
                                 wIops = (stat.w_io - prev.w_io);
                             }
-                            self.prevDisk[fs.iodev] = stat;
+                            self.prevDisk[_dpKey] = stat;
                         } else if (fs.mount === '/') {
                             var intRead = 0,
                                 intWrite = 0,
@@ -1768,14 +1778,15 @@ return view.extend({
                             for (var k in res.diskstats) {
                                 if (!k.match(/^(loop|ram|sda|sdb|sdc)/)) {
                                     var stat = res.diskstats[k];
-                                    if (self.prevDisk[k]) {
-                                        var prev = self.prevDisk[k];
+                                    var _dpKeyK = 'df:' + k;
+                                    if (self.prevDisk[_dpKeyK]) {
+                                        var prev = self.prevDisk[_dpKeyK];
                                         intRead += (stat.r - prev.r) * 512;
                                         intWrite += (stat.w - prev.w) * 512;
                                         intR_io += (stat.r_io - prev.r_io);
                                         intW_io += (stat.w_io - prev.w_io);
                                     }
-                                    self.prevDisk[k] = stat;
+                                    self.prevDisk[_dpKeyK] = stat;
                                 }
                             }
                             readSpeed = intRead;
@@ -1784,14 +1795,15 @@ return view.extend({
                             wIops = intW_io;
                         } else if (res.diskstats && res.diskstats[fs.dev]) {
                             var stat = res.diskstats[fs.dev];
-                            if (self.prevDisk[fs.dev]) {
-                                var prev = self.prevDisk[fs.dev];
+                            var _dpKeyD = 'df:' + fs.dev;
+                            if (self.prevDisk[_dpKeyD]) {
+                                var prev = self.prevDisk[_dpKeyD];
                                 readSpeed = (stat.r - prev.r) * 512;
                                 writeSpeed = (stat.w - prev.w) * 512;
                                 rIops = (stat.r_io - prev.r_io);
                                 wIops = (stat.w_io - prev.w_io);
                             }
-                            self.prevDisk[fs.dev] = stat;
+                            self.prevDisk[_dpKeyD] = stat;
                         }
                         var usedPctStr = fs.pct;
                         var pctNum = parseInt(usedPctStr) || 0;
@@ -1902,7 +1914,7 @@ return view.extend({
                     var extraNode = document.getElementById('hw-int-storage-extra');
                     if (!extraNode) return;
                     var _ovS = res.sys_info || {};
-                    var extraSig = JSON.stringify([res.ubi_devs, res.mtd_parts, res.emmc_info, res.nvme_info, res.squashfs_info, res.f2fs_info, _ovS.overlay_total, _ovS.overlay_used, _ovS.overlay_free, res.ecc_base_date]);
+                    var extraSig = JSON.stringify([res.ubi_devs, res.mtd_parts, res.emmc_info, res.nvme_info, res.nvme_smart, res.squashfs_info, res.f2fs_info, _ovS.overlay_total, _ovS.overlay_used, _ovS.overlay_free, res.ecc_base_date]);
                     if (!sigGate(self._sig, 'extra', extraSig)) return;
                     extraNode.innerHTML = '';
                     var hasUbi = res.ubi_devs && res.ubi_devs.length > 0;
@@ -2038,10 +2050,50 @@ return view.extend({
                         if (hasUbi || hasMtd || hasEmmc) extraNode.appendChild(hRule());
                         extraNode.appendChild(secH('NVMe Details'));
                         var nv = res.nvme_info;
-                        var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), '');
+                        var sm = res.nvme_smart;
+                        var nvBadge = '';
+                        if (sm) {
+                            var nvOk = sm.critical_warning === 0 && sm.percent_used < 90 && sm.media_errors === 0;
+                            var nvWarn = !nvOk && sm.critical_warning === 0 && sm.percent_used < 100 && sm.media_errors === 0;
+                            var nvColor = nvOk ? '#00bcd4' : nvWarn ? '#ffb300' : '#ff1744';
+                            var nvLbl = nvOk ? 'Healthy' : nvWarn ? 'Warning' : 'Critical';
+                            nvBadge = E('span', {style: 'padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color:' + nvColor + '; background:' + nvColor + '22;'}, nvLbl);
+                        }
+                        var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), nvBadge);
                         if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
                         if (nv.fw) nvBox.appendChild(makeRow('Firmware', nv.fw, null));
                         if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
+                        if (sm) {
+                            var wearColor = sm.percent_used >= 100 ? '#ff1744' : sm.percent_used >= 90 ? '#ffb300' : '#00bcd4';
+                            nvBox.appendChild(makeBar2('Wear (Percentage Used)', Math.min(sm.percent_used, 100), sm.percent_used + '%', wearColor));
+                            var spareColor = sm.avail_spare <= sm.spare_thresh ? '#ff1744' : sm.avail_spare <= sm.spare_thresh + 10 ? '#ffb300' : '#00bcd4';
+                            nvBox.appendChild(makeBar2('Available Spare', sm.avail_spare, sm.avail_spare + '% (threshold ' + sm.spare_thresh + '%)', spareColor));
+                            if (sm.temp_k > 0) {
+                                var tempC = Math.round(sm.temp_k - 273.15);
+                                var tempColor = tempC >= 80 ? '#ff1744' : tempC >= 70 ? '#ffb300' : null;
+                                nvBox.appendChild(makeRow('Temperature', tempC + ' °C', tempColor));
+                            }
+                            if (sm.power_on_hours > 0) {
+                                var poDays = Math.floor(sm.power_on_hours / 24);
+                                nvBox.appendChild(makeRow('Power-On Hours', sm.power_on_hours.toLocaleString() + ' h (≈' + poDays + ' days)', null));
+                            }
+                            nvBox.appendChild(makeRow('Power Cycles', sm.power_cycles.toLocaleString(), null));
+                            nvBox.appendChild(makeRow('Unsafe Shutdowns', sm.unsafe_shutdowns.toLocaleString(), sm.unsafe_shutdowns > 0 ? '#ffb300' : null));
+                            nvBox.appendChild(makeRow('Media Errors', sm.media_errors.toLocaleString(), sm.media_errors > 0 ? '#ff1744' : null));
+                            var dataRead = fmtBytesS(sm.data_units_read * 512000);
+                            var dataWritten = fmtBytesS(sm.data_units_written * 512000);
+                            nvBox.appendChild(makeRow('Data Read / Written', dataRead + ' / ' + dataWritten, null, true));
+                            if (sm.critical_warning > 0) {
+                                var cw = sm.critical_warning;
+                                var cwFlags = [];
+                                if (cw & 0x01) cwFlags.push('Spare below threshold');
+                                if (cw & 0x02) cwFlags.push('Temperature threshold');
+                                if (cw & 0x04) cwFlags.push('Reliability degraded');
+                                if (cw & 0x08) cwFlags.push('Media read-only');
+                                if (cw & 0x10) cwFlags.push('Backup device failed');
+                                nvBox.appendChild(makeRow('Critical Warning', cwFlags.length ? cwFlags.join(', ') : ('flags 0x' + cw.toString(16)), '#ff1744', true));
+                            }
+                        }
                         extraNode.appendChild(nvBox);
                     }
                     if (hasSquashfs) {
