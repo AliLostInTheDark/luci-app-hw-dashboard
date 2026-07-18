@@ -70,6 +70,7 @@ The advanced CPU panel (shown alongside) breaks down aggregate time into: Idle, 
 An SVG arc dial shows RAM utilization. The stats list includes:
 
 - Physical Total (rounded up to the nearest standard DRAM size: 32 MB through 64 GB)
+- Memory Speed (e.g. "DDR4 2133 MT/s") — decoded from SMBIOS via the optional `dmidecode` package. Not installed by default (pointless on embedded boards with no DMI tables at all), so this row is simply absent unless `dmidecode` is installed separately; the value is genuinely static hardware data, cached for a day rather than re-decoded every poll
 - Usable Total (as reported by the kernel)
 - Used, Free, Cached, Buffers — each with a proportional progress bar
 - Swap — shown only when a swap partition or file is active
@@ -119,6 +120,10 @@ Below the filesystem bars, a summary section shows hardware-accurate storage siz
 
 USB mass storage devices are detected by scanning block devices for the `removable` flag. Each partition shows its **Format** (detected filesystem type, or `—` when none is detected) and **Mounted** state (the mountpoint, or `No`) as two separate rows — a partition with no recognized filesystem is not the same thing as one that's unmounted, and the two used to be conflated into a single misleading "Unmounted" label.
 
+Sizes are formatted dynamically (B / KB / MB / GB) based on magnitude rather than always rendering in GB, so a small partition doesn't show a meaningless "0.00 GB".
+
+Some platforms carve out a raw partition purely as a loop device's backing store — e.g. x86 images that loop-mount a partition directly to host the f2fs `/overlay`, so the partition itself never has a filesystem of its own. The backend correlates this via `/sys/class/block/loopN/loop/backing_file`, and the dashboard shows the real relationship ("f2fs (via loop0)" / "/overlay (via loop0)") instead of a bare, unexplained dash.
+
 ### Power & Fans
 
 Voltage, current, fan and power rails from generic `hwmon` channels (present on boards with a PMIC or Super I/O chip) are shown here when available. On x86 targets with an Intel CPU, package/core/DRAM power draw is additionally read from `/sys/class/powercap/intel-rapl*` (RAPL) — the backend reports the raw cumulative energy counter each poll, and the frontend derives instantaneous Watts from the delta between polls, the same client-side pattern used for disk I/O speed. The card is hidden entirely when neither source has anything to report (most embedded routers have no fan or power telemetry at all).
@@ -133,7 +138,7 @@ Each sensor row carries an inline sparkline of the last ~60 samples, kept client
 
 Ethernet and USB share one card. Each physical ethernet interface shows link speed and duplex, live throughput from byte-counter deltas, RX/TX error and drop counters, MAC address, MTU, and the carrier-change counter (highlighted amber when the port flapped after its initial link-up). When `ethtool` is installed, a PHY row adds auto-negotiation state, the **negotiated** flow-control result (often different from the configured one), and EEE status — amber when EEE is actively idling the link, since that causes latency on some PHYs.
 
-The USB section lists host controllers and connected devices by name, negotiated speed (USB 2.0 / 3.0 / 3.2) and protocol version.
+The USB section lists host controllers (root hubs, e.g. "xHCI Host Controller") together with connected peripheral devices, each by name, negotiated speed (USB 2.0 / 3.0 / 3.2) and protocol version — both come straight from a live `/sys/bus/usb/devices/` scan, not a hardcoded per-board guess, so the section reflects exactly what the kernel currently sees and is empty (rather than showing a stale claim) on boards with no USB sysfs entries at all.
 
 ### PCI-e Topology
 

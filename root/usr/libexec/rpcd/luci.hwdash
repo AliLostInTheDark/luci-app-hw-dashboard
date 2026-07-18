@@ -1137,6 +1137,47 @@ EOF
 				done
 				RAPL="$RAPL]"
 
+				# DDR speed: only obtainable by decoding SMBIOS/DMI tables, which
+				# needs the optional `dmidecode` package (not installed by
+				# default, and pointless on embedded boards with no DMI tables
+				# at all — so this is a soft runtime check, never a hard
+				# dependency of this package). Genuinely static hardware data,
+				# so it's cached for a full day rather than the usual few
+				# seconds, same as the other slow/never-changing lookups.
+				MEM_SPEED_LINE=""
+				if command -v dmidecode >/dev/null; then
+					_ddr_cache="/tmp/hwdash_ddr_speed"
+					if _cache_read "$_ddr_cache"; then
+						MEM_SPEED_LINE=$C_VAL
+					else
+						_dd_type=""
+						while IFS= read -r _dl; do
+							trim_ws _dl
+							case "$_dl" in
+								"Type:"*)
+									_dd_type=${_dl#Type: }
+									;;
+								"Configured Memory Speed:"*)
+									_dd_speed=${_dl#Configured Memory Speed: }
+									case "$_dd_speed" in
+										Unknown*|"") ;;
+										*)
+											if [ -z "$MEM_SPEED_LINE" ]; then
+												MEM_SPEED_LINE="$_dd_type $_dd_speed"
+											fi
+											;;
+									esac
+									;;
+							esac
+						done <<EOF_DMI
+$(dmidecode -t memory 2>/dev/null)
+EOF_DMI
+						_cache_write "$_ddr_cache" 86400 "$MEM_SPEED_LINE"
+					fi
+				fi
+				json_esc "$MEM_SPEED_LINE"; MEM_SPEED_JSON="\"$JSV\""
+				[ -z "$MEM_SPEED_LINE" ] && MEM_SPEED_JSON="null"
+
 				# LOGICAL_CPUS / PHYSICAL_CORES / MAX_FREQ_KHZ are resolved once and
 				# cached together with the board identity above (hw_identity_v1.sh).
 
@@ -1569,6 +1610,33 @@ EOF
 					esac
 				done < /proc/net/dev
 
+				# Correlate raw partitions that back an active loop device (e.g.
+				# x86 images that carve out a raw partition for the f2fs
+				# overlay and loop-mount it directly, with no filesystem of
+				# its own on the partition itself) so the frontend can explain
+				# *why* a sizeable partition shows no format/mount instead of
+				# just a bare dash. One line per match: "<backing-devname>
+				# <loopdev> <fs> <mountpoint>". Small, fixed-size loop; a
+				# handful of iterations at most.
+				LOOP_BACKING=""
+				for _lp in /sys/class/block/loop*; do
+					[ -f "$_lp/loop/backing_file" ] || continue
+					_lpname=${_lp##*/}
+					read_file _lpback "$_lp/loop/backing_file" ""
+					[ -z "$_lpback" ] && continue
+					_lpback=${_lpback##*/}
+					_lpfs=""; _lpmnt=""
+					while read -r _mdev _mp _mfs _; do
+						if [ "$_mdev" = "/dev/$_lpname" ]; then
+							_lpfs=$_mfs; _lpmnt=$_mp
+							break
+						fi
+					done < /proc/mounts
+					[ -z "$_lpmnt" ] && continue
+					LOOP_BACKING="$LOOP_BACKING$_lpback $_lpname $_lpfs $_lpmnt
+"
+				done
+
 				BLOCK_DEVS="["
 				FIRST_BDEV=1
 				for dev in /sys/class/block/*; do
@@ -1655,15 +1723,28 @@ EOF
 						fi
 					fi
 					[ -z "$fs_type" ] && fs_type="Unknown"
-					
+
 					# Trim + escape without the unconditional per-device sed fork.
 					trim_ws model
 					json_esc "$model"
 					model=$JSV
 					[ -z "$model" ] && model="Storage Device"
-					
+
+					loop_of=""; loop_fs=""; loop_mount=""
+					if [ -n "$LOOP_BACKING" ]; then
+						while read -r _lb_dev _lb_loop _lb_fs _lb_mnt; do
+							[ "$_lb_dev" = "$devname" ] || continue
+							loop_of=$_lb_loop; loop_fs=$_lb_fs; loop_mount=$_lb_mnt
+							break
+						done <<EOF
+$LOOP_BACKING
+EOF
+					fi
+					json_esc "$loop_fs"; loop_fs=$JSV
+					json_esc "$loop_mount"; loop_mount=$JSV
+
 					if [ $FIRST_BDEV -eq 0 ]; then BLOCK_DEVS="$BLOCK_DEVS,"; fi
-					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\"}"
+					BLOCK_DEVS="$BLOCK_DEVS{\"dev\":\"$devname\",\"model\":\"$model\",\"type\":\"$dtype\",\"size\":\"$size_bytes\",\"read\":\"$read_bytes\",\"write\":\"$write_bytes\",\"read_ios\":\"$read_ios\",\"write_ios\":\"$write_ios\",\"fs\":\"$fs_type\",\"mount\":\"$mount_point\",\"removable\":\"$removable\",\"loop_of\":\"$loop_of\",\"loop_fs\":\"$loop_fs\",\"loop_mount\":\"$loop_mount\"}"
 					FIRST_BDEV=0
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
@@ -2205,7 +2286,7 @@ EOF
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"nvme_info\":$NVME_INFO, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

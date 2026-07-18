@@ -1530,17 +1530,14 @@ return view.extend({
                             var colorCore = getDynColor(pct);
                             var ce = self._coreEls[coreIdx];
                             if (!ce) {
-                                var ceVal = E('span', { class: 'hw-stat-value' });
+                                var ceLabel = E('div', { style: 'font-size: 0.8em; opacity: 0.7; letter-spacing: 0.5px; margin-bottom: 4px;' }, coreName);
+                                var ceVal = E('div', { class: 'hw-stat-value', style: 'font-size: 0.9em; white-space: nowrap;' });
                                 var ceFill = E('div', { class: 'hw-bar-fill' });
                                 coresNode.appendChild(E('div', {
                                     class: 'hw-core-cell'
                                 }, [E('div', {
                                     class: 'hw-progress-item', style: 'margin-bottom: 0;'
-                                }, [E('div', {
-                                    class: 'hw-progress-header'
-                                }, [E('span', {
-                                    class: 'hw-stat-label'
-                                }, coreName), ceVal]), E('div', {
+                                }, [ceLabel, ceVal, E('div', {
                                     class: 'hw-bar-bg'
                                 }, [ceFill])])]));
                                 ce = self._coreEls[coreIdx] = { val: ceVal, fill: ceFill };
@@ -1651,6 +1648,7 @@ return view.extend({
                     var ramStats = document.getElementById('stats-ram');
                     var ramRows = [];
                     ramRows.push({ k: 'phys', type: 'stat', mb: '5px', label: 'Physical Total', val: (physRamKB / 1024).toFixed(0) + ' MB' });
+                    if (mem.speed) ramRows.push({ k: 'speed', type: 'stat', mb: '5px', label: 'Memory Speed', val: mem.speed });
                     ramRows.push({ k: 'usable', type: 'stat', mb: '15px', label: 'Usable Total', val: (mem.total / 1024).toFixed(0) + ' MB' });
                     var addMemBarRow = function(k, label, valueMb, totalMb) {
                         var pct = totalMb > 0 ? (valueMb / totalMb) * 100 : 0;
@@ -2169,7 +2167,7 @@ return view.extend({
                                 cardData.cols.forEach(function(colData, colIdx) {
                                     colData.items.forEach(function(grp) {
                                         var main = grp.main;
-                                        var sz = main.size ? (parseInt(main.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : 'Unknown';
+                                        var sz = main.size ? fmtBytesS(parseInt(main.size)) : 'Unknown';
                                         var isUsb = main.removable === '1' || main.type === 'USB';
                                         var displayType = isUsb ? 'USB' : main.type;
                                         var mStats = statsByDev[main.dev];
@@ -2211,9 +2209,15 @@ return view.extend({
                                                 style: 'margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color, rgba(128,128,128,0.3));'
                                             });
                                             grp.parts.forEach(function(part) {
-                                                var psz = part.size ? (parseInt(part.size) / (1024 * 1024 * 1024)).toFixed(2) + ' GB' : '';
+                                                var psz = part.size ? fmtBytesS(parseInt(part.size)) : '';
                                                 var formatStr = (part.fs && part.fs !== 'Unknown') ? part.fs : '—';
                                                 var mountedStr = part.mount ? part.mount : 'No';
+                                                if (!part.fs || part.fs === 'Unknown') {
+                                                    if (part.loop_of) {
+                                                        formatStr = part.loop_fs ? part.loop_fs + ' (via ' + part.loop_of + ')' : 'raw (via ' + part.loop_of + ')';
+                                                        mountedStr = part.loop_mount ? part.loop_mount + ' (via ' + part.loop_of + ')' : mountedStr;
+                                                    }
+                                                }
                                                 var pStats = statsByDev[part.dev];
                                                 var pSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(pStats.rSpeed) + ' / W: ' + fmtSpeedExt(pStats.wSpeed));
                                                 var pIopsSpan = E('span', {}, 'R: ' + Math.round(pStats.rIops) + ' / W: ' + Math.round(pStats.wIops));
@@ -2264,6 +2268,10 @@ return view.extend({
                                         } else {
                                             var mFormatStr = (main.fs && main.fs !== 'Unknown') ? main.fs : '—';
                                             var mMountedStr = main.mount ? main.mount : 'No';
+                                            if ((!main.fs || main.fs === 'Unknown') && main.loop_of) {
+                                                mFormatStr = main.loop_fs ? main.loop_fs + ' (via ' + main.loop_of + ')' : 'raw (via ' + main.loop_of + ')';
+                                                mMountedStr = main.loop_mount ? main.loop_mount + ' (via ' + main.loop_of + ')' : mMountedStr;
+                                            }
                                             var mSpeedSpan = E('span', {}, 'R: ' + fmtSpeedExt(mStats.rSpeed) + ' / W: ' + fmtSpeedExt(mStats.wSpeed));
                                             var mIopsSpan = E('span', {}, 'R: ' + Math.round(mStats.rIops) + ' / W: ' + Math.round(mStats.wIops));
                                             var footer = E('div', {
@@ -2357,7 +2365,6 @@ return view.extend({
                         var name = t.type.replace(/_/g, '-').toUpperCase();
                         if (seenSensors[name]) return;
                         seenSensors[name] = true;
-                        if (name.length > 20) name = name.substring(0, 20);
                         var crit = t.crit && t.crit !== 'null' ? parseInt(t.crit) : null;
                         var pass = t.pass && t.pass !== 'null' ? parseInt(t.pass) : null;
                         if (crit && crit > 1000) crit = crit / 1000;
@@ -2474,12 +2481,11 @@ return view.extend({
                     validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
                 var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
-                var boardId = res.board || '';
-                var hwPortStr = '';
-                if (/JIDU6[J0-9]11/.test(boardId)) hwPortStr = 'USB 3.0 (1 Physical Port)';
-                else if (/JIDU6[J0-9]01/.test(boardId)) hwPortStr = 'USB 2.0 (1 Physical Port)';
-                else if (boardId.indexOf('JIDU6700') !== -1) hwPortStr = 'USB 2.0 (1 Physical Port)';
-                var hasUsb = hwPortStr !== '' || usbDevs.length > 0;
+                var usbControllers = (res.usb_ports || []).map(function(p) {
+                    return { name: p.product || 'USB Host Controller', speed: p.speed, version: '', max_power: '' };
+                });
+                var usbAll = usbControllers.concat(usbDevs);
+                var hasUsb = usbAll.length > 0;
                 var hasEth = res.eth_links && res.eth_links.length > 0;
                 if ((hasEth || hasUsb) && portsNode) {
                     ethCard.style.display = 'flex';
@@ -2488,17 +2494,12 @@ return view.extend({
                         var ethSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'Ethernet');
                         var ethListWrap = E('div', {});
                         var usbSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'USB');
-                        var hwPortVal = E('span', { style: 'color:#00bcd4; font-weight: bold;' });
-                        var hwPortBox = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px; display: none;' }, [
-                            E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em;' }, [E('span', {}, 'Physical Port:'), hwPortVal])
-                        ]);
                         var usbListWrap = E('div', {});
                         portsNode.appendChild(ethSubH);
                         portsNode.appendChild(ethListWrap);
                         portsNode.appendChild(usbSubH);
-                        portsNode.appendChild(hwPortBox);
                         portsNode.appendChild(usbListWrap);
-                        self._portsRefs = { ethSubH: ethSubH, ethListWrap: ethListWrap, usbSubH: usbSubH, hwPortBox: hwPortBox, hwPortVal: hwPortVal, usbListWrap: usbListWrap, ethCache: {}, usbCache: {} };
+                        self._portsRefs = { ethSubH: ethSubH, ethListWrap: ethListWrap, usbSubH: usbSubH, usbListWrap: usbListWrap, ethCache: {}, usbCache: {} };
                     }
                     var pr = self._portsRefs;
                     pr.ethSubH.style.display = hasEth ? '' : 'none';
@@ -2577,9 +2578,7 @@ return view.extend({
                             entry.macRow.style.display = 'none';
                         }
                     });
-                    pr.hwPortBox.style.display = (hasUsb && hwPortStr) ? '' : 'none';
-                    if (hasUsb && hwPortStr) pr.hwPortVal.textContent = hwPortStr;
-                    syncRows(pr.usbListWrap, pr.usbCache, hasUsb ? usbDevs : [], function(u, i) { return u.name + '|' + i; }, function(u) {
+                    syncRows(pr.usbListWrap, pr.usbCache, hasUsb ? usbAll : [], function(u, i) { return u.name + '|' + i; }, function(u) {
                         var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' });
                         var speedVal = E('span', {});
                         var speedRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), speedVal]);
