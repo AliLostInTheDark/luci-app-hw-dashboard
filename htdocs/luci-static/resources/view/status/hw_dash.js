@@ -2067,6 +2067,7 @@ return view.extend({
                         var nv = res.nvme_info;
                         var sm = res.nvme_smart;
                         var nvBadge = '';
+                        var nvTempBadge = '';
                         if (sm) {
                             // sm.passed is the drive firmware's own SMART
                             // overall-health verdict (smartctl -H) — the
@@ -2077,8 +2078,23 @@ return view.extend({
                             var nvColor = !sm.passed ? '#ff1744' : nvWarn ? '#ffb300' : '#00bcd4';
                             var nvLbl = !sm.passed ? 'Critical' : nvWarn ? 'Warning' : 'Healthy';
                             nvBadge = E('span', {style: 'padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color:' + nvColor + '; background:' + nvColor + '22;'}, nvLbl);
+                            if (sm.temp_c > 0) {
+                                // Same badge styling/thresholding as the Thermal
+                                // Sensors card (.hw-temp-badge, hw-temp-crit pulse),
+                                // but using the drive's own reported warn/crit
+                                // thresholds directly instead of the thermal
+                                // card's derived heuristic — NVMe SMART already
+                                // gives real manufacturer values.
+                                var tCrit = sm.temp_crit > 0 ? sm.temp_crit : 80;
+                                var tWarn = sm.temp_warn > 0 ? sm.temp_warn : (tCrit - 10);
+                                var tColor = '#00bcd4', tBg = 'rgba(0,188,212,0.14)', tCls = 'hw-temp-badge';
+                                if (sm.temp_c >= tCrit) { tColor = '#ff1744'; tBg = 'rgba(255,23,68,0.22)'; tCls += ' hw-temp-crit'; }
+                                else if (sm.temp_c >= tWarn) { tColor = '#ffb300'; tBg = 'rgba(255,179,0,0.2)'; }
+                                nvTempBadge = E('span', {class: tCls, style: 'color:' + tColor + '; background:' + tBg + ';'}, sm.temp_c.toFixed(1) + ' °C');
+                            }
                         }
-                        var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), nvBadge);
+                        var nvHeaderRight = E('span', {style: 'display: flex; align-items: center; gap: 8px;'}, [nvTempBadge, nvBadge]);
+                        var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), nvHeaderRight);
                         if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
                         if (nv.fw) nvBox.appendChild(makeRow('Firmware', nv.fw, null));
                         if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
@@ -2094,15 +2110,6 @@ return view.extend({
                             if (sm.ns_capacity > 0) {
                                 var nsPct = Math.min(100, (sm.ns_utilization / sm.ns_capacity) * 100);
                                 nvBox.appendChild(makeBar2('Namespace Utilization', nsPct, fmtBytesS(sm.ns_utilization) + ' / ' + fmtBytesS(sm.ns_capacity), getDynColor(nsPct)));
-                            }
-                            if (sm.temp_c > 0) {
-                                // Real per-drive thresholds when reported, falling
-                                // back to conservative generic guesses otherwise.
-                                var tWarn = sm.temp_warn > 0 ? sm.temp_warn : 70;
-                                var tCrit = sm.temp_crit > 0 ? sm.temp_crit : 80;
-                                var tempColor = sm.temp_c >= tCrit ? '#ff1744' : sm.temp_c >= tWarn ? '#ffb300' : null;
-                                var tempThreshStr = sm.temp_warn > 0 ? ' (warn ' + sm.temp_warn + '°C / crit ' + sm.temp_crit + '°C)' : '';
-                                nvBox.appendChild(makeRow('Temperature', sm.temp_c + ' °C' + tempThreshStr, tempColor));
                             }
                             if (sm.power_on_hours > 0) {
                                 var poDays = Math.floor(sm.power_on_hours / 24);
