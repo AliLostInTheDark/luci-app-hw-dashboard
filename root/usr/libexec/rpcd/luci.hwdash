@@ -2275,7 +2275,19 @@ EOF_DMESG
 					json_esc "$nv_model"; _m=$JSV
 					json_esc "$nv_serial"; _s=$JSV
 					json_esc "$nv_fw"
-					NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$_m\",\"serial\":\"$_s\",\"fw\":\"$JSV\",\"transport\":\"$nv_transport\"}"
+					# TRIM/discard support is a static device capability
+					# (sysfs queue param), not something worth actually
+					# running fstrim/blkdiscard for — read-only status only.
+					read_file nv_discard_gran "/sys/block/${nvme##*/}/queue/discard_granularity" 0
+					case "$nv_discard_gran" in ''|*[!0-9]*) nv_discard_gran=0 ;; esac
+					nv_discard_mount=0
+					while read -r _dmdev _dmmp _dmfs _dmopts _; do
+						if [ "$_dmmp" = "/" ]; then
+							case ",$_dmopts," in *,discard,*) nv_discard_mount=1 ;; esac
+							break
+						fi
+					done < /proc/mounts
+					NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$_m\",\"serial\":\"$_s\",\"fw\":\"$JSV\",\"transport\":\"$nv_transport\",\"discard_gran\":$nv_discard_gran,\"discard_mount\":$nv_discard_mount}"
 					break
 				done
 

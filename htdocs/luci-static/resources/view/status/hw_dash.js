@@ -2098,6 +2098,12 @@ return view.extend({
                         if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
                         if (nv.fw) nvBox.appendChild(makeRow('Firmware', nv.fw, null));
                         if (nv.transport) nvBox.appendChild(makeRow('Transport', nv.transport.toUpperCase(), null));
+                        if (nv.discard_gran > 0) {
+                            var trimStr = 'Supported (' + fmtBytesS(nv.discard_gran) + ' granularity)' + (nv.discard_mount ? ' · Continuous' : ' · Periodic (fstrim)');
+                            nvBox.appendChild(makeRow('TRIM Support', trimStr, '#00bcd4'));
+                        } else if (nv.discard_gran === 0) {
+                            nvBox.appendChild(makeRow('TRIM Support', 'Not Supported', null));
+                        }
                         if (sm) {
                             var wearColor = sm.percent_used >= 100 ? '#ff1744' : sm.percent_used >= 90 ? '#ffb300' : '#00bcd4';
                             nvBox.appendChild(makeBar2('Wear (Percentage Used)', Math.min(sm.percent_used, 100), sm.percent_used + '%', wearColor));
