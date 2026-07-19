@@ -2093,7 +2093,7 @@ return view.extend({
                                 nvTempBadge = E('span', {class: tCls, style: 'color:' + tColor + '; background:' + tBg + ';'}, sm.temp_c.toFixed(1) + ' °C');
                             }
                         }
-                        var nvHeaderRight = E('span', {style: 'display: flex; align-items: center; gap: 8px;'}, [nvTempBadge, nvBadge]);
+                        var nvHeaderRight = E('span', {style: 'display: flex; align-items: center; gap: 8px;'}, [nvBadge, nvTempBadge]);
                         var nvBox = makeDevBox(nv.dev.toUpperCase() + (nv.model ? ' — ' + nv.model : ''), nvHeaderRight);
                         if (nv.serial) nvBox.appendChild(makeRow('Serial', nv.serial, null));
                         if (nv.fw) nvBox.appendChild(makeRow('Firmware', nv.fw, null));
