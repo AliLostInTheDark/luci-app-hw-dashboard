@@ -817,6 +817,10 @@ return view.extend({
             pingGraphNode,
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
+        var wanQualityCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'WAN Quality'),
+            E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
+        ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
@@ -844,6 +848,7 @@ return view.extend({
         container.appendChild(ethCard);
         container.appendChild(pcieCard);
         container.appendChild(pingCard);
+        container.appendChild(wanQualityCard);
         container.appendChild(wifiCard);
         container.appendChild(thermWrapper);
         container.appendChild(eventsCard);
@@ -917,6 +922,7 @@ return view.extend({
             pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
             ping_graph: { nodes: [pingGraphWrapper], label: 'Ping Graph', show: 'block' },
+            wan_quality: { nodes: [wanQualityCard], label: 'WAN Quality', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
             therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
@@ -2591,6 +2597,64 @@ return view.extend({
                     });
                     if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                 }
+                (function() {
+                    var wq = res.wan_quality;
+                    var wanQBox = document.getElementById('hw-wanq-list');
+                    if (!wanQBox) return;
+                    var hasWanQ = wq && wq.length > 0;
+                    wanQualityCard.style.display = hasWanQ && self.hiddenCards.indexOf('wan_quality') === -1 ? 'flex' : 'none';
+                    if (!hasWanQ) return;
+                    if (!self._wanQCache) self._wanQCache = {};
+                    syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
+                        var dot = E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;' });
+                        var nameSpan = E('span', { style: 'font-weight: 600;' });
+                        var ispSpan = E('span', { style: 'opacity: 0.65; font-size: 0.85em; margin-left: 8px;' });
+                        var uptimeSpan = E('span', { class: 'hw-stat-value' });
+                        var latSpan = E('span', { style: 'opacity: 0.7; font-size: 0.85em; margin-left: 10px;' });
+                        var barWrap = E('div', { style: 'display: flex; gap: 1px; width: 100%; height: 26px; border-radius: 4px; overflow: hidden; margin-top: 8px; background: rgba(128,128,128,0.08);' });
+                        var el = E('div', { style: 'width: 100%;' }, [
+                            E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;' }, [
+                                E('span', { style: 'display: flex; align-items: center;' }, [dot, nameSpan, ispSpan]),
+                                E('span', { style: 'white-space: nowrap;' }, [uptimeSpan, latSpan])
+                            ]),
+                            barWrap
+                        ]);
+                        return { el: el, dot: dot, name: nameSpan, isp: ispSpan, uptime: uptimeSpan, lat: latSpan, barWrap: barWrap, segEls: null };
+                    }, function(entry, r) {
+                        var statusColor = r.status === 'up' ? '#00bcd4' : r.status === 'down' ? '#ff1744' : '#9e9e9e';
+                        entry.dot.style.background = statusColor;
+                        entry.name.textContent = r.iface.toUpperCase();
+                        entry.isp.textContent = r.isp ? r.isp.split(' - ')[0] : 'Unknown ISP';
+                        entry.uptime.textContent = r.uptime_pct.toFixed(2) + '% uptime';
+                        entry.uptime.style.color = r.uptime_pct >= 99.5 ? '#00bcd4' : r.uptime_pct >= 95 ? '#ffb300' : '#ff1744';
+                        entry.lat.textContent = r.status === 'up' ? ('avg ' + r.avg_ms.toFixed(0) + ' ms') : (r.status === 'down' ? 'unreachable' : '');
+                        if (!entry.segEls) {
+                            entry.segEls = [];
+                            r.buckets.forEach(function() {
+                                var seg = E('div', { style: 'flex: 1; min-width: 1px;' });
+                                entry.segEls.push(seg);
+                                entry.barWrap.appendChild(seg);
+                            });
+                        }
+                        r.buckets.forEach(function(b, i) {
+                            var seg = entry.segEls[i];
+                            if (!seg) return;
+                            if (b == null) {
+                                seg.style.background = 'transparent';
+                                seg.title = '';
+                            } else if (b.loss >= 50) {
+                                seg.style.background = '#ff1744';
+                                seg.title = b.loss.toFixed(0) + '% loss';
+                            } else if (b.loss > 0) {
+                                seg.style.background = '#ffb300';
+                                seg.title = b.loss.toFixed(0) + '% loss, ' + b.avg.toFixed(0) + ' ms avg';
+                            } else {
+                                seg.style.background = pingStatColor(b.avg) || '#00bcd4';
+                                seg.title = b.avg.toFixed(0) + ' ms avg';
+                            }
+                        });
+                    });
+                })();
                 var portsNode = document.getElementById('hw-eth-links');
                 var validPcie = [];
                 if (res.pcie_devs) {

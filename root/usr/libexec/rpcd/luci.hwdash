@@ -2456,9 +2456,95 @@ EOF_DMESG
 				json_esc "$SYS_HOSTNAME"
 				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
 
+				# WAN Quality: reads the ring buffers written by the
+				# hwdash-wanmon background collector (root/usr/libexec/
+				# hwdash-wanmon), which only runs on mwan3-managed
+				# routers with the LD_PRELOAD wrapper available. Purely
+				# a reader here -- this call never pings anything
+				# itself, so repeated dashboard polls add zero extra
+				# network traffic beyond what the collector already
+				# does on its own fixed interval.
+				WAN_QUALITY="null"
+				_wm_dir=/tmp/hwdash_wanmon
+				if [ -d "$_wm_dir" ]; then
+					_wm_items=""
+					_wm_first=1
+					for _wm_ring in "$_wm_dir"/*.log; do
+						[ -f "$_wm_ring" ] || continue
+						_wm_ifn=${_wm_ring##*/}; _wm_ifn=${_wm_ifn%.log}
+						_wm_isp=""
+						[ -f "$_wm_dir/$_wm_ifn.isp" ] && read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
+						json_esc "$_wm_isp"; _wm_ispj=$JSV
+						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
+						_wm_summary=$(awk -v now="$(date +%s)" -v nbuckets=96 -v span=86400 '
+							{
+								age = now - $1
+								if (age < 0 || age > span) next
+								n++
+								if ($2 != "-") { okn++; sum += $2; last_ms = $2; last_ok = 1 }
+								else { last_ok = 0 }
+								last_age = age
+								b = int(age / (span / nbuckets))
+								if (b < nbuckets) {
+									bn[b]++
+									if ($2 != "-") { bsum[b] += $2; bok[b]++ }
+								}
+							}
+							END {
+								status = (n > 0 && last_age < 45 && last_ok) ? "up" : (n > 0 && last_age < 45) ? "down" : "unknown"
+								uptime = n > 0 ? (okn * 100.0 / n) : 0
+								avg = okn > 0 ? (sum / okn) : 0
+								printf "%s|%.2f|%.1f|", status, uptime, avg
+								for (i = nbuckets - 1; i >= 0; i--) {
+									if (bn[i] > 0) {
+										bloss = (bn[i] - bok[i]) * 100.0 / bn[i]
+										bavg = bok[i] > 0 ? (bsum[i] / bok[i]) : 0
+										printf "%.0f,%.1f;", bloss, bavg
+									} else {
+										printf "-;"
+									}
+								}
+							}
+						' "$_wm_ring" 2>/dev/null)
+						_wm_status=${_wm_summary%%|*}
+						_wm_rest=${_wm_summary#*|}
+						_wm_uptime=${_wm_rest%%|*}
+						_wm_rest=${_wm_rest#*|}
+						_wm_avg=${_wm_rest%%|*}
+						_wm_buckets=${_wm_rest#*|}
+						case "$_wm_status" in up|down) ;; *) _wm_status="unknown" ;; esac
+						case "$_wm_uptime" in ''|*[!0-9.]*) _wm_uptime=0 ;; esac
+						case "$_wm_avg" in ''|*[!0-9.]*) _wm_avg=0 ;; esac
+						_wm_bjson="["
+						_wm_bfirst=1
+						_wm_old_ifs=$IFS
+						IFS=';'
+						for _wm_b in $_wm_buckets; do
+							[ -z "$_wm_b" ] && continue
+							[ $_wm_bfirst -eq 0 ] && _wm_bjson="$_wm_bjson,"
+							if [ "$_wm_b" = "-" ]; then
+								_wm_bjson="$_wm_bjson null"
+							else
+								_wm_bloss=${_wm_b%%,*}
+								_wm_bavg=${_wm_b#*,}
+								case "$_wm_bloss" in ''|*[!0-9.]*) _wm_bloss=0 ;; esac
+								case "$_wm_bavg" in ''|*[!0-9.]*) _wm_bavg=0 ;; esac
+								_wm_bjson="$_wm_bjson{\"loss\":$_wm_bloss,\"avg\":$_wm_bavg}"
+							fi
+							_wm_bfirst=0
+						done
+						IFS=$_wm_old_ifs
+						_wm_bjson="$_wm_bjson]"
+						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"avg_ms\":$_wm_avg,\"buckets\":$_wm_bjson}"
+						_wm_first=0
+					done
+					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"
+				fi
+
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON, \"wan_quality\":$WAN_QUALITY}"
 				;;
 		esac
 		;;

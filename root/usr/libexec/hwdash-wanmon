@@ -1,0 +1,129 @@
+#!/bin/sh
+# Background WAN-quality collector for luci-app-hw-dashboard.
+#
+# Runs continuously (independent of the dashboard being open in a
+# browser) so a day's worth of per-WAN latency/loss history survives
+# page reloads. Pings a fixed IP anchor directly -- never a domain --
+# so it adds zero DNS load anywhere, AdGuard included.
+#
+# On an mwan3-managed router, a plain ping/curl bound to a non-default
+# WAN's device or source IP silently fails or (worse) silently routes
+# out the WRONG interface: mwan3's policy routing is driven by an
+# nftables fwmark that's only applied to traffic already matching one
+# of its own rules, not to arbitrary locally-generated packets bound
+# by device/source alone. mwan3 solves this for its own tracker via
+# an LD_PRELOAD shim (libwrap_mwan3_sockopt.so) that sets the correct
+# fwmark on the socket before routing happens. We reuse that same
+# mechanism here instead of reinventing it.
+
+RINGDIR=/tmp/hwdash_wanmon
+RETENTION=86400
+INTERVAL=15
+DISCOVER_INTERVAL=300
+ANCHOR4=1.1.1.1
+ANCHOR6=2606:4700:4700::1111
+WRAP=/lib/mwan3/libwrap_mwan3_sockopt.so.1.0
+IFACE_LIST=""
+LAST_DISCOVER=0
+TICK=0
+
+mkdir -p "$RINGDIR"
+
+# Every WAN-zone member with a currently live default route -- this
+# is deliberately stricter than "in the wan firewall zone", since a
+# router can have zone members that are configured but not actually
+# routing anywhere (no gateway at all), which would otherwise show up
+# as a permanently-dead WAN.
+discover_ifaces() {
+	IFACE_LIST=""
+	_zone_ifaces=$(uci -q get firewall.@zone[$( \
+		i=0; while :; do \
+			z=$(uci -q get firewall.@zone[$i].name 2>/dev/null) || break; \
+			[ "$z" = "wan" ] && { echo "$i"; break; }; \
+			i=$((i + 1)); \
+		done \
+	)].network 2>/dev/null)
+	for _ifn in $_zone_ifaces; do
+		_up=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
+		[ "$_up" = "true" ] || continue
+		_gw=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+		[ -z "$_gw" ] && continue
+		_dev=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+		[ -z "$_dev" ] && continue
+		_srcip=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+		[ -z "$_srcip" ] && continue
+		# fwmark this device's traffic gets tagged with -- read straight
+		# out of the live nftables ruleset rather than recomputing
+		# mwan3's internal id-to-mark formula ourselves.
+		_mark=$(nft list ruleset 2>/dev/null | grep "iifname \"$_dev\"" | grep "nfproto ipv4" | grep -o '| 0x0000[0-9a-f]*00' | tail -1 | awk '{print $2}')
+		[ -z "$_mark" ] && continue
+		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark
+"
+	done
+}
+
+wrapped_ping() {
+	_dev=$1; _srcip=$2; _mark=$3; _anchor=$4
+	FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
+		ping -4 -c 1 -w 2 -W 2 "$_anchor" 2>/dev/null
+}
+
+resolve_isp() {
+	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4
+	_isp_file="$RINGDIR/${_ifn}.isp"
+	[ -f "$_isp_file" ] && [ "$(( $(date +%s) - $(read_mtime "$_isp_file") ))" -lt 86400 ] && return
+	_pub=$(FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
+		curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+	case "$_pub" in
+		*[!0-9.]*|'') return ;;
+	esac
+	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
+	_asn=$(nslookup -type=TXT "${_rev}.origin.asn.cymru.com" 2>/dev/null | grep text | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+	case "$_asn" in ''|*[!0-9]*) return ;; esac
+	_org=$(nslookup -type=TXT "AS${_asn}.asn.cymru.com" 2>/dev/null | grep text | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+	_org=${_org# }
+	[ -z "$_org" ] && return
+	printf '%s' "$_org" > "$_isp_file.tmp" && mv "$_isp_file.tmp" "$_isp_file"
+}
+
+read_mtime() {
+	_st=$(stat -c '%Y' "$1" 2>/dev/null)
+	echo "${_st:-0}"
+}
+
+trim_ring() {
+	_f=$1
+	[ -f "$_f" ] || return
+	_cutoff=$(($(date +%s) - RETENTION))
+	awk -v c="$_cutoff" '$1 >= c' "$_f" > "$_f.tmp" 2>/dev/null && mv "$_f.tmp" "$_f"
+}
+
+while :; do
+	_now=$(date +%s)
+	if [ -z "$IFACE_LIST" ] || [ $((_now - LAST_DISCOVER)) -ge "$DISCOVER_INTERVAL" ]; then
+		discover_ifaces
+		LAST_DISCOVER=$_now
+	fi
+	if [ -n "$IFACE_LIST" ]; then
+		while read -r _ifn _dev _srcip _mark; do
+			[ -z "$_ifn" ] && continue
+			_ring="$RINGDIR/${_ifn}.log"
+			_out=$(wrapped_ping "$_dev" "$_srcip" "$_mark" "$ANCHOR4")
+			_ms=""
+			case "$_out" in
+				*time=*)
+					_ms=${_out##*time=}
+					_ms=${_ms%%.*}
+					case "$_ms" in ''|*[!0-9]*) _ms="" ;; esac
+					;;
+			esac
+			echo "$_now ${_ms:--}" >> "$_ring"
+			[ $((TICK % 40)) -eq 0 ] && trim_ring "$_ring"
+			[ $((TICK % 240)) -eq 0 ] && resolve_isp "$_dev" "$_srcip" "$_mark" "$_ifn"
+		done <<EOF
+$IFACE_LIST
+EOF
+	fi
+	TICK=$((TICK + 1))
+	sleep "$INTERVAL"
+done
