@@ -906,6 +906,31 @@ return view.extend({
             if (ms <= 200) return '#ff7043';
             return '#ff1744';
         };
+        // Brand-colored monogram badges rather than downloaded logo images —
+        // no image assets in this codebase, and avoids reproducing anyone's
+        // actual trademarked logo file. Extend this list as new ISPs show up.
+        var ispBadge = function(ispFull) {
+            var isp = (ispFull || '').toLowerCase();
+            var name = ispFull ? ispFull.split(' - ')[0] : 'Unknown ISP';
+            var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?';
+            if (isp.indexOf('airtel') !== -1) { color = '#ED1B24'; label = 'A'; name = 'Airtel'; }
+            else if (isp.indexOf('jio') !== -1) { color = '#0F1C4D'; label = 'Jio'; name = 'Jio'; }
+            else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1) { color = '#E60000'; label = 'Vi'; name = 'Vi'; }
+            else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; name = 'BSNL'; }
+            else if (isp.indexOf('hathway') !== -1) { color = '#E31E24'; label = 'HW'; name = 'Hathway'; }
+            else if (isp.indexOf('comcast') !== -1) { color = '#000000'; label = 'X'; name = 'Xfinity'; }
+            else if (isp.indexOf('at&t') !== -1) { color = '#00A8E0'; label = 'AT&T'; name = 'AT&T'; }
+            else if (isp.indexOf('verizon') !== -1) { color = '#CD040B'; label = 'V'; name = 'Verizon'; }
+            return { color: color, label: label, name: name };
+        };
+        var fmtDuration = function(s) {
+            s = Math.max(0, Math.floor(s || 0));
+            var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+            if (d > 0) return d + 'd ' + h + 'h';
+            if (h > 0) return h + 'h ' + m + 'm';
+            if (m > 0) return m + 'm';
+            return s + 's';
+        };
         var cardRegistry = {
             sysinfo: { nodes: [sysCard], label: 'System Info', show: 'flex' },
             cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
@@ -2606,32 +2631,39 @@ return view.extend({
                     if (!hasWanQ) return;
                     if (!self._wanQCache) self._wanQCache = {};
                     syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
-                        var dot = E('span', { style: 'width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;' });
-                        var nameSpan = E('span', { style: 'font-weight: 600;' });
-                        var ispSpan = E('span', { style: 'opacity: 0.65; font-size: 0.85em; margin-left: 8px;' });
-                        var uptimeSpan = E('span', { class: 'hw-stat-value' });
-                        var latSpan = E('span', { style: 'opacity: 0.7; font-size: 0.85em; margin-left: 10px;' });
-                        var barWrap = E('div', { style: 'display: flex; gap: 1px; width: 100%; height: 26px; border-radius: 4px; overflow: hidden; margin-top: 8px; background: rgba(128,128,128,0.08);' });
-                        var el = E('div', { style: 'width: 100%;' }, [
-                            E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;' }, [
-                                E('span', { style: 'display: flex; align-items: center;' }, [dot, nameSpan, ispSpan]),
-                                E('span', { style: 'white-space: nowrap;' }, [uptimeSpan, latSpan])
+                        var dot = E('span', { style: 'width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;' });
+                        var nameSpan = E('span', { style: 'font-weight: 700; font-size: 0.95em; flex-shrink: 0;' });
+                        var badgeEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 0.72em; font-weight: 700; color: #fff; white-space: nowrap; flex-shrink: 0;' });
+                        var ispNameSpan = E('span', { style: 'font-size: 0.85em; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
+                        var uptimeSpan = E('span', { class: 'hw-stat-value', style: 'font-size: 0.85em;' });
+                        var streakSpan = E('span', { style: 'font-size: 0.8em; opacity: 0.65; white-space: nowrap;' });
+                        var latSpan = E('span', { style: 'font-size: 0.8em; opacity: 0.65; white-space: nowrap;' });
+                        var barWrap = E('div', { style: 'display: flex; align-items: flex-end; gap: 1px; width: 100%; height: 34px; margin-top: 9px;' });
+                        var el = E('div', { style: 'width: 100%; padding-bottom: 6px;' }, [
+                            E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px;' }, [
+                                E('span', { style: 'display: flex; align-items: center; gap: 8px; min-width: 0;' }, [dot, nameSpan, badgeEl, ispNameSpan]),
+                                E('span', { style: 'display: flex; align-items: center; gap: 12px; flex-wrap: wrap;' }, [uptimeSpan, streakSpan, latSpan])
                             ]),
                             barWrap
                         ]);
-                        return { el: el, dot: dot, name: nameSpan, isp: ispSpan, uptime: uptimeSpan, lat: latSpan, barWrap: barWrap, segEls: null };
+                        return { el: el, dot: dot, name: nameSpan, badge: badgeEl, ispName: ispNameSpan, uptime: uptimeSpan, streak: streakSpan, lat: latSpan, barWrap: barWrap, segEls: null };
                     }, function(entry, r) {
                         var statusColor = r.status === 'up' ? '#00bcd4' : r.status === 'down' ? '#ff1744' : '#9e9e9e';
                         entry.dot.style.background = statusColor;
                         entry.name.textContent = r.iface.toUpperCase();
-                        entry.isp.textContent = r.isp ? r.isp.split(' - ')[0] : 'Unknown ISP';
-                        entry.uptime.textContent = r.uptime_pct.toFixed(2) + '% uptime';
+                        var ib = ispBadge(r.isp);
+                        entry.badge.style.background = ib.color;
+                        entry.badge.textContent = ib.label;
+                        entry.ispName.textContent = ib.name;
+                        entry.uptime.textContent = r.uptime_pct.toFixed(2) + '%';
                         entry.uptime.style.color = r.uptime_pct >= 99.5 ? '#00bcd4' : r.uptime_pct >= 95 ? '#ffb300' : '#ff1744';
+                        entry.streak.textContent = (r.status === 'down' ? 'down ' : 'up ') + fmtDuration(r.since_change_s);
+                        entry.streak.style.color = r.status === 'down' ? '#ff1744' : '';
                         entry.lat.textContent = r.status === 'up' ? ('avg ' + r.avg_ms.toFixed(0) + ' ms') : (r.status === 'down' ? 'unreachable' : '');
                         if (!entry.segEls) {
                             entry.segEls = [];
                             r.buckets.forEach(function() {
-                                var seg = E('div', { style: 'flex: 1; min-width: 1px;' });
+                                var seg = E('div', { style: 'flex: 1; min-width: 1px; border-radius: 1px;' });
                                 entry.segEls.push(seg);
                                 entry.barWrap.appendChild(seg);
                             });
@@ -2640,15 +2672,19 @@ return view.extend({
                             var seg = entry.segEls[i];
                             if (!seg) return;
                             if (b == null) {
-                                seg.style.background = 'transparent';
+                                seg.style.height = '8%';
+                                seg.style.background = 'rgba(128,128,128,0.18)';
                                 seg.title = '';
                             } else if (b.loss >= 50) {
+                                seg.style.height = '100%';
                                 seg.style.background = '#ff1744';
                                 seg.title = b.loss.toFixed(0) + '% loss';
                             } else if (b.loss > 0) {
+                                seg.style.height = Math.max(60, Math.min(100, b.avg)) + '%';
                                 seg.style.background = '#ffb300';
                                 seg.title = b.loss.toFixed(0) + '% loss, ' + b.avg.toFixed(0) + ' ms avg';
                             } else {
+                                seg.style.height = Math.max(15, Math.min(100, b.avg)) + '%';
                                 seg.style.background = pingStatColor(b.avg) || '#00bcd4';
                                 seg.title = b.avg.toFixed(0) + ' ms avg';
                             }
