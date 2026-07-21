@@ -1,0 +1,11 @@
+#!/bin/sh
+# Tell the WAN-quality collector to refresh its cached netifd tuple
+# immediately. Interface transitions can change the L3 device, source
+# address, default route, and mwan3 mark together; polling that state every
+# few seconds wastes CPU while this event is effectively free.
+
+case "$ACTION" in
+	ifup|ifdown|ifupdate|iflink)
+		[ -d /tmp/hwdash_wanmon ] && touch /tmp/hwdash_wanmon/.rediscover
+		;;
+esac

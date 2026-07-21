@@ -1,10 +1,8 @@
 #!/bin/sh
 # Background WAN-quality collector for luci-app-hw-dashboard.
-#
-# Runs continuously (independent of the dashboard being open in a
-# browser) so a day's worth of per-WAN latency/loss history survives
-# page reloads. Pings a fixed IP anchor directly -- never a domain --
-# so it adds zero DNS load anywhere, AdGuard included.
+# Runs continuously in RAM (/tmp, tmpfs) to track per-WAN latency/
+# uptime statistics since the collector last (re)started -- nothing
+# it writes ever touches flash.
 #
 # On an mwan3-managed router with more than one live WAN, a plain
 # ping/curl bound to a non-default WAN's device or source IP silently
@@ -14,95 +12,236 @@
 # locally-generated packets bound by device/source alone. mwan3 solves
 # this for its own tracker via an LD_PRELOAD shim
 # (libwrap_mwan3_sockopt.so) that sets the correct fwmark on the
-# socket before routing happens; we reuse that same mechanism instead
-# of reinventing it, but only where it's actually needed -- a single
-# default WAN (the common case, no mwan3 at all) has no fwmark to look
-# up and doesn't need the wrapper, so device-bound ping/curl works
-# directly there.
+# socket before routing happens; we reuse that same mechanism here
+# instead of reinventing it, but only where it's actually needed -- a
+# single default WAN (no mwan3 at all) has no fwmark to look up and
+# doesn't need the wrapper, so device-bound ping/curl works directly.
 
 RINGDIR=/tmp/hwdash_wanmon
-RETENTION=86400
-INTERVAL=15
+INTERVAL=2
+# A hotplug event forces immediate discovery on a network transition. This
+# long interval is only a safety refresh, so the collector does not parse the
+# full netifd dump every few seconds while the router is idle.
 DISCOVER_INTERVAL=300
+ISP_RETRY_INTERVAL=60
+HIST_LEN=60
+# 288 five-minute buckets form a rolling 24-hour availability window.
+# Counts live only in tmpfs, avoiding flash writes and expensive log scans.
+WINDOW_BUCKET_SECS=300
+WINDOW_BUCKETS=288
+PING_CAP=4
+CURL_CAP=8
+LOOP_DEADLINE=20
 ANCHOR4=1.1.1.1
+BACKUP4=8.8.8.8
+ANCHOR6=2606:4700:4700::1111
+BACKUP6=2001:4860:4860::8888
 WRAP=/lib/mwan3/libwrap_mwan3_sockopt.so.1.0
 IFACE_LIST=""
+ACTIVE_IFACES=""
+TRACKED_IFACES=""
 LAST_DISCOVER=0
-TICK=0
 
 mkdir -p "$RINGDIR"
 
-# Every WAN-zone member with a currently live default route -- this
-# is deliberately stricter than "in the wan firewall zone", since a
-# router can have zone members that are configured but not actually
-# routing anywhere (no gateway at all), which would otherwise show up
-# as a permanently-dead WAN.
+# Every network interface -- any protocol, any firewall zone, WAN or
+# VPN (WireGuard, Tailscale, OpenVPN...) -- that currently has a
+# genuine internet-reaching default route. Zone/protocol membership
+# isn't the criterion: a VPN interface used as a full-tunnel exit path
+# gets a real 0.0.0.0/0 (or ::/0) route just like a normal WAN does,
+# while the same VPN interface used only for private site-to-site
+# access won't, and is correctly excluded without special-casing it by
+# name. This also naturally excludes a local ONT/modem management
+# link layered on the same physical device as the real WAN (a
+# secondary interface with "option defaultroute '0'"): checked against
+# ubus's own per-interface route report, not the shared kernel device
+# table, so it doesn't inherit the real WAN's route just for sharing
+# its device.
+#
+# One ubus call total (network.interface dump returns every
+# interface's full status in one shot) instead of one call per
+# interface per field -- this used to be up to four ubus IPC round-
+# trips for every single candidate, every 5 minutes.
 discover_ifaces() {
 	IFACE_LIST=""
-	_zone_ifaces=$(uci -q get firewall.@zone[$( \
-		i=0; while :; do \
-			z=$(uci -q get firewall.@zone[$i].name 2>/dev/null) || break; \
-			[ "$z" = "wan" ] && { echo "$i"; break; }; \
-			i=$((i + 1)); \
-		done \
-	)].network 2>/dev/null)
-	for _ifn in $_zone_ifaces; do
-		_up=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
+	_active=""
+	ACTIVE_IFACES=""
+	_dump=$(ubus call network.interface dump 2>/dev/null)
+	[ -z "$_dump" ] && return
+	_names=$(printf '%s' "$_dump" | jsonfilter -e '@.interface[*].interface' 2>/dev/null)
+	_idx=0
+	for _ifn in $_names; do
+		_i=$_idx
+		_idx=$((_idx + 1))
+		[ "$_ifn" = "loopback" ] && continue
+
+		_up=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].up" 2>/dev/null)
 		[ "$_up" = "true" ] || continue
-		_gw=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
-		[ -z "$_gw" ] && continue
-		_dev=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+		_dev=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].l3_device" 2>/dev/null)
 		[ -z "$_dev" ] && continue
-		_srcip=$(ubus call network.interface.$_ifn status 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+
+		_routes=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].route" 2>/dev/null)
+		_family=""
+		case "$_routes" in
+			*'"target":"0.0.0.0"'*|*'"target": "0.0.0.0"'*) _family="4" ;;
+			*'"target":"::"'*|*'"target": "::"'*) _family="6" ;;
+		esac
+		[ -z "$_family" ] && continue
+
+		if [ "$_family" = "4" ]; then
+			_srcip=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i][\"ipv4-address\"][0].address" 2>/dev/null)
+		else
+			_srcip=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i][\"ipv6-address\"][0].address" 2>/dev/null)
+		fi
 		[ -z "$_srcip" ] && continue
-		# fwmark this device's traffic gets tagged with, when mwan3
-		# manages it -- read straight out of the live nftables ruleset
-		# rather than recomputing mwan3's internal id-to-mark formula
-		# ourselves. Absent entirely on a plain single-WAN router (no
-		# mwan3), which is fine -- "-" just means "no wrap needed".
+
+		_nfproto="nfproto ipv4"
+		[ "$_family" = "6" ] && _nfproto="nfproto ipv6"
 		_mark=""
-		[ -f "$WRAP" ] && _mark=$(nft list ruleset 2>/dev/null | grep "iifname \"$_dev\"" | grep "nfproto ipv4" | grep -o '| 0x0000[0-9a-f]*00' | tail -1 | awk '{print $2}')
+		[ -f "$WRAP" ] && _mark=$(nft list ruleset 2>/dev/null | grep "iifname \"$_dev\"" | grep "$_nfproto" | grep -o '| 0x0000[0-9a-f]*00' | tail -1 | awk '{print $2}')
 		[ -z "$_mark" ] && _mark="-"
-		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark
+		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark $_family
 "
+		_active="${_active}${_ifn}
+"
+		ACTIVE_IFACES="$ACTIVE_IFACES $_ifn"
 	done
+	# Keep an atomic live-state snapshot for the collector's own transition
+	# handling; the RPC reader deliberately uses .tracked so an outage stays
+	# visible rather than vanishing from the dashboard.
+	printf '%s' "$_active" > "$RINGDIR/.active.tmp" && mv "$RINGDIR/.active.tmp" "$RINGDIR/.active"
+
+	# Keep monitoring interfaces across ifdown. A quality card must show
+	# the outage and collect its downtime, not disappear merely because
+	# netifd temporarily withdrew the default route.
+	_old_tracked=""
+	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
+	TRACKED_IFACES="$_old_tracked"
+	for _ifn in $ACTIVE_IFACES; do
+		_case=" $_old_tracked "
+		case "$_case" in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
+	done
+	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' > "$RINGDIR/.tracked.tmp" && mv "$RINGDIR/.tracked.tmp" "$RINGDIR/.tracked"
 }
 
+# Hard external kill on top of ping/curl's own -w/-W/--max-time flags:
+# those are supposed to cap runtime by themselves, but a device torn
+# down mid-syscall (ifdown, or a restart cycling a sibling interface)
+# has been observed to wedge the process well past its own timeout
+# anyway -- an in-flight probe blocked on a socket op for a device
+# that's disappearing isn't guaranteed to unblock just because ping
+# asked nicely for 2 seconds. This collector runs forever in a loop
+# shared by every interface, so nothing it launches may ever be able
+# to run unbounded: kill by PID after a hard deadline can't be
+# bypassed by whatever the wedged process is stuck on internally, no
+# matter which layer (kernel, LD_PRELOAD wrapper, ping itself) failed
+# to honor its own timeout.
+run_capped() {
+	_cap=$1; _outf=$2; shift 2
+	"$@" > "$_outf" 2>/dev/null &
+	_rp=$!
+	( sleep "$_cap"; kill -9 "$_rp" 2>/dev/null ) >/dev/null 2>&1 &
+	_wp=$!
+	wait "$_rp" 2>/dev/null
+	kill "$_wp" 2>/dev/null
+	wait "$_wp" 2>/dev/null
+}
+
+# Single fixed primary anchor per family, with ONE backup tried only
+# if the primary doesn't answer -- covers the primary anchor itself
+# having a blip without going back to a triple-fallback chain (anchor,
+# second anchor, then the gateway itself), which tripled subprocess/
+# network work on every transient blip for little real benefit.
 do_ping() {
-	_dev=$1; _srcip=$2; _mark=$3; _anchor=$4
+	_dev=$1; _srcip=$2; _mark=$3; _family=$4; _anchor=$5; _ifn=$6
+	_famtag="ipv4"; [ "$_family" = "6" ] && _famtag="ipv6"
+	_outf="$RINGDIR/.probe.${_ifn}"
 	if [ "$_mark" != "-" ]; then
-		FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
-			ping -4 -c 1 -w 2 -W 2 "$_anchor" 2>/dev/null
+		run_capped "$PING_CAP" "$_outf" env FAMILY="$_famtag" DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
+			ping -"$_family" -c 1 -w 2 -W 2 "$_anchor"
 	else
-		ping -4 -I "$_dev" -c 1 -w 2 -W 2 "$_anchor" 2>/dev/null
+		run_capped "$PING_CAP" "$_outf" ping -"$_family" -I "$_dev" -c 1 -w 2 -W 2 "$_anchor"
 	fi
+	cat "$_outf" 2>/dev/null
+	rm -f "$_outf"
+}
+
+ping_with_backup() {
+	_dev=$1; _srcip=$2; _mark=$3; _family=$4; _ifn=$5
+	_anchor="$ANCHOR4"; _backup="$BACKUP4"
+	[ "$_family" = "6" ] && { _anchor="$ANCHOR6"; _backup="$BACKUP6"; }
+	_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_anchor" "$_ifn")
+	case "$_out" in
+		*time=*) printf '%s' "$_out"; return ;;
+	esac
+	do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_backup" "$_ifn"
 }
 
 do_curl() {
-	_dev=$1; _srcip=$2; _mark=$3; _url=$4
+	_dev=$1; _srcip=$2; _mark=$3; _url=$4; _ifn=$5
+	_outf="$RINGDIR/.probe.${_ifn}.c"
 	if [ "$_mark" != "-" ]; then
-		FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
-			curl -s --max-time 5 "$_url" 2>/dev/null
+		run_capped "$CURL_CAP" "$_outf" env FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
+			curl -s --max-time 5 "$_url"
 	else
-		curl -s --interface "$_dev" --max-time 5 "$_url" 2>/dev/null
+		run_capped "$CURL_CAP" "$_outf" curl -s --interface "$_dev" --max-time 5 "$_url"
 	fi
+	cat "$_outf" 2>/dev/null
+	rm -f "$_outf"
 }
 
+# ISP is resolved once per address and then retained -- re-resolved
+# only when the interface's own local address changes (a real
+# reconnect/restart), not on any time-based expiry. A stale/failed
+# lookup retries at most once per ISP_RETRY_INTERVAL rather than every
+# tick.
+#
+# IPv6 siblings (wan6 alongside wan) don't get an independent ASN
+# lookup at all -- Cymru's origin lookup is IPv4-only, and a v6
+# sibling is the same physical link as its v4 base, so it's the same
+# ISP by definition. Just mirror whatever the sibling has already
+# resolved, cheaply (a file compare, no network calls), and leave it
+# blank if the sibling hasn't resolved yet either.
 resolve_isp() {
-	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4
+	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4; _family=$5
 	_isp_file="$RINGDIR/${_ifn}.isp"
-	[ -f "$_isp_file" ] && [ "$(( $(date +%s) - $(read_mtime "$_isp_file") ))" -lt 86400 ] && return
-	_pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org)
-	case "$_pub" in
-		*[!0-9.]*|'') return ;;
-	esac
+	if [ "$_family" = "6" ]; then
+		case "$_ifn" in
+			*6)
+				_sib_isp="$RINGDIR/${_ifn%6}.isp"
+				if [ -f "$_sib_isp" ] && ! cmp -s "$_sib_isp" "$_isp_file" 2>/dev/null; then
+					cp "$_sib_isp" "$_isp_file.tmp" 2>/dev/null && mv "$_isp_file.tmp" "$_isp_file"
+				fi
+				;;
+		esac
+		return
+	fi
+	_ip_file="$RINGDIR/${_ifn}.ispip"
+	_last_ip=""
+	[ -f "$_ip_file" ] && read -r _last_ip < "$_ip_file" 2>/dev/null
+	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ]; then
+		return
+	fi
+	_try_file="$RINGDIR/${_ifn}.isp.try"
+	if [ -f "$_try_file" ] && [ "$(( $(date +%s) - $(read_mtime "$_try_file") ))" -lt "$ISP_RETRY_INTERVAL" ]; then
+		return
+	fi
+	touch "$_try_file"
+	_pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org "$_ifn")
+	case "$_pub" in *[!0-9.]*|'') return ;; esac
 	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
-	_asn=$(nslookup -type=TXT "${_rev}.origin.asn.cymru.com" 2>/dev/null | grep text | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
-	case "$_asn" in ''|*[!0-9]*) return ;; esac
-	_org=$(nslookup -type=TXT "AS${_asn}.asn.cymru.com" 2>/dev/null | grep text | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+	_nsf="$RINGDIR/.probe.${_ifn}.ns"
+	run_capped "$PING_CAP" "$_nsf" nslookup -type=TXT "${_rev}.origin.asn.cymru.com"
+	_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+	case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
+	run_capped "$PING_CAP" "$_nsf" nslookup -type=TXT "AS${_asn}.asn.cymru.com"
+	_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+	rm -f "$_nsf"
 	_org=${_org# }
 	[ -z "$_org" ] && return
-	printf '%s' "$_org" > "$_isp_file.tmp" && mv "$_isp_file.tmp" "$_isp_file"
+	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file.tmp" && mv "$_isp_file.tmp" "$_isp_file"
+	printf '%s' "$_srcip" > "$_ip_file.tmp" && mv "$_ip_file.tmp" "$_ip_file"
+	rm -f "$_try_file"
 }
 
 read_mtime() {
@@ -110,39 +249,158 @@ read_mtime() {
 	echo "${_st:-0}"
 }
 
-trim_ring() {
-	_f=$1
-	[ -f "$_f" ] || return
-	_cutoff=$(($(date +%s) - RETENTION))
-	awk -v c="$_cutoff" '$1 >= c' "$_f" > "$_f.tmp" 2>/dev/null && mv "$_f.tmp" "$_f"
+# Fixed-length ring of recent samples per interface, for the small
+# ping-stability sparkline -- "x" marks a down/timeout tick so the
+# frontend can render it as a gap instead of a false zero-ms reading.
+# Kept as one space-separated line (cheap to grow/trim with plain word
+# splitting, no awk/sed process per tick) capped at HIST_LEN entries.
+append_history() {
+	_ifn=$1; _val=$2
+	_hist_file="$RINGDIR/${_ifn}.hist"
+	_old=""
+	[ -f "$_hist_file" ] && read -r _old < "$_hist_file" 2>/dev/null
+	if [ -z "$_old" ]; then
+		_new="$_val"
+	else
+		set -- $_old
+		while [ $# -ge "$HIST_LEN" ]; do shift; done
+		_new="$* $_val"
+	fi
+	printf '%s\n' "$_new" > "$_hist_file.tmp" && mv "$_hist_file.tmp" "$_hist_file"
+}
+
+# Add one observation to a rolling 24-hour counter. Reusing a bucket slot
+# removes its expired contribution first, so rpcd can read one tiny summary
+# file instead of aggregating a full day's worth of two-second samples.
+record_window_sample() {
+	_ifn=$1; _ok=$2
+	_bucket=$((_now / WINDOW_BUCKET_SECS))
+	_slot=$((_bucket % WINDOW_BUCKETS))
+	_bucket_file="$RINGDIR/${_ifn}.day.${_slot}"
+	_summary_file="$RINGDIR/${_ifn}.daystats"
+	_old_bucket=""; _old_total=0; _old_success=0
+	[ -f "$_bucket_file" ] && read -r _old_bucket _old_total _old_success < "$_bucket_file" 2>/dev/null
+	_total=0; _success=0
+	[ -f "$_summary_file" ] && read -r _total _success < "$_summary_file" 2>/dev/null
+	if [ "$_old_bucket" != "$_bucket" ]; then
+		_total=$((_total - ${_old_total:-0}))
+		_success=$((_success - ${_old_success:-0}))
+		[ "$_total" -lt 0 ] && _total=0
+		[ "$_success" -lt 0 ] && _success=0
+		_old_total=0; _old_success=0
+	fi
+	_old_total=$((_old_total + 1))
+	[ "$_ok" = "1" ] && _old_success=$((_old_success + 1))
+	_total=$((_total + 1))
+	[ "$_ok" = "1" ] && _success=$((_success + 1))
+	printf '%s %d %d\n' "$_bucket" "$_old_total" "$_old_success" > "$_bucket_file.tmp" && mv "$_bucket_file.tmp" "$_bucket_file"
+	printf '%d %d\n' "$_total" "$_success" > "$_summary_file.tmp" && mv "$_summary_file.tmp" "$_summary_file"
+}
+
+# One interface's full per-tick update: ping, roll the stats/history
+# rings, resolve ISP. Run backgrounded (one subshell per interface, see
+# the main loop below) so a single slow or timed-out link can't stall
+# every other interface's update that tick -- the same reason the
+# Ping Latency rpc call backgrounds each of its own targets instead of
+# pinging them one after another.
+process_iface() {
+	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5
+	_stats_file="$RINGDIR/${_ifn}.stats"
+	_out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn")
+	_ms=""
+	case "$_out" in
+		*time=*)
+			_ms=${_out##*time=}
+			_ms=${_ms%%.*}
+			case "$_ms" in ''|*[!0-9]*) _ms="" ;; esac
+			;;
+	esac
+	_total=0; _success=0; _status="unknown"; _streak_start=$_now; _prev_ms="x"
+	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _prev_ms < "$_stats_file" 2>/dev/null
+	_total=$((_total + 1))
+	_new_status="down"
+	_cur_ms="x"
+	if [ -n "$_ms" ]; then
+		_success=$((_success + 1))
+		_new_status="up"
+		_cur_ms="$_ms"
+	fi
+	if [ "$_new_status" != "$_status" ]; then
+		_status="$_new_status"
+		_streak_start=$_now
+	fi
+	printf '%d %d %s %d %s\n' "$_total" "$_success" "$_status" "$_streak_start" "$_cur_ms" > "$_stats_file.tmp" && mv "$_stats_file.tmp" "$_stats_file"
+	append_history "$_ifn" "$_cur_ms"
+	[ -n "$_ms" ] && record_window_sample "$_ifn" 1 || record_window_sample "$_ifn" 0
+	resolve_isp "$_dev" "$_srcip" "$_mark" "$_ifn" "$_family"
+}
+
+# Record an actual outage sample for an interface netifd has taken down.
+# No probe is attempted because its route/device is no longer valid; the
+# next ifup discovery will move it back to process_iface automatically.
+process_down_iface() {
+	_ifn=$1
+	_stats_file="$RINGDIR/${_ifn}.stats"
+	_total=0; _success=0; _status="unknown"; _streak_start=$_now; _prev_ms="x"
+	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _prev_ms < "$_stats_file" 2>/dev/null
+	_total=$((_total + 1))
+	if [ "$_status" != "down" ]; then
+		_status="down"
+		_streak_start=$_now
+	fi
+	printf '%d %d %s %d x\n' "$_total" "$_success" "$_status" "$_streak_start" > "$_stats_file.tmp" && mv "$_stats_file.tmp" "$_stats_file"
+	append_history "$_ifn" x
+	record_window_sample "$_ifn" 0
 }
 
 while :; do
 	_now=$(date +%s)
-	if [ -z "$IFACE_LIST" ] || [ $((_now - LAST_DISCOVER)) -ge "$DISCOVER_INTERVAL" ]; then
+	_force_discover=0
+	if [ -f "$RINGDIR/.rediscover" ]; then
+		rm -f "$RINGDIR/.rediscover"
+		_force_discover=1
+	fi
+	if [ "$_force_discover" = "1" ] || [ -z "$IFACE_LIST" ] || [ $((_now - LAST_DISCOVER)) -ge "$DISCOVER_INTERVAL" ]; then
 		discover_ifaces
 		LAST_DISCOVER=$_now
 	fi
+	_pids=""
 	if [ -n "$IFACE_LIST" ]; then
-		while read -r _ifn _dev _srcip _mark; do
+		while read -r _ifn _dev _srcip _mark _family; do
 			[ -z "$_ifn" ] && continue
-			_ring="$RINGDIR/${_ifn}.log"
-			_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$ANCHOR4")
-			_ms=""
-			case "$_out" in
-				*time=*)
-					_ms=${_out##*time=}
-					_ms=${_ms%%.*}
-					case "$_ms" in ''|*[!0-9]*) _ms="" ;; esac
-					;;
-			esac
-			echo "$_now ${_ms:--}" >> "$_ring"
-			[ $((TICK % 40)) -eq 0 ] && trim_ring "$_ring"
-			[ $((TICK % 240)) -eq 0 ] && resolve_isp "$_dev" "$_srcip" "$_mark" "$_ifn"
+			process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" &
+			_pids="$_pids $!"
 		done <<EOF
 $IFACE_LIST
 EOF
 	fi
-	TICK=$((TICK + 1))
+
+	# Interfaces previously seen by the monitor but absent from the live
+	# default-route list are deliberately kept in the card as Offline and
+	# receive one timeout sample per tick. This covers both an ifdown test
+	# and a real link loss, including IPv4/IPv6 sibling interfaces.
+	for _ifn in $TRACKED_IFACES; do
+		case " $ACTIVE_IFACES " in *" $_ifn "*) continue ;; esac
+		process_down_iface "$_ifn" &
+		_pids="$_pids $!"
+	done
+
+	if [ -n "$_pids" ]; then
+		# Outer safety net alongside run_capped's own per-probe kill:
+		# reap each interface's PID individually against a hard overall
+		# deadline instead of a bare `wait` (which blocks on ALL
+		# backgrounded jobs at once) -- a single pathological wedge that
+		# somehow survived run_capped must still never stall the loop,
+		# and an already-finished interface's PID is reaped immediately
+		# rather than sitting behind a stuck one.
+		_deadline=$(( $(date +%s) + LOOP_DEADLINE ))
+		for _pid in $_pids; do
+			while kill -0 "$_pid" 2>/dev/null; do
+				[ "$(date +%s)" -ge "$_deadline" ] && { kill -9 "$_pid" 2>/dev/null; break; }
+				sleep 1
+			done
+			wait "$_pid" 2>/dev/null
+		done
+	fi
 	sleep "$INTERVAL"
 done

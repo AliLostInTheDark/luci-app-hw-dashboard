@@ -14,6 +14,11 @@ var callHwPing = rpc.declare({
     params: ['targets'],
     expect: {}
 });
+var callHwGetWanQuality = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'wan_quality',
+    expect: {}
+});
 var callHwGetConfig = rpc.declare({
     object: 'luci.hwdash',
     method: 'get_config',
@@ -232,6 +237,100 @@ return view.extend({
             el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
                 '<polygon points="' + area + '" fill="' + color + '22"/>' +
                 '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + poly + '"/></svg>';
+        };
+        // Smooth cubic-bezier interpolation between points (mid-x control
+        // handles, the same construction luci-app-wanlive-dashboard uses for
+        // its traffic/latency charts) instead of a jagged straight polyline
+        // -- a soft "hill" shape reads as a trend at a glance.
+        var smoothPathXY = function(pts) {
+            var path = 'M ' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1);
+            for (var i = 0; i < pts.length - 1; i++) {
+                var x0 = pts[i][0], y0 = pts[i][1], x1 = pts[i + 1][0], y1 = pts[i + 1][1];
+                var mx = (x0 + x1) / 2;
+                path += ' C ' + mx.toFixed(1) + ',' + y0.toFixed(1) + ' ' + mx.toFixed(1) + ',' + y1.toFixed(1) + ' ' + x1.toFixed(1) + ',' + y1.toFixed(1);
+            }
+            return path;
+        };
+        // Small per-WAN-interface ping-stability trend graph. Same
+        // width:100%+viewBox trick as drawUsageSpark above (so it scales to
+        // mobile for free), Y-axis auto-ranged off the actual latency values.
+        // Down/timeout samples are pinned to the chart's floor instead of
+        // leaving a gap, so the ONE continuous curve eases smoothly down
+        // into an outage and back up out of it -- a hard-edged block
+        // dropped on top read as a sudden jump-cut, not a trend. A second
+        // fill, sharing the exact same curve geometry (plus the one real
+        // point on each side so it meets the healthy curve exactly rather
+        // than starting/ending mid-air), recolors just that stretch red --
+        // the color change rides on one continuous shape instead of being
+        // a visibly separate layer.
+        var drawWanHistorySpark = function(el, history, color) {
+            if (!el) return;
+            var W = 160, H = 40, P = 2;
+            if (!history || history.length < 2) { el.innerHTML = ''; return; }
+            var vals = history.filter(function(v) { return v != null; });
+            var n = history.length;
+            var x = function(i) { return P + i * (W - 2 * P) / (n - 1); };
+            color = color || '#00bcd4';
+            var gid = 'wq' + Math.random().toString(36).slice(2, 9);
+            var svg = '<defs>' +
+                '<linearGradient id="' + gid + '" x1="0%" y1="0%" x2="0%" y2="100%">' +
+                '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.8"/>' +
+                '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.06"/>' +
+                '</linearGradient>' +
+                '<linearGradient id="' + gid + 'd" x1="0%" y1="0%" x2="0%" y2="100%">' +
+                '<stop offset="0%" stop-color="#f44336" stop-opacity="0.8"/>' +
+                '<stop offset="100%" stop-color="#f44336" stop-opacity="0.06"/>' +
+                '</linearGradient>' +
+                '</defs>';
+
+            if (vals.length === 0) {
+                // A zero-height filled path paints nothing. Give a fully
+                // offline window a real, two-pixel red baseline instead.
+                el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+                    svg + '<rect x="' + P + '" y="' + (H - P - 2) + '" width="' + (W - 2 * P) + '" height="2" rx="1" fill="#f44336" fill-opacity="0.9"/></svg>';
+                return;
+            }
+
+            var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+            if (hi - lo < 10) { var mid = (hi + lo) / 2; lo = mid - 5; hi = mid + 5; }
+            var pad = (hi - lo) * 0.15;
+            lo = Math.max(0, lo - pad); hi = hi + pad;
+            var y = function(v) { return H - P - (v - lo) * (H - 2 * P) / (hi - lo); };
+
+            var allPts = [];
+            for (var i = 0; i < n; i++) {
+                var v = history[i];
+                allPts.push([x(i), v == null ? (H - P) : y(v)]);
+            }
+            var basePath = smoothPathXY(allPts);
+            var baseFill = basePath + ' L ' + allPts[n - 1][0].toFixed(1) + ',' + (H - P) + ' L ' + allPts[0][0].toFixed(1) + ',' + (H - P) + ' Z';
+            // The fill and its fine highlight stroke are one continuous
+            // healthy curve. Outage segments below overlay that exact same
+            // geometry, so their color transition is smooth rather than a
+            // separate-looking block.
+            svg += '<path d="' + baseFill + '" fill="url(#' + gid + ')" stroke="none"/>' +
+                '<path d="' + basePath + '" fill="none" stroke="' + color + '" stroke-opacity="0.72" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>';
+
+            var j = 0;
+            while (j < n) {
+                if (history[j] == null) {
+                    var runEnd = j;
+                    while (runEnd < n && history[runEnd] == null) runEnd++;
+                    var segStart = Math.max(0, j - 1);
+                    var segEnd = Math.min(n - 1, runEnd);
+                    var seg = allPts.slice(segStart, segEnd + 1);
+                    if (seg.length >= 2) {
+                        var dPath = smoothPathXY(seg);
+                        var dFill = dPath + ' L ' + seg[seg.length - 1][0].toFixed(1) + ',' + (H - P) + ' L ' + seg[0][0].toFixed(1) + ',' + (H - P) + ' Z';
+                        svg += '<path d="' + dFill + '" fill="url(#' + gid + 'd)" stroke="none"/>' +
+                            '<path d="' + dPath + '" fill="none" stroke="#f44336" stroke-opacity="0.9" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>';
+                    }
+                    j = runEnd;
+                } else {
+                    j++;
+                }
+            }
+            el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
         };
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
         var PING_WINDOW = 120;
@@ -863,8 +962,14 @@ return view.extend({
         self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
         self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
         self.disabledPings = Array.isArray(savedCfg.disabledPings) ? savedCfg.disabledPings : [];
+        // Per-interface WAN Quality show/hide -- separate from hiddenCards
+        // (which hides the whole card) since interface names are only known
+        // once the collector discovers them, not ahead of time. Persisted
+        // through the same settings_json blob in UCI, so it survives
+        // sysupgrade exactly like the rest of this app's settings.
+        self.hiddenWanIfaces = Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []);
         var saveConfig = function() {
-            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets, disabledPings: self.disabledPings }).catch(function() {});
+            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets, disabledPings: self.disabledPings, wanHidden: self.hiddenWanIfaces }).catch(function() {});
         };
         if (!Array.isArray(savedCfg.hidden) && (self.hiddenCards.length > 0 || self.pingTargets.length > 0)) {
             saveConfig();
@@ -906,30 +1011,77 @@ return view.extend({
             if (ms <= 200) return '#ff7043';
             return '#ff1744';
         };
-        // Brand-colored monogram badges rather than downloaded logo images —
-        // no image assets in this codebase, and avoids reproducing anyone's
-        // actual trademarked logo file. Extend this list as new ISPs show up.
+        // Local SVGs cover the common ISPs. logos.hunter.io remains a
+        // no-auth, domain-keyed fallback for the rest; an unrecognised ISP
+        // uses a colored monogram while a remote image is loading or fails.
+        var ISP_LOGO_DOMAINS = {
+            airtel: 'airtel.in', bharti: 'airtel.in',
+            jio: 'jio.com', reliance: 'jio.com',
+            vodafone: 'myvi.in', ' vi ': 'myvi.in',
+            bsnl: 'bsnl.co.in',
+            hathway: 'hathway.com',
+            comcast: 'xfinity.com', xfinity: 'xfinity.com',
+            verizon: 'verizon.com',
+            't-mobile': 't-mobile.com',
+            spectrum: 'spectrum.com',
+            cox: 'cox.com'
+        };
+        // Keep commonly seen providers in the package as SVGs.  They stay
+        // sharp at every size and do not depend on a third-party favicon
+        // service supplying a transparent, high-resolution raster image.
+        var ISP_LOGO_ASSETS = {
+            airtel: L.resource('hwdash-icons/airtel.svg') + '?v=1', bharti: L.resource('hwdash-icons/airtel.svg') + '?v=1',
+            jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2'
+        };
         var ispBadge = function(ispFull) {
-            var isp = (ispFull || '').toLowerCase();
-            var name = ispFull ? ispFull.split(' - ')[0] : 'Unknown ISP';
-            var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?';
-            if (isp.indexOf('airtel') !== -1) { color = '#ED1B24'; label = 'A'; name = 'Airtel'; }
-            else if (isp.indexOf('jio') !== -1) { color = '#0F1C4D'; label = 'Jio'; name = 'Jio'; }
-            else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1) { color = '#E60000'; label = 'Vi'; name = 'Vi'; }
-            else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; name = 'BSNL'; }
-            else if (isp.indexOf('hathway') !== -1) { color = '#E31E24'; label = 'HW'; name = 'Hathway'; }
-            else if (isp.indexOf('comcast') !== -1) { color = '#000000'; label = 'X'; name = 'Xfinity'; }
+            var raw = ispFull || '';
+            var asn = '';
+            var org = raw;
+            if (raw.indexOf(' | ') !== -1) {
+                var parts = raw.split(' | ');
+                asn = parts[0];
+                org = parts[1];
+            }
+            var isp = org.toLowerCase();
+            var name = org ? org.split(' - ')[0].split(',')[0].trim() : 'Unknown ISP';
+            if (name.length > 20) name = name.substring(0, 17) + '...';
+            var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
+            if (isp.indexOf('airtel') !== -1 || isp.indexOf('bharti') !== -1) { name = 'Airtel'; color = '#ED1B24'; label = 'A'; }
+            else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { name = 'Jio'; color = '#0F1C4D'; label = 'Jio'; }
+            else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { name = 'Vi'; color = '#E60000'; label = 'Vi'; }
+            else if (isp.indexOf('bsnl') !== -1) { name = 'BSNL'; color = '#004C97'; label = 'BSNL'; }
+            else if (isp.indexOf('hathway') !== -1) { name = 'Hathway'; color = '#E31E24'; label = 'HW'; }
+            else if (isp.indexOf('comcast') !== -1 || isp.indexOf('xfinity') !== -1) { name = 'Xfinity'; color = '#111827'; label = 'X'; }
             else if (isp.indexOf('at&t') !== -1) { color = '#00A8E0'; label = 'AT&T'; name = 'AT&T'; }
-            else if (isp.indexOf('verizon') !== -1) { color = '#CD040B'; label = 'V'; name = 'Verizon'; }
-            return { color: color, label: label, name: name };
+            else if (isp.indexOf('verizon') !== -1) { name = 'Verizon'; color = '#CD040B'; label = 'V'; }
+            for (var key in ISP_LOGO_DOMAINS) {
+                if (isp.indexOf(key) !== -1) { domain = ISP_LOGO_DOMAINS[key]; break; }
+            }
+            for (var assetKey in ISP_LOGO_ASSETS) {
+                if (isp.indexOf(assetKey) !== -1) { logo = ISP_LOGO_ASSETS[assetKey]; break; }
+            }
+            return { color: color, label: label, name: name, asn: asn, domain: domain, logo: logo };
         };
         var fmtDuration = function(s) {
             s = Math.max(0, Math.floor(s || 0));
             var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-            if (d > 0) return d + 'd ' + h + 'h';
-            if (h > 0) return h + 'h ' + m + 'm';
-            if (m > 0) return m + 'm';
-            return s + 's';
+            if (d > 0) return d + 'D ' + h + 'H';
+            if (h > 0) return h + 'H ' + m + 'M';
+            if (m > 0) return m + 'M';
+            return s + 'S';
+        };
+        // Full breakdown down to the second (WAN Quality's uptime/downtime
+        // streak) -- unlike fmtDuration above, never caps at two units, so
+        // an admin can tell exactly when a link flipped, not just "9h".
+        var fmtDurationFull = function(s) {
+            s = Math.max(0, Math.floor(s || 0));
+            var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+            var parts = [];
+            if (d > 0) parts.push(d + 'D');
+            if (d > 0 || h > 0) parts.push(h + 'H');
+            if (d > 0 || h > 0 || m > 0) parts.push(m + 'M');
+            parts.push(sec + 'S');
+            return parts.join(' ');
         };
         var cardRegistry = {
             sysinfo: { nodes: [sysCard], label: 'System Info', show: 'flex' },
@@ -983,6 +1135,12 @@ return view.extend({
             cardChecks.appendChild(E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, cardRegistry[key].label]));
         });
         settingsPanel.appendChild(cardChecks);
+        var wanIfaceSection = E('div', { style: 'display: none;' }, [
+            E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'WAN Quality Interfaces'),
+            E('div', { id: 'hw-wanq-checks', class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' })
+        ]);
+        settingsPanel.appendChild(wanIfaceSection);
+        self._wanIfaceCheckCache = {};
         settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Ping Targets'));
         var targetList = E('div', { class: 'cbi-value-field', style: 'margin-bottom: 10px;' });
         var makePingToggle = function(host, fam, label, isCustom, customIdx) {
@@ -1242,7 +1400,15 @@ return view.extend({
             if (self.pingBusy && (_pnow - (self.pingBusyAt || 0)) < 10000) return Promise.resolve();
             self.pingBusy = true;
             self.pingBusyAt = _pnow;
-            return callHwPing(pingTargetPairs()).then(function(res) {
+            // poll.add shares one master tick across every registered
+            // interval, so a 1s tick coincides with a 3s tick (infoTick)
+            // every 3rd cycle no matter what -- a small offset keeps this
+            // rpcd invocation from landing in the same instant as info's
+            // and wan_quality's, instead of three separate shell-script
+            // processes all forking at once and briefly spiking the CPU.
+            return new Promise(function(res) { setTimeout(res, 400); }).then(function() {
+                return callHwPing(pingTargetPairs());
+            }).then(function(res) {
                 if (!res || !res.targets || res.targets.length === 0) return;
                 if (!self.pingHist) self.pingHist = {};
                 var hist = self.pingHist;
@@ -1430,7 +1596,7 @@ return view.extend({
                 applyCardVisibility();
             }).catch(function() {}).then(function() { self.pingBusy = false; });
         };
-        poll.add(pingTick, 1);
+        poll.add(pingTick, 2);
         var infoTick = function() {
             if (document.hidden) return Promise.resolve();
             var _inow = Date.now();
@@ -2622,75 +2788,6 @@ return view.extend({
                     });
                     if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                 }
-                (function() {
-                    var wq = res.wan_quality;
-                    var wanQBox = document.getElementById('hw-wanq-list');
-                    if (!wanQBox) return;
-                    var hasWanQ = wq && wq.length > 0;
-                    wanQualityCard.style.display = hasWanQ && self.hiddenCards.indexOf('wan_quality') === -1 ? 'flex' : 'none';
-                    if (!hasWanQ) return;
-                    if (!self._wanQCache) self._wanQCache = {};
-                    syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
-                        var dot = E('span', { style: 'width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;' });
-                        var nameSpan = E('span', { style: 'font-weight: 700; font-size: 0.95em; flex-shrink: 0;' });
-                        var badgeEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 0.72em; font-weight: 700; color: #fff; white-space: nowrap; flex-shrink: 0;' });
-                        var ispNameSpan = E('span', { style: 'font-size: 0.85em; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
-                        var uptimeSpan = E('span', { class: 'hw-stat-value', style: 'font-size: 0.85em;' });
-                        var streakSpan = E('span', { style: 'font-size: 0.8em; opacity: 0.65; white-space: nowrap;' });
-                        var latSpan = E('span', { style: 'font-size: 0.8em; opacity: 0.65; white-space: nowrap;' });
-                        var barWrap = E('div', { style: 'display: flex; align-items: flex-end; gap: 1px; width: 100%; height: 34px; margin-top: 9px;' });
-                        var el = E('div', { style: 'width: 100%; padding-bottom: 6px;' }, [
-                            E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px;' }, [
-                                E('span', { style: 'display: flex; align-items: center; gap: 8px; min-width: 0;' }, [dot, nameSpan, badgeEl, ispNameSpan]),
-                                E('span', { style: 'display: flex; align-items: center; gap: 12px; flex-wrap: wrap;' }, [uptimeSpan, streakSpan, latSpan])
-                            ]),
-                            barWrap
-                        ]);
-                        return { el: el, dot: dot, name: nameSpan, badge: badgeEl, ispName: ispNameSpan, uptime: uptimeSpan, streak: streakSpan, lat: latSpan, barWrap: barWrap, segEls: null };
-                    }, function(entry, r) {
-                        var statusColor = r.status === 'up' ? '#00bcd4' : r.status === 'down' ? '#ff1744' : '#9e9e9e';
-                        entry.dot.style.background = statusColor;
-                        entry.name.textContent = r.iface.toUpperCase();
-                        var ib = ispBadge(r.isp);
-                        entry.badge.style.background = ib.color;
-                        entry.badge.textContent = ib.label;
-                        entry.ispName.textContent = ib.name;
-                        entry.uptime.textContent = r.uptime_pct.toFixed(2) + '%';
-                        entry.uptime.style.color = r.uptime_pct >= 99.5 ? '#00bcd4' : r.uptime_pct >= 95 ? '#ffb300' : '#ff1744';
-                        entry.streak.textContent = (r.status === 'down' ? 'down ' : 'up ') + fmtDuration(r.since_change_s);
-                        entry.streak.style.color = r.status === 'down' ? '#ff1744' : '';
-                        entry.lat.textContent = r.status === 'up' ? ('avg ' + r.avg_ms.toFixed(0) + ' ms') : (r.status === 'down' ? 'unreachable' : '');
-                        if (!entry.segEls) {
-                            entry.segEls = [];
-                            r.buckets.forEach(function() {
-                                var seg = E('div', { style: 'flex: 1; min-width: 1px; border-radius: 1px;' });
-                                entry.segEls.push(seg);
-                                entry.barWrap.appendChild(seg);
-                            });
-                        }
-                        r.buckets.forEach(function(b, i) {
-                            var seg = entry.segEls[i];
-                            if (!seg) return;
-                            if (b == null) {
-                                seg.style.height = '8%';
-                                seg.style.background = 'rgba(128,128,128,0.18)';
-                                seg.title = '';
-                            } else if (b.loss >= 50) {
-                                seg.style.height = '100%';
-                                seg.style.background = '#ff1744';
-                                seg.title = b.loss.toFixed(0) + '% loss';
-                            } else if (b.loss > 0) {
-                                seg.style.height = Math.max(60, Math.min(100, b.avg)) + '%';
-                                seg.style.background = '#ffb300';
-                                seg.title = b.loss.toFixed(0) + '% loss, ' + b.avg.toFixed(0) + ' ms avg';
-                            } else {
-                                seg.style.height = Math.max(15, Math.min(100, b.avg)) + '%';
-                                seg.style.background = pingStatColor(b.avg) || '#00bcd4';
-                                seg.title = b.avg.toFixed(0) + ' ms avg';
-                            }
-                        });
-                    });
-                })();
                 var portsNode = document.getElementById('hw-eth-links');
                 var validPcie = [];
                 if (res.pcie_devs) {
@@ -3272,6 +3369,180 @@ return view.extend({
         };
         poll.add(infoTick, 3);
         infoTick();
+
+        // WAN Quality gets its own poll tick at the same 2s cadence as
+        // Ping Latency (poll.add(pingTick, 2) above) instead of piggy-
+        // backing on the much heavier 3s info tick -- that heavier tick's
+        // rate is what made this card feel a beat behind Ping Latency even
+        // after the background collector itself sped up. 2s (not 1s) is a
+        // deliberate balance: measured sustained CPU cost of 1s polling on
+        // both cards was ~10% just from the recurring rpcd invocations
+        // alone, which is the actual "gets stuck"/CPU complaint -- 2s
+        // roughly halves that while still feeling close to real-time. The
+        // rpcd side (luci.hwdash `wan_quality`) is a small, dedicated, pure file
+        // reader, so polling it 3x more often costs almost nothing extra.
+        var wanQTick = function() {
+            if (document.hidden) return Promise.resolve();
+            if (self.hiddenCards && self.hiddenCards.indexOf('wan_quality') !== -1) return Promise.resolve();
+            var _wnow = Date.now();
+            if (self.wanQBusy && (_wnow - (self.wanQBusyAt || 0)) < 10000) return Promise.resolve();
+            self.wanQBusy = true;
+            self.wanQBusyAt = _wnow;
+            // See the matching comment in pingTick -- same shared-tick
+            // collision, offset to a different point in the cycle so all
+            // three of this card's, ping's, and info's rpcd invocations
+            // don't fork at the same instant.
+            return new Promise(function(res) { setTimeout(res, 150); }).then(function() {
+                return callHwGetWanQuality();
+            }).then(function(res) {
+                var wqAll = res && res.wan_quality;
+                var wanQBox = document.getElementById('hw-wanq-list');
+                if (!wanQBox) return;
+                var hasWanQ = wqAll && wqAll.length > 0;
+                wanQualityCard.style.display = hasWanQ && self.hiddenCards.indexOf('wan_quality') === -1 ? 'flex' : 'none';
+                var wanIfaceSectionNode = wanIfaceSection;
+                wanIfaceSectionNode.style.display = hasWanQ ? '' : 'none';
+                if (hasWanQ) {
+                    var wanqChecks = document.getElementById('hw-wanq-checks');
+                    syncRows(wanqChecks, self._wanIfaceCheckCache, wqAll, function(r) { return r.iface; }, function(r) {
+                        var cb = E('input', { type: 'checkbox' });
+                        var lbl = E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, r.iface.toUpperCase()]);
+                        return { el: lbl, cb: cb, iface: r.iface };
+                    }, function(entry, r) {
+                        entry.cb.checked = self.hiddenWanIfaces.indexOf(r.iface) === -1;
+                        entry.cb.onchange = function(ev) {
+                            var idx = self.hiddenWanIfaces.indexOf(r.iface);
+                            if (ev.target.checked && idx !== -1) self.hiddenWanIfaces.splice(idx, 1);
+                            else if (!ev.target.checked && idx === -1) self.hiddenWanIfaces.push(r.iface);
+                            saveConfig();
+                        };
+                    });
+                }
+                if (!hasWanQ) return;
+                var wq = wqAll.filter(function(r) { return self.hiddenWanIfaces.indexOf(r.iface) === -1; });
+                if (!self._wanQCache) self._wanQCache = {};
+
+                syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
+                    // Persistent img + monogram pair, never rebuilt -- the
+                    // monogram is both the instant loading state and the
+                    // fallback if the real logo 404s/fails to load.
+                    var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
+                    var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
+                    logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
+                    logoImg.onerror = function() { logoImg.style.display = 'none'; monogramEl.style.display = 'inline-flex'; logoImg.dataset.src = ''; };
+                    var badgeWrapper = E('div', { style: 'position: relative; width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;' }, [monogramEl, logoImg]);
+                    var ispNameSpan = E('span', { style: 'font-weight: 600; font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
+                    var ifaceAsnSpan = E('span', { style: 'font-size: 0.78em; opacity: 0.55; white-space: nowrap; font-family: monospace; letter-spacing: 0.3px;' });
+                    var infoBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px;' }, [ispNameSpan, ifaceAsnSpan]);
+
+                    var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; vertical-align: middle;' });
+                    var statusVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; vertical-align: middle;' });
+                    var statusLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; font-weight: 500; white-space: nowrap;' });
+                    var statusBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; line-height: 1;' }, [statusDot, statusVal]),
+                        statusLbl
+                    ]);
+
+                    var latVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; color: #00bcd4; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                    var latLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'LATENCY');
+                    var latBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [latVal, latLbl]);
+
+                    var uptimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                    var uptimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'UPTIME 24H');
+                    var uptimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [uptimeVal, uptimeLbl]);
+
+                    var downtimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                    var downtimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN 24H');
+                    var downtimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [downtimeVal, downtimeLbl]);
+
+                    var histGraphEl = E('div', { style: 'width: 100%; height: 32px;' });
+                    var histLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; text-align: center; display: block;' }, 'TREND');
+                    var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; width: 108px; flex: 0 0 108px;' }, [histGraphEl, histLbl]);
+
+                    var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
+                        E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
+                            E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
+                            E('div', { style: 'display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 360px; flex: 1 1 280px;' }, [statusBlock, latBlock, uptimeBlock, downtimeBlock]),
+                            histBlock
+                        ])
+                    ]);
+
+                    return {
+                        el: el,
+                        monogramEl: monogramEl,
+                        logoImg: logoImg,
+                        ispName: ispNameSpan,
+                        ifaceAsn: ifaceAsnSpan,
+                        statusDot: statusDot,
+                        statusVal: statusVal,
+                        statusLbl: statusLbl,
+                        lat: latVal,
+                        uptime: uptimeVal,
+                        downtime: downtimeVal,
+                        histGraph: histGraphEl
+                    };
+                }, function(entry, r) {
+                    var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
+                    entry.statusDot.style.background = statusColor;
+                    entry.statusVal.style.color = statusColor;
+                    entry.statusVal.textContent = r.status === 'up' ? 'ACTIVE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
+                    entry.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
+
+                    var ib = ispBadge(r.isp);
+                    entry.ispName.textContent = ib.name;
+                    entry.monogramEl.style.background = ib.color;
+                    entry.monogramEl.textContent = ib.label;
+                    // Only touch img.src when the selected asset actually
+                    // changes -- setting src every poll would refetch and
+                    // flicker the logo for no reason.
+                    var logoSrc = ib.logo || (ib.domain ? 'https://logos.hunter.io/' + ib.domain : '');
+                    if (logoSrc && entry.logoImg.dataset.src !== logoSrc) {
+                        entry.logoImg.dataset.src = logoSrc;
+                        entry.logoImg.style.display = 'none';
+                        entry.monogramEl.style.display = 'inline-flex';
+                        entry.logoImg.src = logoSrc;
+                    } else if (!logoSrc && entry.logoImg.dataset.src) {
+                        entry.logoImg.dataset.src = '';
+                        entry.logoImg.style.display = 'none';
+                        entry.monogramEl.style.display = 'inline-flex';
+                    }
+
+                    var ifnLabel = r.iface.toUpperCase();
+                    if (ib.asn) {
+                        entry.ifaceAsn.textContent = ifnLabel + ' • ' + ib.asn;
+                    } else {
+                        entry.ifaceAsn.textContent = ifnLabel + ' • Local Link';
+                    }
+
+                    entry.uptime.textContent = r.uptime_pct.toFixed(2) + '%';
+                    entry.uptime.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
+
+                    entry.downtime.textContent = r.downtime_pct.toFixed(2) + '%';
+                    entry.downtime.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
+
+                    var latColor = '#4caf50';
+                    if (r.cur_ms != null) {
+                        if (r.cur_ms > 250) latColor = '#f44336';
+                        else if (r.cur_ms > 150) latColor = '#ff9800';
+                        else if (r.cur_ms > 100) latColor = '#ffb300';
+                        else if (r.cur_ms > 50) latColor = '#8bc34a';
+                    }
+                    entry.lat.style.color = latColor;
+                    entry.lat.textContent = (r.status === 'up' && r.cur_ms != null) ? (r.cur_ms + ' ms') : '—';
+
+                    // Down periods render their own red band inside
+                    // drawWanHistorySpark itself (only from where the
+                    // outage actually starts) -- this color only applies
+                    // to the healthy segments, so it should never be the
+                    // down/red status color even while currently down.
+                    drawWanHistorySpark(entry.histGraph, r.history, latColor);
+                });
+            }).catch(function(err) {
+                console.error(err);
+            }).then(function() { self.wanQBusy = false; });
+        };
+        poll.add(wanQTick, 2);
+        wanQTick();
         pingTick();
         return container;
     },
