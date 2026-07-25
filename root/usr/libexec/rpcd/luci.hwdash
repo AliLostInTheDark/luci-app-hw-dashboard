@@ -71,6 +71,48 @@ _cache_write() {
 		mv "$1.$$" "$1" 2>/dev/null
 }
 
+# Which resolver should this package's own lookups use?
+#
+# Same rule as the collector: anything other than dnsmasq on :53 (AdGuard
+# Home, Pi-hole, Unbound) logs and charts every query it sees, and the Ping
+# Latency card is the heaviest DNS user in the package -- measured on one
+# router, 1,426 of the 1,487 logged queries for its default targets came from
+# the router itself. dnsmasq is left alone since it does not log per-query.
+#
+# Detected from the listener on :53 and cached for an hour: this method runs
+# about once a second, so it must never cost a netstat per call.
+HWDASH_DNS=""
+_dns_bypass() {
+	if _cache_read /tmp/hwdash_dnssrv.cache; then
+		[ "$C_VAL" = "-" ] && HWDASH_DNS="" || HWDASH_DNS="$C_VAL"
+		return
+	fi
+	_own=""
+	if command -v netstat >/dev/null 2>&1; then
+		_own=$(netstat -lnp 2>/dev/null | awk '$4 ~ /:53$/ && $NF ~ /\// {
+			n = split($NF, a, "/"); print a[n]; exit }')
+	fi
+	[ -z "$_own" ] && { pgrep -x dnsmasq >/dev/null 2>&1 && _own=dnsmasq; }
+	case "$_own" in
+		dnsmasq) HWDASH_DNS="" ;;
+		*) HWDASH_DNS="1.1.1.1" ;;
+	esac
+	_cache_write /tmp/hwdash_dnssrv.cache 3600 "${HWDASH_DNS:--}"
+}
+
+# Resolve a hostname off the local resolver. Empty result means "could not",
+# and the caller keeps the name -- for the ping card a one-off fallback is
+# better than losing the probe entirely, and it cannot recur often because the
+# answer is cached for 30 minutes either way.
+_resolve_off_resolver() {
+	[ -z "$HWDASH_DNS" ] && return
+	_rqt=A; [ "$2" = "6" ] && _rqt=AAAA
+	_rres=$(nslookup -type="$_rqt" "$1" "$HWDASH_DNS" 2>/dev/null | \
+		awk '/^Name:/ { s = 1 } s && /^Address/ { print $NF; exit }')
+	case "$_rres" in ''|*[!0-9a-fA-F.:]*) return ;; esac
+	printf '%s' "$_rres"
+}
+
 # Hand the collector the user's raw (unresolved) WAN probe targets. It owns
 # hostname resolution and the fallback list; this side deliberately does not
 # substitute a default for an empty value -- empty means "use your built-in
@@ -254,6 +296,7 @@ case "$1" in
 				;;
 			ping)
 				HWDASH_NOW=$(date +%s 2>/dev/null)
+				_dns_bypass
 				# Router-side latency probes. Target list priority:
 				#   1. "targets" array in the RPC args (set from the dashboard
 				#      settings panel, stored per-browser) — "<host> <4|6>"
@@ -399,7 +442,7 @@ EOFR
 										;;
 								esac
 							done <<EOFN
-$(nslookup "$_bare" 2>/dev/null)
+$(nslookup "$_bare" $HWDASH_DNS 2>/dev/null)
 EOFN
 							case "$_nm" in *[!A-Za-z0-9.-]*) _nm="-" ;; esac
 							_map="${_map:+$_map;}$_rip=$_nm"
@@ -445,6 +488,17 @@ EOFN
 							;;
 					esac
 					(
+						# Still a name here means the 30-minute map had no
+						# entry. Resolve it ourselves rather than letting ping
+						# hand it to the local resolver. Done inside the
+						# subshell so every cold target resolves in parallel
+						# with the others, not one after another.
+						case "$_tgt" in
+							*[!0-9.:]*)
+								_rip=$(_resolve_off_resolver "$_tgt" "$_pt_f")
+								[ -n "$_rip" ] && _tgt=$_rip
+								;;
+						esac
 						# family FIRST, -w 2 = hard 2s deadline (route/connect
 						# hangs that -W does not cap), -n = no reverse-DNS
 						# (its resolver timeout was the 5s stall when the

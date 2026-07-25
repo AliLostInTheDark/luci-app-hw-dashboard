@@ -76,6 +76,15 @@ Follow-up review of the r22 collector, verified by running it against a live
   router with 13 WANs: 6,879 historical `cymru`/`ipify` entries in its query
   log, and zero new ones across a full cold start with all 13 interfaces
   resolving.
+* **The Ping Latency card was the biggest offender, and is now covered too.**
+  Its default targets are hostnames (`dns.google`, `google.com`,
+  `one.one.one.one`, `youtube.com`), and while a 30-minute map means most
+  probes ping a cached IP, a cold or expired entry let `ping` resolve the name
+  through the local resolver -- as did the reverse-DNS (`PTR`) lookups, which
+  called `nslookup` with no server. Measured on one AdGuard Home router:
+  **1,426 of the 1,487** logged queries for those targets came from the router
+  itself. Both paths now use the same bypass, resolved in parallel inside each
+  target's existing subshell so the call does not get slower.
 * **IPv6 ISP resolution.** A v6 interface previously only ever inherited its
   v4 sibling's ISP, so a v6-only WAN (or one not named `<v4name>6`) showed
   nothing. It now falls back to a real lookup in Cymru's `origin6` zone. The
