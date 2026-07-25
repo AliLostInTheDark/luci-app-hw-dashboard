@@ -41,6 +41,17 @@ var callHwSetCpuPerf = rpc.declare({
     params: ['perf'],
     expect: {}
 });
+var callHwGetAql = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'get_aql',
+    expect: {}
+});
+var callHwSetAql = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'set_aql',
+    params: ['aql'],
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -951,6 +962,7 @@ return view.extend({
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
+        var aqlCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wireless AQL'), E('div', { id: 'hw-aql', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var irqCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Interrupts'), E('div', { id: 'hw-irq', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
@@ -965,6 +977,7 @@ return view.extend({
         container.appendChild(irqCard);
         container.appendChild(hwmonCard);
         container.appendChild(offloadCard);
+        container.appendChild(aqlCard);
         container.appendChild(dskCard.node);
         container.appendChild(extCard);
         var myExtWrapper = E('div', {
@@ -1152,6 +1165,7 @@ return view.extend({
             cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
             offload: { nodes: [offloadCard], label: 'Offload Engines', show: null },
+            aql: { nodes: [aqlCard], label: 'Wireless AQL', show: null },
             irq: { nodes: [irqCard], label: 'Interrupts', show: null },
             events: { nodes: [eventsCard], label: 'Hardware Events', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
@@ -1400,6 +1414,139 @@ return view.extend({
                     ? 'Applies immediately and persists across reboot (synced to /etc/config/cpu-perf).'
                     : 'Applies immediately; resets after reboot. Install luci-app-cpu-perf to persist.'));
         };
+        // --- Wireless AQL settings ------------------------------------
+        // Save / Revert / Reset follow LuCI's own semantics:
+        //   Save   - apply to the live radios AND persist to UCI
+        //   Revert - discard unsaved edits, reload what is persisted
+        //   Reset  - drop the persisted section and restore mac80211 defaults
+        settingsPanel.appendChild(E('h4', {
+            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
+        }, 'Wireless AQL (Airtime Queue Limits)'));
+        var aqlBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
+        settingsPanel.appendChild(aqlBody);
+
+        var AQL_PRESETS = {
+            latency:   { low: 1500, high: 2500, label: 'Latency (1500 / 2500)' },
+            balanced:  { low: 5000, high: 12000, label: 'Balanced — driver default (5000 / 12000)' },
+            bandwidth: { low: 15000, high: 20000, label: 'Bandwidth (15000 / 20000)' }
+        };
+        var buildAqlForm = function(aq) {
+            aqlBody.innerHTML = '';
+            aqlBody.style.opacity = '1';
+            if (!aq || !aq.available) {
+                aqlBody.appendChild(E('div', { style: 'opacity: 0.7;' },
+                    'Not available: this build has no mac80211 AQL controls in debugfs (needs CONFIG_MAC80211_DEBUGFS and debugfs mounted).'));
+                return;
+            }
+            var def = aq.defaults || { low: 5000, high: 12000, threshold: 24000 };
+            var saved = aq.saved || {};
+            // What the radios are running right now, which is the honest
+            // starting point when nothing has been persisted yet.
+            var live = (aq.phys && aq.phys[0]) || null;
+            var liveBe = null;
+            if (live && live.limits) live.limits.forEach(function(l) { if (l.ac === 'BE') liveBe = l; });
+            var curLow  = saved.low  != null ? saved.low  : (liveBe ? liveBe.low  : def.low);
+            var curHigh = saved.high != null ? saved.high : (liveBe ? liveBe.high : def.high);
+            var curTh   = saved.threshold != null ? saved.threshold : (live ? live.threshold : def.threshold);
+            var curEn   = saved.enable != null ? saved.enable : (live && live.enable === 0 ? 0 : 1);
+
+            if (aq.wed_active) {
+                aqlBody.appendChild(E('div', {
+                    style: 'margin-bottom: 10px; padding: 8px 10px; border-left: 3px solid #ffa726; background: rgba(255,167,38,0.08); font-size: 0.82em; line-height: 1.45;'
+                }, 'WED is active' + (aq.wed_devs ? ' (' + aq.wed_devs + ')' : '') + '. It offloads the Wi\u2011Fi datapath in hardware and bypasses mac80211\u2019s queues entirely, so AQL does not govern that traffic and these values will have no effect. Disable WED to tune latency with AQL \u2014 the two are mutually exclusive.'));
+            }
+
+            var presetSel = E('select', { class: 'cbi-input-select', style: 'width: 260px;' });
+            Object.keys(AQL_PRESETS).forEach(function(k) {
+                presetSel.appendChild(E('option', { value: k }, AQL_PRESETS[k].label));
+            });
+            presetSel.appendChild(E('option', { value: 'custom' }, 'Custom'));
+            var lowInput  = E('input', { type: 'text', class: 'cbi-input-text', value: String(curLow),  style: 'width: 110px;' });
+            var highInput = E('input', { type: 'text', class: 'cbi-input-text', value: String(curHigh), style: 'width: 110px;' });
+            var thInput   = E('input', { type: 'text', class: 'cbi-input-text', value: String(curTh),   style: 'width: 110px;' });
+            var enCb = E('input', { type: 'checkbox', style: 'width: 18px; height: 18px;' });
+            enCb.checked = curEn !== 0;
+
+            var syncPreset = function() {
+                var m = 'custom';
+                Object.keys(AQL_PRESETS).forEach(function(k) {
+                    if (String(AQL_PRESETS[k].low) === lowInput.value.trim() &&
+                        String(AQL_PRESETS[k].high) === highInput.value.trim()) m = k;
+                });
+                presetSel.value = m;
+            };
+            syncPreset();
+            presetSel.addEventListener('change', function() {
+                var pr = AQL_PRESETS[presetSel.value];
+                if (!pr) return;
+                lowInput.value = String(pr.low);
+                highInput.value = String(pr.high);
+            });
+            lowInput.addEventListener('input', syncPreset);
+            highInput.addEventListener('input', syncPreset);
+
+            var msg = E('span', { style: 'margin-left: 10px; font-size: 0.85em;' });
+            var setMsg = function(t, c) { msg.textContent = t; msg.style.color = c || ''; };
+            var busy = function(b) {
+                [saveBtn, revertBtn, resetBtn].forEach(function(x) { x.disabled = b; });
+            };
+            var reload = function(note) {
+                return callHwGetAql().then(function(fresh) {
+                    buildAqlForm(fresh);
+                    if (note) setTimeout(function() {
+                        var m2 = aqlBody.querySelector('[data-aqlmsg]');
+                        if (m2) { m2.textContent = note.t; m2.style.color = note.c; }
+                    }, 0);
+                });
+            };
+            var saveBtn = E('button', { class: 'cbi-button cbi-button-save' }, 'Save');
+            var revertBtn = E('button', { class: 'cbi-button', style: 'margin-left: 6px;' }, 'Revert');
+            var resetBtn = E('button', { class: 'cbi-button cbi-button-reset', style: 'margin-left: 6px;' }, 'Reset');
+            msg.setAttribute('data-aqlmsg', '1');
+
+            saveBtn.addEventListener('click', function() {
+                var lo = parseInt(lowInput.value, 10), hi = parseInt(highInput.value, 10), th = parseInt(thInput.value, 10);
+                if (!(lo > 0) || !(hi > 0) || lo > hi) { setMsg('Low must be a number \u2264 high.', '#ff5252'); return; }
+                busy(true); setMsg('Applying\u2026');
+                callHwSetAql({ low: lo, high: hi, threshold: th > 0 ? th : def.threshold, enable: enCb.checked ? 1 : 0 })
+                    .then(function(r) {
+                        busy(false);
+                        if (r && r.result === 'ok') reload({ t: 'Saved and applied.', c: '#8bc34a' });
+                        else setMsg('Rejected: ' + ((r && r.result) || 'error'), '#ff5252');
+                    }).catch(function() { busy(false); setMsg('Request failed.', '#ff5252'); });
+            });
+            revertBtn.addEventListener('click', function() {
+                busy(true); setMsg('Reverting\u2026');
+                reload({ t: 'Reverted to saved values.', c: '' }).then(function() { busy(false); });
+            });
+            resetBtn.addEventListener('click', function() {
+                busy(true); setMsg('Resetting\u2026');
+                callHwSetAql({ reset: true }).then(function(r) {
+                    busy(false);
+                    if (r && r.result === 'ok') reload({ t: 'Reset to driver defaults.', c: '#8bc34a' });
+                    else setMsg('Reset failed.', '#ff5252');
+                }).catch(function() { busy(false); setMsg('Request failed.', '#ff5252'); });
+            });
+
+            aqlBody.appendChild(cbiRow('Preset:', presetSel));
+            aqlBody.appendChild(cbiRow('TX queue low (\u00b5s):', lowInput));
+            aqlBody.appendChild(cbiRow('TX queue high (\u00b5s):', highInput));
+            aqlBody.appendChild(cbiRow('Threshold (\u00b5s):', thInput));
+            aqlBody.appendChild(cbiRow('AQL enabled:', enCb));
+            aqlBody.appendChild(cbiRow('', [saveBtn, revertBtn, resetBtn, msg]));
+            aqlBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px; line-height: 1.5;' },
+                'Lower limits cut latency under load at some cost to peak throughput; 1500\u20132500 is the usual sweet spot. Applies to every radio immediately and is replayed on boot, since debugfs itself does not persist.'));
+        };
+        var aqlLoaded = false;
+        var loadAql = function() {
+            if (aqlLoaded) return;
+            aqlLoaded = true;
+            callHwGetAql().then(buildAqlForm).catch(function() {
+                aqlBody.textContent = 'Failed to read AQL state.';
+                aqlBody.style.opacity = '1';
+            });
+        };
+
         var cpuPerfLoaded = false;
         var loadCpuPerf = function() {
             if (cpuPerfLoaded) return;
@@ -1438,7 +1585,7 @@ return view.extend({
             style: 'padding: 4px 14px;',
             click: function() {
                 settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
-                if (settingsPanel.style.display !== 'none') loadCpuPerf();
+                if (settingsPanel.style.display !== 'none') { loadCpuPerf(); loadAql(); }
             }
         }, '\u2699 Settings');
         var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
@@ -3259,6 +3406,17 @@ return view.extend({
                         if (off.sw_flows >= 0) offRows.push({ k: 'swflows', type: 'bar', label: off.qcom ? 'PPE Offloaded Flows' : 'Offloaded / Active Flows', cur: off.sw_flows, tot: connNow, color: '#00bcd4' });
                         if (!off.qcom && off.ppe_flows >= 0) offRows.push({ k: 'ppeflows', type: 'bar', label: 'PPE Bind Entries', cur: off.ppe_flows, tot: off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), color: '#8bc34a' });
                         if (off.wed > 0) offRows.push({ k: 'wed', type: 'row', label: 'WED (Wi-Fi offload)', val: off.wed + ' engine' + (off.wed > 1 ? 's' : ''), color: '#00bcd4' });
+                        // Accelerator is configured but the kernel exposes no
+                        // counters for it -- say so, rather than showing an
+                        // "Active" row with no numbers under it and leaving the
+                        // reader to guess whether offload is broken.
+                        if (off.dbg !== undefined && off.dbg < 2 && (off.ft > 0 || off.hw_cfg > 0 || off.sw_cfg > 0)) {
+                            offRows.push({
+                                k: 'nodbg', type: 'row', label: 'Flow counters',
+                                val: off.dbg === 0 ? 'debugfs not mounted' : 'not exposed by this build',
+                                color: '#ffa726'
+                            });
+                        }
                         if (off.qcom) {
                             var q = off.qcom;
                             offRows.push({ k: 'qcomhdr', type: 'header', label: 'Qualcomm PPE Diagnostics' });
@@ -3331,6 +3489,62 @@ return view.extend({
                     offloadCard.style.display = 'flex';
                 } else {
                     offloadCard.style.display = 'none';
+                }
+                // --- Wireless AQL ------------------------------------------
+                // Hidden outright when the controls don't exist: no debugfs, or
+                // a kernel built without CONFIG_MAC80211_DEBUGFS. There is
+                // nothing to show and nothing to tune, so an empty card would
+                // just be noise.
+                if (res.aql && res.aql.available) {
+                    var aq = res.aql;
+                    var aqlNode = document.getElementById('hw-aql');
+                    if (aqlNode) {
+                        var aqlRows = [];
+                        // WED offloads the WiFi datapath in hardware and never
+                        // enqueues through mac80211, so AQL simply doesn't see
+                        // that traffic. Lead with that -- the values below are
+                        // real, they just aren't governing anything.
+                        if (aq.wed_active) {
+                            aqlRows.push({ k: 'wedwarn', type: 'row', label: '⚠ WED active' + (aq.wed_devs ? ' (' + aq.wed_devs + ')' : ''), val: 'AQL bypassed', color: '#ffa726' });
+                        } else if (aq.wed_param) {
+                            aqlRows.push({ k: 'wedparam', type: 'row', label: 'WED', value: '', val: 'enabled, not attached', color: '#9e9e9e' });
+                        }
+                        (aq.phys || []).forEach(function(ph) {
+                            var be = null;
+                            (ph.limits || []).forEach(function(l) { if (l.ac === 'BE') be = l; });
+                            if (!be && ph.limits && ph.limits.length) be = ph.limits[0];
+                            aqlRows.push({ k: ph.phy + '-hdr', type: 'header', label: ph.phy.toUpperCase() + (ph.enable === 0 ? ' (disabled)' : '') });
+                            if (be) {
+                                aqlRows.push({ k: ph.phy + '-lim', type: 'row', label: 'TX Queue Limit (low / high)', val: be.low + ' / ' + be.high + ' µs', color: be.high <= 3000 ? '#8bc34a' : (be.high >= 12000 ? '#00bcd4' : '') });
+                            }
+                            aqlRows.push({ k: ph.phy + '-th', type: 'row', label: 'Threshold', val: ph.threshold + ' µs', color: '' });
+                            // Pending airtime is the proof it's live: a WED-
+                            // bypassed radio sits at 0 no matter the load.
+                            aqlRows.push({ k: ph.phy + '-pend', type: 'row', label: 'Pending Airtime', val: ph.pending_us + ' µs', color: ph.pending_us > 0 ? '#8bc34a' : '#9e9e9e' });
+                        });
+                        syncRows(aqlNode, self._aqlCache || (self._aqlCache = {}), aqlRows, function(r) { return r.k; }, function(r) {
+                            if (r.type === 'header') {
+                                var eh = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
+                                    E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, r.label),
+                                    E('span', { class: 'hw-stat-value' }, '')
+                                ]);
+                                return { el: eh };
+                            }
+                            var v = E('span', { class: 'hw-stat-value' });
+                            return { el: E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), v]), val: v };
+                        }, function(entry, r) {
+                            if (r.type === 'header') {
+                                entry.el.firstChild.textContent = r.label;
+                                return;
+                            }
+                            entry.el.firstChild.textContent = r.label;
+                            entry.val.textContent = r.val;
+                            entry.val.style.color = r.color;
+                        });
+                    }
+                    aqlCard.style.display = 'flex';
+                } else {
+                    aqlCard.style.display = 'none';
                 }
                 if (res.hw_events && res.hw_events.length > 0) {
                     var evNode = document.getElementById('hw-events');

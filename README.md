@@ -35,6 +35,7 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 | **WiFi** | Per-band PHY details (channel, TX power, NSS, bitrate, noise floor) straight from `iwinfo`/`iw` |
 | **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess — plus a bufferbloat grade |
 | **WAN Quality** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3` or carrier-grade NAT |
+| **Wireless AQL** | Tune airtime queue limits for lower Wi‑Fi latency under load — with presets, save/revert/reset, and persistence across reboots |
 | **Privacy** | Every background DNS lookup this package makes is automatically kept off a filtering resolver (AdGuard Home, Pi‑hole, Unbound) |
 | **Settings** | Persist on-device via UCI — follow the router across browsers, sysupgrades and backups |
 
@@ -120,7 +121,7 @@ Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (w
 <details>
 <summary><b>Offload Engines</b></summary>
 
-Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence.
+Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence. Covers both MediaTek (PPE/WED) and Qualcomm (PPE) accelerators. The card hides itself on platforms with no offload at all, and where offload is configured but the kernel exposes no counters for it, it says so instead of showing an “Active” row with nothing under it.
 </details>
 
 <details>
@@ -133,6 +134,16 @@ Realtime graph of router-side latency to configurable targets (defaults: `dns.go
 <summary><b>WAN Quality</b></summary>
 
 One row per internet-facing interface — logo, status, rolling 24-hour uptime/downtime, time in current state, and latency. Works with or without `mwan3`, and picks up any interface with a genuine default route automatically, including VPN tunnels used as a full exit path. The ISP is identified by ASN lookup against the link's real public egress IP (never assumed from the interface address, which can sit inside carrier-NAT space announced by a completely different operator), shown with its full registry name, and resolved for IPv6-only links too.
+</details>
+
+<details>
+<summary><b>Wireless AQL</b></summary>
+
+Airtime Queue Limits control how much Wi‑Fi traffic mac80211 will buffer per station. Lowering them trades a little peak throughput for markedly lower latency under load, since a bulk transfer can no longer push everything else behind hundreds of milliseconds of queued frames — the 1500–2500 µs range is the usual sweet spot.
+
+The card shows the live limit, threshold and in-flight airtime per radio. Settings offers latency/balanced/bandwidth presets plus custom values, with **Save / Revert / Reset** — Save applies to every radio and persists, Revert restores the last saved values, Reset returns to the driver defaults. Because these controls live in debugfs and don't survive a reboot, saved values are replayed at boot by a small init service.
+
+Requires `CONFIG_MAC80211_DEBUGFS` and a mounted debugfs; the card hides itself entirely on builds without them. **AQL and WED are mutually exclusive** — WED offloads the Wi‑Fi datapath in hardware and bypasses mac80211's queues, so AQL never sees that traffic. When WED is active the card says so rather than letting you tune a control that does nothing.
 </details>
 
 <details>

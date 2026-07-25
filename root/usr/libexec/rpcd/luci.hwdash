@@ -71,6 +71,124 @@ _cache_write() {
 		mv "$1.$$" "$1" 2>/dev/null
 }
 
+# --- Wireless AQL (Airtime Queue Limits) ----------------------------------
+#
+# mac80211 exposes per-PHY airtime queue limits under debugfs. Lowering them
+# trades peak throughput for latency under load: the driver stops buffering
+# several hundred ms of frames per station, so a bulk transfer can no longer
+# push everything else behind it. Values in the 1500-2500 range give the
+# lowest latency; the mac80211 defaults below are tuned for throughput.
+#
+# Every field is optional. The controls only exist when the kernel was built
+# with CONFIG_MAC80211_DEBUGFS *and* debugfs is mounted, and plenty of custom
+# or size-trimmed builds drop one or both -- the card hides itself entirely
+# rather than showing an inert panel.
+#
+# WED (MediaTek Wireless Ethernet Dispatch) offloads the WiFi datapath into
+# hardware and bypasses mac80211's software queues, so AQL never accounts for
+# that traffic and tuning it changes nothing. The two are mutually exclusive
+# by design, which is why WED is detected and surfaced rather than silently
+# letting someone tune a knob that does nothing.
+AQL_DEF_LOW=5000
+AQL_DEF_HIGH=12000
+AQL_DEF_THRESHOLD=24000
+AQL_DIR=/sys/kernel/debug/ieee80211
+
+# Sets AQL_WED (1 = hardware offload is live and bypassing AQL) and
+# AQL_WED_DEVS. A non-empty txinfo means the block is attached and clocking
+# counters; the module parameter alone only says it was *requested*.
+_aql_wed_state() {
+	AQL_WED=0; AQL_WED_DEVS=""; AQL_WED_PARAM=0
+	for _aw in /sys/kernel/debug/wed*; do
+		[ -d "$_aw" ] || continue
+		# Read it, don't stat it: debugfs files report size 0 even when a read
+		# returns plenty, so [ -s ] is always false here. An attached-but-idle
+		# block still prints its register dump; a detached one prints nothing.
+		_av=""
+		read -r _av 2>/dev/null < "$_aw/txinfo"
+		if [ -n "$_av" ]; then
+			AQL_WED=1
+			AQL_WED_DEVS="${AQL_WED_DEVS:+$AQL_WED_DEVS,}${_aw##*/}"
+		fi
+	done
+	for _am in /sys/module/*/parameters/wed_enable; do
+		[ -f "$_am" ] || continue
+		read -r _av 2>/dev/null < "$_am"
+		case "$_av" in Y|y|1) AQL_WED_PARAM=1 ;; esac
+	done
+}
+
+# Per-PHY live state as a JSON array, into AQL_PHYS. Also sets AQL_AVAIL.
+_aql_scan() {
+	AQL_AVAIL=0; AQL_PHYS=""
+	local _first=1
+	[ -d "$AQL_DIR" ] || return
+	for _ap in "$AQL_DIR"/phy*; do
+		[ -f "$_ap/aql_txq_limit" ] || continue
+		AQL_AVAIL=1
+		local _name=${_ap##*/} _en="" _th="" _lim="" _lf=1 _bcmc=0 _pend=0
+		read_file _en "$_ap/aql_enable" ""
+		read_file _th "$_ap/aql_threshold" ""
+		case "$_en" in ''|*[!0-9]*) _en=-1 ;; esac
+		case "$_th" in ''|*[!0-9]*) _th=0 ;; esac
+		# "AC <low> <high>" per access class, then a single-column BC/MC row.
+		while read -r _c1 _c2 _c3; do
+			case "$_c1" in ''|AC) continue ;; esac
+			if [ "$_c1" = "BC/MC" ]; then
+				case "$_c2" in ''|*[!0-9]*) ;; *) _bcmc=$_c2 ;; esac
+				continue
+			fi
+			case "$_c2" in ''|*[!0-9]*) continue ;; esac
+			case "$_c3" in ''|*[!0-9]*) continue ;; esac
+			[ $_lf -eq 0 ] && _lim="$_lim,"
+			_lim="$_lim{\"ac\":\"$_c1\",\"low\":$_c2,\"high\":$_c3}"
+			_lf=0
+		done < "$_ap/aql_txq_limit"
+		# Live in-flight airtime, the "is this actually doing anything" signal.
+		if [ -f "$_ap/aql_pending" ]; then
+			while read -r _c1 _c2 _c3; do
+				[ "$_c1" = "total" ] || continue
+				case "$_c2" in ''|*[!0-9]*) ;; *) _pend=$_c2 ;; esac
+			done < "$_ap/aql_pending"
+		fi
+		[ $_first -eq 0 ] && AQL_PHYS="$AQL_PHYS,"
+		AQL_PHYS="$AQL_PHYS{\"phy\":\"$_name\",\"enable\":$_en,\"threshold\":$_th,\"bcmc\":$_bcmc,\"pending_us\":$_pend,\"limits\":[$_lim]}"
+		_first=0
+	done
+}
+
+# Write the requested limits to every PHY. $1=low $2=high $3=threshold
+# $4=enable. mac80211 takes one "<ac> <low> <high>" line per access class on
+# aql_txq_limit; access classes are indexed 0-3 (VO/VI/BE/BK).
+_aql_apply() {
+	local _lo=$1 _hi=$2 _th=$3 _en=$4 _ac=0 _p
+	[ -d "$AQL_DIR" ] || return 1
+	for _p in "$AQL_DIR"/phy*; do
+		[ -f "$_p/aql_txq_limit" ] || continue
+		_ac=0
+		while [ $_ac -lt 4 ]; do
+			echo "$_ac $_lo $_hi" > "$_p/aql_txq_limit" 2>/dev/null
+			_ac=$((_ac + 1))
+		done
+		[ -n "$_th" ] && [ -w "$_p/aql_threshold" ] && echo "$_th" > "$_p/aql_threshold" 2>/dev/null
+		[ -n "$_en" ] && [ -w "$_p/aql_enable" ] && echo "$_en" > "$_p/aql_enable" 2>/dev/null
+	done
+	return 0
+}
+
+# Saved (persisted) settings, into AQL_CFG_*. Empty low/high = never
+# configured, i.e. the driver defaults are in force.
+_aql_cfg_read() {
+	AQL_CFG_LOW=$(uci -q get hwdash.aql.low 2>/dev/null)
+	AQL_CFG_HIGH=$(uci -q get hwdash.aql.high 2>/dev/null)
+	AQL_CFG_TH=$(uci -q get hwdash.aql.threshold 2>/dev/null)
+	AQL_CFG_EN=$(uci -q get hwdash.aql.enable 2>/dev/null)
+	case "$AQL_CFG_LOW" in ''|*[!0-9]*) AQL_CFG_LOW="" ;; esac
+	case "$AQL_CFG_HIGH" in ''|*[!0-9]*) AQL_CFG_HIGH="" ;; esac
+	case "$AQL_CFG_TH" in ''|*[!0-9]*) AQL_CFG_TH="" ;; esac
+	case "$AQL_CFG_EN" in 0|1) ;; *) AQL_CFG_EN="" ;; esac
+}
+
 # Which resolver should this package's own lookups use?
 #
 # Same rule as the collector: anything other than dnsmasq on :53 (AdGuard
@@ -142,7 +260,7 @@ _sync_wan_targets() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} } }'
+		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} } }'
 		;;
 	call)
 		case "$2" in
@@ -226,6 +344,64 @@ case "$1" in
 				CPF_PERSIST=0
 				[ -f /etc/config/cpu-perf ] && CPF_PERSIST=1
 				echo "{\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
+				;;
+			get_aql)
+				_aql_scan
+				_aql_wed_state
+				_aql_cfg_read
+				echo "{\"available\":$AQL_AVAIL,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
+				;;
+			set_aql)
+				# Applies immediately AND persists to UCI, so a reboot doesn't
+				# silently revert it -- debugfs is volatile, so /etc/init.d/
+				# hwdash-aql replays the saved values on every boot.
+				# reset=true clears the saved section and restores the mac80211
+				# defaults, which is the "Reset" button rather than "Revert"
+				# (that one is purely client-side: reload the saved values).
+				_IN=""
+				IFS= read -r _IN 2>/dev/null
+				_ALO=""; _AHI=""; _ATH=""; _AEN=""; _ARST=""
+				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
+					eval $(printf '%s' "$_IN" | head -c 1024 | jsonfilter \
+						-e '_ALO=@.aql.low' -e '_AHI=@.aql.high' \
+						-e '_ATH=@.aql.threshold' -e '_AEN=@.aql.enable' \
+						-e '_ARST=@.aql.reset' 2>/dev/null)
+				fi
+				_aql_scan
+				if [ "$AQL_AVAIL" != "1" ]; then
+					echo '{"result":"unavailable"}'
+				elif [ "$_ARST" = "true" ] || [ "$_ARST" = "1" ]; then
+					_aql_apply "$AQL_DEF_LOW" "$AQL_DEF_HIGH" "$AQL_DEF_THRESHOLD" 1
+					uci -q delete hwdash.aql
+					uci -q commit hwdash
+					echo '{"result":"ok","reset":true}'
+				else
+					_AOK=1
+					# Bounds are deliberately generous -- this is a tuning knob,
+					# not a safety rail -- but a non-integer or an inverted
+					# low/high pair would be written to debugfs verbatim.
+					case "$_ALO" in ''|*[!0-9]*) _AOK=0 ;; esac
+					case "$_AHI" in ''|*[!0-9]*) _AOK=0 ;; esac
+					if [ $_AOK -eq 1 ]; then
+						[ "$_ALO" -lt 100 ] && _AOK=0
+						[ "$_AHI" -gt 100000 ] && _AOK=0
+						[ "$_ALO" -gt "$_AHI" ] && _AOK=0
+					fi
+					case "$_ATH" in ''|*[!0-9]*) _ATH=$AQL_DEF_THRESHOLD ;; esac
+					case "$_AEN" in true|1) _AEN=1 ;; false|0) _AEN=0 ;; *) _AEN=1 ;; esac
+					if [ $_AOK -eq 1 ]; then
+						_aql_apply "$_ALO" "$_AHI" "$_ATH" "$_AEN"
+						uci -q set hwdash.aql=aql
+						uci -q set hwdash.aql.low="$_ALO"
+						uci -q set hwdash.aql.high="$_AHI"
+						uci -q set hwdash.aql.threshold="$_ATH"
+						uci -q set hwdash.aql.enable="$_AEN"
+						uci -q commit hwdash
+						echo '{"result":"ok"}'
+					else
+						echo '{"result":"invalid"}'
+					fi
+				fi
 				;;
 			set_cpu_perf)
 				_IN=""
@@ -1550,6 +1726,23 @@ EOF_DMI
 				_offload_refresh() {
 					local _ft=0 _swcfg=0 _hwcfg=0 _ppe=-1 _sw=-1 _wed=0 _ptot=0 _pl _p _w _hl _hv _pd _pn
 					local _qcom_json="null"
+					# Can we read hardware counters at all on this build?
+					#   0 = debugfs not mounted / not compiled in
+					#   1 = debugfs there, but no PPE/WED/hnat node exposed
+					#   2 = a real counter source is present
+					# Without this the card would report "Flowtable Active" and
+					# then show no flow counts, with nothing to say why -- the
+					# accelerator is working fine, the kernel just isn't
+					# exposing its statistics on this build.
+					local _dbg=0
+					[ -d /sys/kernel/debug ] && _dbg=1
+					if [ $_dbg -eq 1 ]; then
+						for _p in /sys/kernel/debug/ppe*/bind /sys/kernel/debug/ppe/cpu_code \
+						          /sys/kernel/debug/hnat/hnat_stats; do
+							[ -f "$_p" ] && { _dbg=2; break; }
+						done
+						[ $_dbg -eq 1 ] && [ -d /sys/kernel/debug/wed0 ] && _dbg=2
+					fi
 					command -v nft >/dev/null && _ft=$(nft list flowtables 2>/dev/null | grep -c "flags offload")
 					_swcfg=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
 					_hwcfg=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
@@ -1666,7 +1859,7 @@ EOF_DMI
 							_qcom_json="{\"qcom_ppe\":1,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
 						fi
 					fi
-					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"qcom\":$_qcom_json}"
+					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"dbg\":$_dbg,\"qcom\":$_qcom_json}"
 				}
 				OFFLOAD_JSON=""
 				if _cache_read /tmp/hwdash_offload.json; then
@@ -2269,6 +2462,12 @@ EOF
 				fi
 				WIFI_SURVEY="$WIFI_SURVEY}"
 
+				# AQL live state (cheap: a handful of small debugfs reads,
+				# skipped entirely when the directory isn't there).
+				_aql_scan
+				_aql_wed_state
+				AQL_JSON="{\"available\":$AQL_AVAIL,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"phys\":[$AQL_PHYS]}"
+
 				# UBI device tree + MTD partition table are hardware inventory:
 				# the layout is fixed at flash time and wear/ECC counters move on
 				# minute-plus timescales. Enumerating them every poll was the
@@ -2699,7 +2898,7 @@ EOF_DMESG
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"aql\":$AQL_JSON, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

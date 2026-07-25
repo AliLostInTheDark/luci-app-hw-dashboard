@@ -23,6 +23,10 @@ define Package/luci-app-hw-dashboard/postinst
 		/etc/init.d/hwdash-wanmon enable 2>/dev/null
 		/etc/init.d/hwdash-wanmon restart 2>/dev/null
 	}
+	[ -x /etc/init.d/hwdash-aql ] && {
+		/etc/init.d/hwdash-aql enable 2>/dev/null
+		/etc/init.d/hwdash-aql start 2>/dev/null
+	}
 	( sleep 3; ubus call luci.hwdash info >/dev/null 2>&1; ubus call luci.hwdash info >/dev/null 2>&1 ) &
 	exit 0
 }

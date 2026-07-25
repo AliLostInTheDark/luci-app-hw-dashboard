@@ -1,0 +1,82 @@
+#!/bin/sh /etc/rc.common
+# Replays the saved Airtime Queue Limits onto every wireless PHY at boot.
+#
+# The AQL controls live in debugfs, which is volatile -- everything written
+# there is gone after a reboot and the driver comes back up with its own
+# throughput-oriented defaults. This service exists purely so a setting made
+# in the dashboard survives, in the same way /etc/config/hwdash makes the rest
+# of the dashboard's preferences survive.
+#
+# Does nothing at all unless the user has actually saved a setting: with no
+# hwdash.aql section the driver defaults are what's wanted, and writing them
+# back explicitly would be pointless work on every boot.
+
+START=99
+# Deliberately no USE_PROCD: this is a one-shot that writes some values and
+# exits, not a daemon procd should supervise. It must stay *unset* rather than
+# set to 0 -- rc.common tests it with [ -n ], so any value at all (including
+# "0") switches it to the procd path, where start() is replaced by one that
+# calls start_service() and this script's own start() would never run.
+
+AQL_DIR=/sys/kernel/debug/ieee80211
+
+apply_aql() {
+	local low high threshold enable ac phy
+
+	low=$(uci -q get hwdash.aql.low)
+	high=$(uci -q get hwdash.aql.high)
+	threshold=$(uci -q get hwdash.aql.threshold)
+	enable=$(uci -q get hwdash.aql.enable)
+
+	# Nothing saved -> leave the driver defaults alone.
+	[ -n "$low" ] && [ -n "$high" ] || return 0
+
+	case "$low" in ''|*[!0-9]*) return 0 ;; esac
+	case "$high" in ''|*[!0-9]*) return 0 ;; esac
+	[ "$low" -gt "$high" ] && return 0
+
+	# debugfs may not be mounted yet, or the kernel may lack
+	# CONFIG_MAC80211_DEBUGFS entirely -- either way there is nothing to do.
+	[ -d "$AQL_DIR" ] || return 0
+
+	for phy in "$AQL_DIR"/phy*; do
+		[ -f "$phy/aql_txq_limit" ] || continue
+		# One line per access class (0-3 = VO/VI/BE/BK).
+		ac=0
+		while [ "$ac" -lt 4 ]; do
+			echo "$ac $low $high" > "$phy/aql_txq_limit" 2>/dev/null
+			ac=$((ac + 1))
+		done
+		case "$threshold" in
+			''|*[!0-9]*) ;;
+			*) [ -w "$phy/aql_threshold" ] && echo "$threshold" > "$phy/aql_threshold" 2>/dev/null ;;
+		esac
+		case "$enable" in
+			0|1) [ -w "$phy/aql_enable" ] && echo "$enable" > "$phy/aql_enable" 2>/dev/null ;;
+		esac
+	done
+}
+
+start() {
+	# The wireless PHYs register when the driver loads, which can trail the
+	# rest of boot slightly on some targets. One short retry loop costs
+	# nothing and avoids losing the setting on a slow probe.
+	local tries=0
+	while [ "$tries" -lt 10 ]; do
+		[ -d "$AQL_DIR" ] && break
+		sleep 1
+		tries=$((tries + 1))
+	done
+	apply_aql
+}
+
+stop() {
+	# Deliberately a no-op: these are tuning values on a live radio, not a
+	# daemon. Reverting them on stop would drop the user's setting whenever
+	# the service is restarted.
+	return 0
+}
+
+reload() {
+	apply_aql
+}
