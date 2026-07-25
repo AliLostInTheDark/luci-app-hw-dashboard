@@ -2,10 +2,10 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-hw-dashboard
 LUCI_TITLE:=Hardware Dashboard
-LUCI_DEPENDS:=+luci-base +ethtool-full
+LUCI_DEPENDS:=+luci-base +ethtool-full +curl
 LUCI_PKGARCH:=all
-PKG_VERSION:=1.2.2
-PKG_RELEASE:=6
+PKG_VERSION:=1.2.3
+PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -17,8 +17,7 @@ define Package/luci-app-hw-dashboard/postinst
 [ -n "$${IPKG_INSTROOT}" ] || {
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
-	rm -rf /tmp/hwdash_*
-	rm -rf /etc/hwdash
+	rm -rf /tmp/hwdash*
 	/etc/init.d/rpcd restart 2>/dev/null
 	[ -x /etc/init.d/hwdash-wanmon ] && {
 		/etc/init.d/hwdash-wanmon enable 2>/dev/null

@@ -71,6 +71,32 @@ _cache_write() {
 		mv "$1.$$" "$1" 2>/dev/null
 }
 
+# Hand the collector the user's raw (unresolved) WAN probe targets. It owns
+# hostname resolution and the fallback list; this side deliberately does not
+# substitute a default for an empty value -- empty means "use your built-in
+# spread", which is not the same as pinning every interface to 1.1.1.1.
+#
+# WANTGT_V gates the format: the collector ignores a file without it, so an
+# rpcd/collector version skew mid-upgrade cannot be misread as "the user
+# cleared both targets".
+_sync_wan_targets() {
+	_raw=$1
+	[ -z "$_raw" ] && _raw=$(uci -q get hwdash.main.settings_json 2>/dev/null)
+	_t4=""; _t6=""
+	if [ -n "$_raw" ] && command -v jsonfilter >/dev/null; then
+		eval $(printf '%s' "$_raw" | jsonfilter -e '_t4=@.wanTarget4' -e '_t6=@.wanTarget6' 2>/dev/null)
+	fi
+	# The collector sources this file, so anything that survives into it is
+	# evaluated by a root shell. Reduce to the character set an address or
+	# hostname can legally use before it gets there.
+	_t4=$(printf '%s' "$_t4" | tr -cd 'A-Za-z0-9.:_ -')
+	_t6=$(printf '%s' "$_t6" | tr -cd 'A-Za-z0-9.:_ -')
+	mkdir -p /tmp/hwdash_wanmon 2>/dev/null
+	printf 'WANTGT_V=2\nWANTGT4="%s"\nWANTGT6="%s"\n' "$_t4" "$_t6" \
+		> /tmp/hwdash_wanmon/.wan_targets.$$ 2>/dev/null && \
+		mv /tmp/hwdash_wanmon/.wan_targets.$$ /tmp/hwdash_wanmon/.wan_targets 2>/dev/null
+}
+
 
 case "$1" in
 	list)
@@ -95,6 +121,7 @@ case "$1" in
 				_res=""
 				_res=$(uci -q get hwdash.main.settings_json 2>/dev/null)
 				[ -n "$_res" ] && echo "$_res" || echo '{}'
+				_sync_wan_targets "$_res"
 				;;
 			set_config)
 				_IN=""
@@ -107,6 +134,7 @@ case "$1" in
 					uci -q set hwdash.main=settings
 					uci -q set hwdash.main.settings_json="$_CFG"
 					uci -q commit hwdash
+					_sync_wan_targets "$_CFG"
 					echo '{"result":"ok"}'
 				else
 					echo '{"result":"invalid"}'
@@ -162,11 +190,7 @@ case "$1" in
 				IFS= read -r _IN 2>/dev/null
 				_GOV=""; _MIN=""; _MAX=""; _TURBO=""
 				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					_IN=$(printf '%s' "$_IN" | head -c 2048)
-					_GOV=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.governor' 2>/dev/null)
-					_MIN=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.min_freq' 2>/dev/null)
-					_MAX=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.max_freq' 2>/dev/null)
-					_TURBO=$(printf '%s' "$_IN" | jsonfilter -e '@.perf.turbo_enabled' 2>/dev/null)
+					eval $(printf '%s' "$_IN" | head -c 2048 | jsonfilter -e '_GOV=@.perf.governor' -e '_MIN=@.perf.min_freq' -e '_MAX=@.perf.max_freq' -e '_TURBO=@.perf.turbo_enabled' 2>/dev/null)
 				fi
 				_CF=/sys/devices/system/cpu/cpu0/cpufreq
 				_OK=1
@@ -264,10 +288,10 @@ EOF
 				fi
 				[ -z "$_PT_LIST" ] && _PT_LIST="dns.google 4
 dns.google 6
-one.one.one.one 4
-one.one.one.one 6
 google.com 4
 google.com 6
+one.one.one.one 4
+one.one.one.one 6
 youtube.com 4
 youtube.com 6
 "
@@ -530,8 +554,11 @@ EOF
 				_wm_dir=/tmp/hwdash_wanmon
 				if [ -d "$_wm_dir" ]; then
 					_wm_tracked="$_wm_dir/.tracked"
+					_wm_tr=""
+					[ -f "$_wm_tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_tracked" 2>/dev/null)
 					_wm_items=""
 					_wm_first=1
+					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
 					for _wm_ring in "$_wm_dir"/*.stats; do
 						[ -f "$_wm_ring" ] || continue
 						_wm_ifn=${_wm_ring##*/}; _wm_ifn=${_wm_ifn%.stats}
@@ -539,29 +566,59 @@ EOF
 						# currently down. The collector adds explicit timeout samples
 						# while it is absent, so this is a real Offline state rather
 						# than a stale row left behind by a vanished interface.
-						[ -f "$_wm_tracked" ] && grep -Fx "$_wm_ifn" "$_wm_tracked" >/dev/null 2>&1 || continue
+						case " $_wm_tr " in *" $_wm_ifn "*) ;; *) continue ;; esac
 						_wm_isp=""
 						[ -f "$_wm_dir/$_wm_ifn.isp" ] && read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
 						json_esc "$_wm_isp"; _wm_ispj=$JSV
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
 
-						read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
-						_wm_total=0; _wm_success=0; _wm_status="unknown"; _wm_streak_start=$_wm_uptime_now; _wm_cur_ms="x"
-						read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_cur_ms < "$_wm_ring" 2>/dev/null
+						# The collector rewrites this file in place (truncate,
+						# then write) every two seconds while we poll every
+						# second, so a read can legitimately land on the
+						# zero-length instant between the two, and a failed
+						# read blanks the variables it was given. That window
+						# is microseconds and never repeats back-to-back, so
+						# one retry turns a visible "unknown"/0% flicker on the
+						# card into nothing at all -- cheaper than making the
+						# collector pay for an atomic rename every tick.
+						_wm_try=0
+						while :; do
+							_wm_total=0; _wm_success=0; _wm_status="unknown"
+							_wm_streak_start=$_wm_uptime_now
+							_wm_lastgood_ms="x"; _wm_consec_miss=0
+							read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_lastgood_ms _wm_consec_miss < "$_wm_ring" 2>/dev/null && break
+							_wm_try=$((_wm_try + 1))
+							[ "$_wm_try" -ge 2 ] && break
+						done
+						# Guard every field the arithmetic below consumes: a
+						# short read (truncated mid-line) assigns what it got
+						# and leaves the rest empty.
+						case "$_wm_total" in ''|*[!0-9]*) _wm_total=0 ;; esac
+						case "$_wm_success" in ''|*[!0-9]*) _wm_success=0 ;; esac
+						case "$_wm_streak_start" in ''|*[!0-9]*) _wm_streak_start=$_wm_uptime_now ;; esac
+						case "$_wm_status" in up|down) ;; *) _wm_status="unknown" ;; esac
 						# Availability uses the collector's rolling 24-hour bucket
 						# summary, not the daemon's all-time sample count.
 						_wm_day_total=0; _wm_day_success=0
 						read -r _wm_day_total _wm_day_success < "$_wm_dir/$_wm_ifn.daystats" 2>/dev/null
-						[ "${_wm_day_total:-0}" -gt 0 ] && { _wm_total=$_wm_day_total; _wm_success=$_wm_day_success; }
+						case "$_wm_day_total" in ''|*[!0-9]*) _wm_day_total=0 ;; esac
+						case "$_wm_day_success" in ''|*[!0-9]*) _wm_day_success=0 ;; esac
+						[ "$_wm_day_total" -gt 0 ] && { _wm_total=$_wm_day_total; _wm_success=$_wm_day_success; }
 
 						_wm_uptime=0
 						_wm_downtime=0
 						if [ "${_wm_total:-0}" -gt 0 ]; then
-							_wm_uptime=$(awk -v s="$_wm_success" -v t="$_wm_total" 'BEGIN {printf "%.2f", (s * 100.0 / t)}')
-							_wm_downtime=$(awk -v s="$_wm_success" -v t="$_wm_total" 'BEGIN {printf "%.2f", ((t - s) * 100.0 / t)}')
+							_u100=$(( _wm_success * 10000 / _wm_total ))
+							_d100=$(( 10000 - _u100 ))
+							_wm_uptime=$(printf '%d.%02d' $((_u100 / 100)) $((_u100 % 100)))
+							_wm_downtime=$(printf '%d.%02d' $((_d100 / 100)) $((_d100 % 100)))
 						fi
+						# cur_ms: show lastgood_ms when link is up (always a
+						# number with new format), null only when genuinely down.
 						_wm_cur=null
-						case "$_wm_cur_ms" in ''|x) ;; *) _wm_cur="$_wm_cur_ms" ;; esac
+						if [ "$_wm_status" = "up" ]; then
+							case "$_wm_lastgood_ms" in ''|x|*[!0-9]*) ;; *) _wm_cur="$_wm_lastgood_ms" ;; esac
+						fi
 
 						_wm_streak=$((_wm_uptime_now - _wm_streak_start))
 						[ "$_wm_streak" -lt 0 ] && _wm_streak=0
@@ -582,7 +639,13 @@ EOF
 								for _wm_h in "$@"; do
 									[ $_wm_hfirst -eq 0 ] && _wm_hj="$_wm_hj,"
 									case "$_wm_h" in
-										x) _wm_hj="${_wm_hj}null" ;;
+										# Anything that is not a plain integer
+										# (the "x" down-marker, or a token from
+										# a torn read) becomes null rather than
+										# being pasted into the array verbatim,
+										# which would emit invalid JSON and
+										# blank the whole card.
+										*[!0-9]*|'') _wm_hj="${_wm_hj}null" ;;
 										*) _wm_hj="${_wm_hj}${_wm_h}" ;;
 									esac
 									_wm_hfirst=0
@@ -601,7 +664,7 @@ EOF
 				;;
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)
-				HWDASH_PERSIST_DIR=/etc/hwdash
+				HWDASH_PERSIST_DIR=/tmp/hwdash
 				# iw list parsing takes seconds on some chips — never on the
 				# request path. Generated once by a detached child; radios show
 				# without phycap for the first seconds and pick it up next cycle.
@@ -889,7 +952,7 @@ EOF
 				FIRST_DF=1
 				OV_TOTAL=0; OV_USED=0; OV_FREE=0
 				while read -r fs blocks used avail pct mountpoint; do
-					[ -z "$fs" ] && continue
+					[ -z "$fs" ] || [ "$fs" = "Filesystem" ] && continue
 
 					# Harvest overlay usage from this same df pass — this used to
 					# be a separate grep + df + awk fork trio later in the script.
@@ -996,14 +1059,14 @@ EOF
 					DF_JSON="$DF_JSON{\"fs\":\"$fs\",\"mount\":\"$mountpoint\",\"total\":$blocks,\"used\":$used,\"avail\":$avail,\"pct\":\"$pct\",\"dev\":\"$devname\",\"iodev\":\"$realdev\",\"hw_type\":\"$hw_type\",\"hw_size\":$hw_size,\"hw_model\":\"$JSV\"}"
 					FIRST_DF=0
 				done <<EOF
-$(df -k 2>/dev/null | tail -n +2)
+$(df -k 2>/dev/null)
 EOF
 				DF_JSON="$DF_JSON]"
 
 				DF_INODES="{"
 				FIRST_INODE=1
 				while read -r fs inodes iused ifree ipct mountpoint; do
-					[ -z "$fs" ] && continue
+					[ -z "$fs" ] || [ "$fs" = "Filesystem" ] && continue
 					case "$fs" in
 						tmpfs|devtmpfs|none|proc|sysfs) continue ;;
 					esac
@@ -1014,7 +1077,7 @@ EOF
 					DF_INODES="$DF_INODES\"$mountpoint\":{\"inodes\":$inodes,\"iused\":$iused,\"ifree\":$ifree,\"ipct\":\"$ipct\"}"
 					FIRST_INODE=0
 				done <<EOF
-$(df -i 2>/dev/null | tail -n +2)
+$(df -i 2>/dev/null)
 EOF
 				DF_INODES="$DF_INODES}"
 
@@ -1421,19 +1484,19 @@ EOF_DMI
 								local _line _pkt _port _drop _first=1
 								_cpu_code_json="{"
 								while read -r _line; do
-									_line=$(echo "$_line" | sed 's/^[ \t]*//')
+									trim_ws _line
 									[ -z "$_line" ] && continue
 									case "$_line" in
 										"CPU CODE:"*)
 											_line=${_line#CPU CODE:}
-											_line=$(echo "$_line" | sed 's/^[ \t]*//')
+											trim_ws _line
 											;;
 									esac
 									[ -z "$_line" ] && continue
 									case "$_line" in
 										*\(port=*\),dropcode:*)
 											_pkt=${_line%%(port*}
-											_pkt=$(echo "$_pkt" | tr -d ' \t')
+											_pkt=${_pkt//[ 	]/}
 											_port=${_line##*port=}
 											_port=${_port%%)*}
 											while [ "${_port#0}" != "$_port" ]; do
@@ -1441,13 +1504,13 @@ EOF_DMI
 											done
 											[ -z "$_port" ] && _port=0
 											_drop=${_line##*dropcode:}
-											_drop=$(echo "$_drop" | tr -d ' \t\r\n')
+											_drop=${_drop//[ 	\r\n]/}
 											while [ "${_drop#0}" != "$_drop" ]; do
 												_drop=${_drop#0}
 											done
 											[ -z "$_drop" ] && _drop=0
 											[ $_first -eq 0 ] && _cpu_code_json="$_cpu_code_json,"
-											_cpu_code_json="$_cpu_code_json\"cpucode_port${_port}_drop${_drop}\":$_pkt"
+											_cpu_code_json="$_cpu_code_json\"cpucode_port${_port}_drop${_drop}\":${_pkt:-0}"
 											_first=0
 											;;
 									esac
@@ -1469,9 +1532,9 @@ EOF_DMI
 												*port=*)
 													_p=${_v%%(*}
 													if [ "$_mode" = "silent" ]; then
-														_bm_silent=$((_bm_silent + _p))
+														_bm_silent=$((_bm_silent + ${_p:-0}))
 													else
-														_bm_overflow=$((_bm_overflow + _p))
+														_bm_overflow=$((_bm_overflow + ${_p:-0}))
 													fi
 													;;
 											esac
@@ -1487,11 +1550,12 @@ EOF_DMI
 									case "$_line" in
 										*"="*)
 											_k=${_line%%=*}
-											_k=$(echo $_k | tr 'A-Z' 'a-z' | tr ' ' '_' | tr -cd 'a-z0-9_')
+											trim_ws _k
+											_k=$(printf '%s' "$_k" | tr 'A-Z ' 'a-z_')
 											_v=${_line##*=}
-											_v=$(echo $_v | tr -d ' \t')
+											_v=${_v//[ 	]/}
 											[ $_first -eq 0 ] && _edma_err_json="$_edma_err_json,"
-											_edma_err_json="$_edma_err_json\"$_k\":$_v"
+											_edma_err_json="$_edma_err_json\"$_k\":${_v:-0}"
 											_first=0
 											;;
 									esac
@@ -1955,35 +2019,29 @@ EOF
 				if command -v iwinfo >/dev/null; then
 					for iface in $(iwinfo | awk '/^[a-zA-Z0-9_-]+/ {print $1}'); do
 						info=$(iwinfo "$iface" info 2>/dev/null)
-						txpower=$(echo "$info" | awk -F'Tx-Power: ' '/Tx-Power:/ {print $2}' | awk '{print $1" "$2}')
-						[ -z "$txpower" ] && txpower="Unknown"
-
-						hwmode=$(echo "$info" | awk -F'HW Mode\\(s\\): ' '/HW Mode\(s\):/ {print $2}')
-						[ -z "$hwmode" ] && hwmode="Unknown"
-
-						hardware=$(echo "$info" | grep "Hardware:" | awk -F': ' '{print $2}')
-						[ -z "$hardware" ] && hardware="Unknown"
-
-						channel=$(echo "$info" | awk -F'Channel: ' '/Channel:/ {print $2}' | awk '{print $1}')
+						txpower="Unknown"; hwmode="Unknown"; hardware="Unknown"; channel="Unknown"; curr_width="0"; freq=""; phyname_info=""; bitrate="Unknown"
+						eval $(printf '%s\n' "$info" | awk '
+							/Tx-Power:/ { match($0, /Tx-Power: *([^ \t]+ [^ \t]+)/, a); if (a[1]!="") print "txpower=\"" a[1] "\"" }
+							/HW Mode\(s\):/ { match($0, /HW Mode\(s\): *([^\r\n]+)/, a); if (a[1]!="") print "hwmode=\"" a[1] "\"" }
+							/Hardware:/ { match($0, /Hardware: *([^\r\n]+)/, a); if (a[1]!="") print "hardware=\"" a[1] "\"" }
+							/Channel:/ {
+								match($0, /Channel: *([0-9]+|unknown)/, a); if (a[1]!="") print "channel=\"" a[1] "\""
+								match($0, /Channel:[^(]*\(([0-9.]+)/, b); if (b[1]!="") print "freq=\"" b[1] "\""
+							}
+							/Width:/ { match($0, /Width: *([0-9]+)/, a); if (a[1]!="") print "curr_width=\"" a[1] "\"" }
+							/Phy name:/ { match($0, /Phy name: *([^ \t\r\n]+)/, a); if (a[1]!="") print "phyname_info=\"" a[1] "\"" }
+							/Bit Rate:/ { match($0, /Bit Rate: *([^ \t]+ [^ \t]+)/, a); if (a[1]!="") print "bitrate=\"" a[1] "\"" }
+						')
 						{ [ -z "$channel" ] || [ "$channel" = "unknown" ]; } && channel="Unknown"
+						{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
-						curr_width=$(echo "$info" | awk -F'Width: ' '/Width:/ {print $2}' | awk '{print $1}')
-						[ -z "$curr_width" ] && curr_width="0"
-
-						# Band detection: take ONLY the first numeric token inside the
-						# Channel "(...)" group (the frequency in GHz). The old parser
-						# stripped every non-digit on the line, so when the channel read
-						# "unknown" it scraped the "20" out of "HT Mode: HE20" and
-						# reported a bogus "20 GHz" for the 2.4 GHz radio.
-						freq=$(echo "$info" | sed -n 's/.*Channel:[^(]*(\([0-9][0-9.]*\).*/\1/p' | head -1)
+						# Band detection
 						case "$freq" in
 							2.*) band="2.4 GHz" ;;
 							5.*) band="5 GHz" ;;
 							6.*|7.*) band="6 GHz" ;;
 							*)   band="Unknown" ;;
 						esac
-						# Fall back to the channel number when the frequency was not a
-						# plausible GHz value (channel unknown, or reported in MHz).
 						if [ "$band" = "Unknown" ] && [ "$channel" != "Unknown" ]; then
 							case "$channel" in
 								[1-9]|1[0-4])               band="2.4 GHz" ;;
@@ -1991,18 +2049,10 @@ EOF
 							esac
 						fi
 
-						# sysfs is the authoritative, always-present phy name. Prefer it
-						# over scraping iwinfo text — when the driver returns a partial
-						# "info" block (the same transient that drops the channel) the
-						# "Phy name:" line is missing, phycap lookup misses and Chip HW
-						# Max vanishes. sysfs keeps phyname (and thus phycap) stable.
-						phyname=$(cat /sys/class/net/"$iface"/phy80211/name 2>/dev/null)
-						[ -z "$phyname" ] && phyname=$(echo "$info" | grep "Phy name:" | awk '{print $3}')
-						[ -z "$phyname" ] && phyname=$(iw dev "$iface" info 2>/dev/null | grep wiphy | awk '{print "phy"$2}')
+						# sysfs phyname lookup
+						read_file phyname "/sys/class/net/$iface/phy80211/name" ""
+						[ -z "$phyname" ] && phyname=$phyname_info
 						[ -z "$phyname" ] && phyname="Unknown"
-
-						bitrate=$(echo "$info" | awk -F'Bit Rate: ' '/Bit Rate:/ {print $2}' | awk '{print $1" "$2}')
-						{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
 						phycap="{}"
 						if [ -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && [ "$phyname" != "Unknown" ]; then
@@ -2034,14 +2084,23 @@ EOF
 						freqlist=$(iwinfo "$iface" freqlist 2>/dev/null)
 						enabled_ch=""
 						if [ -n "$freqlist" ]; then
-							# Only channels actually usable in the current regulatory
-							# domain — drop the ones iwinfo marks "[restricted]" so the
-							# UI reflects this router, not the full hardware/standard set.
-							enabled_ch=$(echo "$freqlist" | grep -vi 'restricted' | grep -oE "Channel [0-9]+" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+							enabled_ch=$(printf '%s\n' "$freqlist" | awk '
+								!/restricted/ && /Channel [0-9]+/ {
+									for (i = 1; i <= NF; i++) {
+										if ($i == "Channel") {
+											ch = $(i+1);
+											if (out != "") out = out ","
+											out = out ch
+										}
+									}
+								}
+								END { print out }
+							')
 						fi
 
-						# Per-radio country code (falls back to the global regdomain).
-						cc=$(iwinfo "$iface" countrycode 2>/dev/null | tr -d '[:space:]')
+						# Per-radio country code (falls back to global regdomain).
+						cc=$(iwinfo "$iface" countrycode 2>/dev/null)
+						cc=${cc//[ 	\r\n]/}
 						[ -z "$cc" ] && cc="$REG_COUNTRY"
 						[ -z "$cc" ] && cc="00"
 
@@ -2173,11 +2232,9 @@ EOF
 				done
 				UBI_DEVS="$UBI_DEVS]"
 
-				# ECC baseline: first-seen counter snapshot, persisted OUTSIDE
-				# /etc/hwdash so it survives package upgrades (postinst clears
-				# /etc/hwdash and /tmp/hwdash_*). Accumulating bitflips since a
-				# fixed baseline are the real NAND health signal, not absolutes.
-				ECC_BASE_FILE=/etc/hwdash-ecc.baseline
+				# ECC baseline: first-seen counter snapshot, persisted in tmpfs RAM.
+				# Accumulating bitflips since a fixed baseline are the real NAND health signal.
+				ECC_BASE_FILE=/tmp/hwdash/ecc.baseline
 				ECC_BASE_DATE=0
 				if [ -f "$ECC_BASE_FILE" ]; then
 					read -r _eb_hdr < "$ECC_BASE_FILE" 2>/dev/null
@@ -2195,11 +2252,11 @@ EOF
 						[ "$mdev" = "dev:" ] && continue
 						mn=${mdev#mtd}; mn=${mn%:}
 						[ -z "$mn" ] && continue
-						mname=$(echo "$mname" | tr -d '"')
+						mname=${mname//\"/}
 						msz_b=$((0x${msz})) 2>/dev/null || msz_b=0
 						mesz_b=$((0x${mesz})) 2>/dev/null || mesz_b=0
 						mtype="nand"
-						[ -f "/sys/class/mtd/mtd${mn}/type" ] && mtype=$(cat "/sys/class/mtd/mtd${mn}/type" 2>/dev/null)
+						[ -f "/sys/class/mtd/mtd${mn}/type" ] && read_file mtype "/sys/class/mtd/mtd${mn}/type" "nand"
 						_mecc_c=0; _mecc_f=0; _mecc_str=0
 						if [ -f "/sys/class/mtd/mtd${mn}/ecc_stats" ]; then
 							read _mecc_c _mecc_f _ 2>/dev/null < "/sys/class/mtd/mtd${mn}/ecc_stats"
@@ -2385,26 +2442,28 @@ EOF_DMESG
 						else
 							_nv_json=$(smartctl -a "/dev/$_nvme_ns" -j 2>/dev/null)
 							if [ -n "$_nv_json" ]; then
-								_nv_pass=$(printf '%s' "$_nv_json" | jsonfilter -e '@.smart_status.passed' 2>/dev/null)
-								_nv_tempcur=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.current' 2>/dev/null)
-								_nv_tempwarn=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.op_limit_max' 2>/dev/null)
-								_nv_tempcrit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.temperature.critical_limit_max' 2>/dev/null)
-								_nv_crit=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.critical_warning' 2>/dev/null)
-								_nv_spare=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.available_spare' 2>/dev/null)
-								_nv_sparethr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.available_spare_threshold' 2>/dev/null)
-								_nv_used=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.percentage_used' 2>/dev/null)
-								_nv_dread=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.data_units_read' 2>/dev/null)
-								_nv_dwrite=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.data_units_written' 2>/dev/null)
-								_nv_poh=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.power_on_hours' 2>/dev/null)
-								_nv_pcyc=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.power_cycles' 2>/dev/null)
-								_nv_unsafe=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.unsafe_shutdowns' 2>/dev/null)
-								_nv_merr=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.media_errors' 2>/dev/null)
-								_nv_errlog=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.num_err_log_entries' 2>/dev/null)
-								_nv_hreads=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.host_reads' 2>/dev/null)
-								_nv_hwrites=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_smart_health_information_log.host_writes' 2>/dev/null)
-								_nv_nsutil=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_namespaces[0].utilization.bytes' 2>/dev/null)
-								_nv_nscap=$(printf '%s' "$_nv_json" | jsonfilter -e '@.nvme_namespaces[0].capacity.bytes' 2>/dev/null)
-								[ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
+								_nv_pass=0; _nv_tempcur=0; _nv_tempwarn=0; _nv_tempcrit=0; _nv_crit=0; _nv_spare=0; _nv_sparethr=0; _nv_used=0; _nv_dread=0; _nv_dwrite=0; _nv_poh=0; _nv_pcyc=0; _nv_unsafe=0; _nv_merr=0; _nv_errlog=0; _nv_hreads=0; _nv_hwrites=0; _nv_nsutil=0; _nv_nscap=0
+								eval $(printf '%s' "$_nv_json" | jsonfilter \
+									-e '_nv_pass=@.smart_status.passed' \
+									-e '_nv_tempcur=@.temperature.current' \
+									-e '_nv_tempwarn=@.temperature.op_limit_max' \
+									-e '_nv_tempcrit=@.temperature.critical_limit_max' \
+									-e '_nv_crit=@.nvme_smart_health_information_log.critical_warning' \
+									-e '_nv_spare=@.nvme_smart_health_information_log.available_spare' \
+									-e '_nv_sparethr=@.nvme_smart_health_information_log.available_spare_threshold' \
+									-e '_nv_used=@.nvme_smart_health_information_log.percentage_used' \
+									-e '_nv_dread=@.nvme_smart_health_information_log.data_units_read' \
+									-e '_nv_dwrite=@.nvme_smart_health_information_log.data_units_written' \
+									-e '_nv_poh=@.nvme_smart_health_information_log.power_on_hours' \
+									-e '_nv_pcyc=@.nvme_smart_health_information_log.power_cycles' \
+									-e '_nv_unsafe=@.nvme_smart_health_information_log.unsafe_shutdowns' \
+									-e '_nv_merr=@.nvme_smart_health_information_log.media_errors' \
+									-e '_nv_errlog=@.nvme_smart_health_information_log.num_err_log_entries' \
+									-e '_nv_hreads=@.nvme_smart_health_information_log.host_reads' \
+									-e '_nv_hwrites=@.nvme_smart_health_information_log.host_writes' \
+									-e '_nv_nsutil=@["nvme_namespaces"][0].utilization.bytes' \
+									-e '_nv_nscap=@["nvme_namespaces"][0].capacity.bytes' 2>/dev/null)
+								[ "$_nv_pass" = "1" ] || [ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
 								case "$_nv_tempcur" in ''|*[!0-9]*) _nv_tempcur=0 ;; esac
 								case "$_nv_tempwarn" in ''|*[!0-9]*) _nv_tempwarn=0 ;; esac
 								case "$_nv_tempcrit" in ''|*[!0-9]*) _nv_tempcrit=0 ;; esac

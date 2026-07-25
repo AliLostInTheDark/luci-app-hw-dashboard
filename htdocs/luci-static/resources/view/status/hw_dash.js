@@ -584,9 +584,23 @@ return view.extend({
                     en.extra.textContent = lv.extra || '';
                 });
             };
+            var sortPingKeys = function(h) {
+                return Object.keys(h).sort(function(ka, kb) {
+                    var a = h[ka], b = h[kb];
+                    if (!a || !b) return ka.localeCompare(kb);
+                    if (a.gw && !b.gw) return -1;
+                    if (!a.gw && b.gw) return 1;
+                    if (a.gw && b.gw) return (a.fam || 4) - (b.fam || 4);
+                    var hA = (a.host || '').toLowerCase();
+                    var hB = (b.host || '').toLowerCase();
+                    var c = hA.localeCompare(hB, undefined, { sensitivity: 'base' });
+                    if (c !== 0) return c;
+                    return (a.fam || 4) - (b.fam || 4);
+                });
+            };
             var update = function(hist) {
                 P.hist = hist;
-                P.keys = Object.keys(hist);
+                P.keys = sortPingKeys(hist);
                 var vw = VIEWS[P.view];
                 var series = {};
                 P.keys.forEach(function(k) { series[k] = buildSeriesFrom(hist[k], vw); });
@@ -917,7 +931,7 @@ return view.extend({
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
         var wanQualityCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
-            E('h3', {}, 'WAN Quality'),
+            E('h3', {}, 'WAN Uptime Status'),
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
@@ -962,22 +976,26 @@ return view.extend({
         self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
         self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
         self.disabledPings = Array.isArray(savedCfg.disabledPings) ? savedCfg.disabledPings : [];
-        // Per-interface WAN Quality show/hide -- separate from hiddenCards
-        // (which hides the whole card) since interface names are only known
-        // once the collector discovers them, not ahead of time. Persisted
-        // through the same settings_json blob in UCI, so it survives
-        // sysupgrade exactly like the rest of this app's settings.
         self.hiddenWanIfaces = Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []);
+        self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
+        self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
         var saveConfig = function() {
-            callHwSetConfig({ hidden: self.hiddenCards, targets: self.pingTargets, disabledPings: self.disabledPings, wanHidden: self.hiddenWanIfaces }).catch(function() {});
+            callHwSetConfig({
+                hidden: self.hiddenCards,
+                targets: self.pingTargets,
+                disabledPings: self.disabledPings,
+                wanHidden: self.hiddenWanIfaces,
+                wanTarget4: self.wanTarget4,
+                wanTarget6: self.wanTarget6
+            }).catch(function() {});
         };
         if (!Array.isArray(savedCfg.hidden) && (self.hiddenCards.length > 0 || self.pingTargets.length > 0)) {
             saveConfig();
         }
         var DEFAULT_PING_TARGETS = [
             { host: 'dns.google', fam: 4 }, { host: 'dns.google', fam: 6 },
-            { host: 'one.one.one.one', fam: 4 }, { host: 'one.one.one.one', fam: 6 },
             { host: 'google.com', fam: 4 }, { host: 'google.com', fam: 6 },
+            { host: 'one.one.one.one', fam: 4 }, { host: 'one.one.one.one', fam: 6 },
             { host: 'youtube.com', fam: 4 }, { host: 'youtube.com', fam: 6 }
         ];
         var expandFams = function(t) { return String(t.fam) === 'both' ? [4, 6] : [parseInt(t.fam) === 6 ? 6 : 4]; };
@@ -989,17 +1007,22 @@ return view.extend({
         };
         var pingTargetPairs = function() {
             var seen = {};
-            var pairs = [];
+            var items = [];
             DEFAULT_PING_TARGETS.concat(self.pingTargets).forEach(function(t) {
                 expandFams(t).forEach(function(fam) {
                     var key = t.host + '|' + fam;
                     if (seen[key]) return;
                     seen[key] = true;
                     if (isPingDisabled(t.host, fam)) return;
-                    pairs.push(t.host + ' ' + fam);
+                    items.push({ host: t.host, fam: fam, str: t.host + ' ' + fam });
                 });
             });
-            return pairs;
+            items.sort(function(a, b) {
+                var c = a.host.localeCompare(b.host, undefined, { sensitivity: 'base' });
+                if (c !== 0) return c;
+                return a.fam - b.fam;
+            });
+            return items.map(function(it) { return it.str; });
         };
         var pingStatColor = function(ms) {
             if (ms === null || ms === undefined) return '';
@@ -1038,7 +1061,7 @@ return view.extend({
         // small local ISP that never shows up in any public logo service can
         // still get a real badge, keyed by its ASN rather than a name guess.
         var ISP_BY_ASN = {
-            'AS151690': { name: 'FAB5', color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fab5.png') + '?v=3' }
+            'AS151690': { color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fab5.png') + '?v=3' }
         };
         var ispBadge = function(ispFull) {
             var raw = ispFull || '';
@@ -1050,20 +1073,34 @@ return view.extend({
                 org = parts[1];
             }
             var isp = org.toLowerCase();
-            var name = org ? org.split(' - ')[0].split(',')[0].trim() : 'Unknown ISP';
+            // Show the operator name exactly as the ASN registry gives it.
+            // Cymru returns "<AS handle> - <operator name>", so drop only the
+            // handle (which is routing-registry shorthand, not a name a person
+            // would recognise) and keep everything after it verbatim -- no
+            // trimming at the first comma, which used to turn "Bharti Airtel
+            // Ltd., Telemedia Services, IN" into just "Bharti Airtel Ltd.".
+            var name = 'Unknown ISP';
+            if (org) {
+                var dashIdx = org.indexOf(' - ');
+                name = (dashIdx !== -1 ? org.substring(dashIdx + 3) : org).trim() || org.trim();
+            }
             var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
             if (ISP_BY_ASN[asn]) {
+                // A pinned entry supplies branding (colour, short label, bundled
+                // logo) for an operator no public logo service knows about. It
+                // deliberately does NOT override the name: the registry name is
+                // still the accurate one, and it is what gets displayed.
                 var _pin = ISP_BY_ASN[asn];
-                return { color: _pin.color, label: _pin.label, name: _pin.name, asn: asn, domain: _pin.domain || '', logo: _pin.logo || '' };
+                return { color: _pin.color, label: _pin.label, name: _pin.name || name, asn: asn, domain: _pin.domain || '', logo: _pin.logo || '' };
             }
-            if (isp.indexOf('airtel') !== -1 || isp.indexOf('bharti') !== -1) { name = 'Airtel'; color = '#ED1B24'; label = 'A'; }
-            else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { name = 'Jio'; color = '#0F1C4D'; label = 'Jio'; }
-            else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { name = 'Vi'; color = '#E60000'; label = 'Vi'; }
-            else if (isp.indexOf('bsnl') !== -1) { name = 'BSNL'; color = '#004C97'; label = 'BSNL'; }
-            else if (isp.indexOf('hathway') !== -1) { name = 'Hathway'; color = '#E31E24'; label = 'HW'; }
-            else if (isp.indexOf('comcast') !== -1 || isp.indexOf('xfinity') !== -1) { name = 'Xfinity'; color = '#111827'; label = 'X'; }
-            else if (isp.indexOf('at&t') !== -1) { color = '#00A8E0'; label = 'AT&T'; name = 'AT&T'; }
-            else if (isp.indexOf('verizon') !== -1) { name = 'Verizon'; color = '#CD040B'; label = 'V'; }
+            if (isp.indexOf('airtel') !== -1 || isp.indexOf('bharti') !== -1) { color = '#ED1B24'; label = 'A'; }
+            else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { color = '#0F1C4D'; label = 'Jio'; }
+            else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { color = '#E60000'; label = 'Vi'; }
+            else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; }
+            else if (isp.indexOf('hathway') !== -1) { color = '#E31E24'; label = 'HW'; }
+            else if (isp.indexOf('comcast') !== -1 || isp.indexOf('xfinity') !== -1) { color = '#111827'; label = 'X'; }
+            else if (isp.indexOf('at&t') !== -1) { color = '#00A8E0'; label = 'AT&T'; }
+            else if (isp.indexOf('verizon') !== -1) { color = '#CD040B'; label = 'V'; }
             for (var key in ISP_LOGO_DOMAINS) {
                 if (isp.indexOf(key) !== -1) { domain = ISP_LOGO_DOMAINS[key]; break; }
             }
@@ -1109,7 +1146,7 @@ return view.extend({
             pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
             ping_graph: { nodes: [pingGraphWrapper], label: 'Ping Graph', show: 'block' },
-            wan_quality: { nodes: [wanQualityCard], label: 'WAN Quality', show: null },
+            wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
             therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
@@ -1146,7 +1183,7 @@ return view.extend({
         });
         settingsPanel.appendChild(cardChecks);
         var wanIfaceSection = E('div', { style: 'display: none;' }, [
-            E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'WAN Quality Interfaces'),
+            E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'WAN Uptime Status Interfaces'),
             E('div', { id: 'hw-wanq-checks', class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' })
         ]);
         settingsPanel.appendChild(wanIfaceSection);
@@ -1249,18 +1286,35 @@ return view.extend({
                 }
             }, 'Reset to defaults')
         ]));
-        settingsPanel.appendChild(E('h4', {
-            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
-        }, 'CPU Performance'));
-        var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
-        var cpuPerfSection = E('div', {}, [cpuPerfBody]);
-        settingsPanel.appendChild(cpuPerfSection);
         var cbiRow = function(labelTxt, field) {
             return E('div', { class: 'cbi-value', style: 'display: flex; align-items: center; gap: 12px; margin-bottom: 8px;' }, [
                 E('label', { class: 'cbi-value-title', style: 'min-width: 160px; opacity: 0.8;' }, labelTxt),
                 E('div', { class: 'cbi-value-field' }, field)
             ]);
         };
+        settingsPanel.appendChild(E('h4', {
+            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
+        }, 'WAN Uptime Status Probing Targets'));
+        var wanTgt4Input = E('input', { type: 'text', class: 'cbi-input-text', value: self.wanTarget4, placeholder: 'IP or domain (e.g. 1.1.1.1 or dns.google)', style: 'width: 260px;' });
+        var wanTgt6Input = E('input', { type: 'text', class: 'cbi-input-text', value: self.wanTarget6, placeholder: 'IP or domain (e.g. 2606:4700:4700::1111)', style: 'width: 260px;' });
+        var saveWanTargets = function() {
+            var v4 = wanTgt4Input.value.trim() || '1.1.1.1';
+            var v6 = wanTgt6Input.value.trim() || '2606:4700:4700::1111';
+            self.wanTarget4 = v4;
+            self.wanTarget6 = v6;
+            saveConfig();
+        };
+        wanTgt4Input.addEventListener('change', saveWanTargets);
+        wanTgt6Input.addEventListener('change', saveWanTargets);
+        settingsPanel.appendChild(cbiRow('IPv4 Quality Target', wanTgt4Input));
+        settingsPanel.appendChild(cbiRow('IPv6 Quality Target', wanTgt6Input));
+
+        settingsPanel.appendChild(E('h4', {
+            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
+        }, 'CPU Performance'));
+        var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
+        var cpuPerfSection = E('div', {}, [cpuPerfBody]);
+        settingsPanel.appendChild(cpuPerfSection);
         var buildCpuPerfForm = function(perf) {
             cpuPerfBody.innerHTML = '';
             cpuPerfBody.style.opacity = '1';
@@ -1524,7 +1578,18 @@ return view.extend({
                     }
                     self.pingPanel.update(hist);
                     var pt = self.pingTable;
-                    var keys = Object.keys(hist);
+                    var keys = Object.keys(hist).sort(function(ka, kb) {
+                        var a = hist[ka], b = hist[kb];
+                        if (!a || !b) return ka.localeCompare(kb);
+                        if (a.gw && !b.gw) return -1;
+                        if (!a.gw && b.gw) return 1;
+                        if (a.gw && b.gw) return (a.fam || 4) - (b.fam || 4);
+                        var hA = (a.host || '').toLowerCase();
+                        var hB = (b.host || '').toLowerCase();
+                        var c = hA.localeCompare(hB, undefined, { sensitivity: 'base' });
+                        if (c !== 0) return c;
+                        return (a.fam || 4) - (b.fam || 4);
+                    });
                     var sig = keys.join('|');
                     if (pt.sig !== sig) {
                         pt.sig = sig;
@@ -3408,34 +3473,48 @@ return view.extend({
                 var wqAll = res && res.wan_quality;
                 var wanQBox = document.getElementById('hw-wanq-list');
                 if (!wanQBox) return;
+                var isHidden = self.hiddenCards && self.hiddenCards.indexOf('wan_quality') !== -1;
                 var hasWanQ = wqAll && wqAll.length > 0;
-                wanQualityCard.style.display = hasWanQ && self.hiddenCards.indexOf('wan_quality') === -1 ? 'flex' : 'none';
+                wanQualityCard.style.display = hasWanQ && !isHidden ? 'flex' : 'none';
                 var wanIfaceSectionNode = wanIfaceSection;
-                wanIfaceSectionNode.style.display = hasWanQ ? '' : 'none';
-                if (hasWanQ) {
-                    var wanqChecks = document.getElementById('hw-wanq-checks');
+                if (wanIfaceSectionNode) wanIfaceSectionNode.style.display = hasWanQ ? '' : 'none';
+                if (!hasWanQ) return;
+                var wanqChecks = document.getElementById('hw-wanq-checks');
+                if (wanqChecks) {
                     syncRows(wanqChecks, self._wanIfaceCheckCache, wqAll, function(r) { return r.iface; }, function(r) {
                         var cb = E('input', { type: 'checkbox' });
                         var lbl = E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, r.iface.toUpperCase()]);
                         return { el: lbl, cb: cb, iface: r.iface };
                     }, function(entry, r) {
-                        entry.cb.checked = self.hiddenWanIfaces.indexOf(r.iface) === -1;
+                        var isDead = r.status === 'down' && (r.uptime_pct === 0 || r.uptime_pct === '0.00' || r.uptime_pct === 0.0);
+                        var isExplicitlyShown = self.hiddenWanIfaces.indexOf('!' + r.iface) !== -1;
+                        var isExplicitlyHidden = self.hiddenWanIfaces.indexOf(r.iface) !== -1;
+                        entry.cb.checked = isExplicitlyShown || (!isExplicitlyHidden && !isDead);
                         entry.cb.onchange = function(ev) {
-                            var idx = self.hiddenWanIfaces.indexOf(r.iface);
-                            if (ev.target.checked && idx !== -1) self.hiddenWanIfaces.splice(idx, 1);
-                            else if (!ev.target.checked && idx === -1) self.hiddenWanIfaces.push(r.iface);
+                            var idxHide = self.hiddenWanIfaces.indexOf(r.iface);
+                            var idxShow = self.hiddenWanIfaces.indexOf('!' + r.iface);
+                            if (idxHide !== -1) self.hiddenWanIfaces.splice(idxHide, 1);
+                            if (idxShow !== -1) self.hiddenWanIfaces.splice(idxShow, 1);
+                            if (ev.target.checked) {
+                                if (isDead) self.hiddenWanIfaces.push('!' + r.iface);
+                            } else {
+                                self.hiddenWanIfaces.push(r.iface);
+                            }
                             saveConfig();
                         };
                     });
                 }
-                if (!hasWanQ) return;
-                var wq = wqAll.filter(function(r) { return self.hiddenWanIfaces.indexOf(r.iface) === -1; });
+                var wq = wqAll.filter(function(r) {
+                    var isDead = r.status === 'down' && (r.uptime_pct === 0 || r.uptime_pct === '0.00' || r.uptime_pct === 0.0);
+                    var isExplicitlyShown = self.hiddenWanIfaces.indexOf('!' + r.iface) !== -1;
+                    var isExplicitlyHidden = self.hiddenWanIfaces.indexOf(r.iface) !== -1;
+                    if (isExplicitlyHidden) return false;
+                    if (isDead && !isExplicitlyShown) return false;
+                    return true;
+                });
                 if (!self._wanQCache) self._wanQCache = {};
 
                 syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
-                    // Persistent img + monogram pair, never rebuilt -- the
-                    // monogram is both the instant loading state and the
-                    // fallback if the real logo 404s/fails to load.
                     var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
                     var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
                     logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
