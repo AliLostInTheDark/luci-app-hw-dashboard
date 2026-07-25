@@ -1007,7 +1007,10 @@ return view.extend({
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
         var saveConfig = function() {
-            callHwSetConfig({
+            // Returns the promise so the page-level Save can wait on it and
+            // report a real result; existing callers ignore it and keep the
+            // previous fire-and-forget behaviour.
+            return callHwSetConfig({
                 hidden: self.hiddenCards,
                 targets: self.pingTargets,
                 disabledPings: self.disabledPings,
@@ -1195,6 +1198,7 @@ return view.extend({
         });
         settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Visible Cards'));
         var cardChecks = E('div', { class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' });
+        var cardCheckboxes = {};
         Object.keys(cardRegistry).forEach(function(key) {
             var cb = E('input', {
                 type: 'checkbox',
@@ -1207,8 +1211,16 @@ return view.extend({
                 }
             });
             cb.checked = self.hiddenCards.indexOf(key) === -1;
+            cardCheckboxes[key] = cb;
             cardChecks.appendChild(E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, cardRegistry[key].label]));
         });
+        // Revert/Reset change self.hiddenCards directly; without this the
+        // boxes would keep showing the old state.
+        var syncCardCheckboxes = function() {
+            Object.keys(cardCheckboxes).forEach(function(k) {
+                cardCheckboxes[k].checked = self.hiddenCards.indexOf(k) === -1;
+            });
+        };
         settingsPanel.appendChild(cardChecks);
         var wanIfaceSection = E('div', { style: 'display: none;' }, [
             E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'WAN Uptime Status Interfaces'),
@@ -1434,8 +1446,11 @@ return view.extend({
             aqlBody.innerHTML = '';
             aqlBody.style.opacity = '1';
             if (!aq || !aq.available) {
-                aqlBody.appendChild(E('div', { style: 'opacity: 0.7;' },
-                    'Not available: this build has no mac80211 AQL controls in debugfs (needs CONFIG_MAC80211_DEBUGFS and debugfs mounted).'));
+                aqlSaveCurrent = function() { return Promise.resolve({ result: 'skipped' }); };
+                aqlBody.appendChild(E('div', { style: 'opacity: 0.7; line-height: 1.5;' },
+                    (aq && aq.debugfs === 0)
+                        ? 'Not available: debugfs is not mounted on this build (needs CONFIG_DEBUG_FS, mounted at /sys/kernel/debug).'
+                        : 'Not available: debugfs is present, but this kernel exposes no mac80211 AQL controls under /sys/kernel/debug/ieee80211 (needs CONFIG_MAC80211_DEBUGFS).'));
                 return;
             }
             var def = aq.defaults || { low: 5000, high: 12000, threshold: 24000 };
@@ -1528,6 +1543,14 @@ return view.extend({
                 }).catch(function() { busy(false); setMsg('Request failed.', '#ff5252'); });
             });
 
+            // Let the page-level Save flush whatever is in these inputs.
+            aqlSaveCurrent = function() {
+                var lo = parseInt(lowInput.value, 10), hi = parseInt(highInput.value, 10), th = parseInt(thInput.value, 10);
+                if (!(lo > 0) || !(hi > 0) || lo > hi) return Promise.resolve({ result: 'invalid' });
+                return callHwSetAql({ low: lo, high: hi, threshold: th > 0 ? th : def.threshold, enable: enCb.checked ? 1 : 0 })
+                    .catch(function() { return { result: 'error' }; });
+            };
+
             aqlBody.appendChild(cbiRow('Preset:', presetSel));
             aqlBody.appendChild(cbiRow('TX queue low (\u00b5s):', lowInput));
             aqlBody.appendChild(cbiRow('TX queue high (\u00b5s):', highInput));
@@ -1537,6 +1560,10 @@ return view.extend({
             aqlBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px; line-height: 1.5;' },
                 'Lower limits cut latency under load at some cost to peak throughput; 1500\u20132500 is the usual sweet spot. Applies to every radio immediately and is replayed on boot, since debugfs itself does not persist.'));
         };
+        // Assigned once the AQL form exists; the page-level Save calls it to
+        // flush the staged values. Resolves with {result:'skipped'} when there
+        // is no form (unsupported build) so Save still reports success.
+        var aqlSaveCurrent = function() { return Promise.resolve({ result: 'skipped' }); };
         var aqlLoaded = false;
         var loadAql = function() {
             if (aqlLoaded) return;
@@ -1580,6 +1607,79 @@ return view.extend({
             }, '\u2913 Download diagnostics snapshot'),
             E('span', { style: 'font-size: 0.78em; opacity: 0.5; margin-left: 10px;' }, 'Saves the latest full hardware readout as JSON')
         ]));
+        // --- page-level Save / Revert / Reset --------------------------
+        // Everything above applies as you change it (that behaviour predates
+        // this bar and is what makes the panel feel live), so Save's job is to
+        // flush the one section that is genuinely staged -- the AQL form --
+        // and re-persist the rest, then report a single result. Revert and
+        // Reset are the ones that really needed to be page-wide: previously
+        // there was no way to undo a settings change short of reversing each
+        // control by hand.
+        var pageMsg = E('span', { style: 'margin-left: 10px; font-size: 0.85em;' });
+        var setPageMsg = function(t, c) { pageMsg.textContent = t || ''; pageMsg.style.color = c || ''; };
+        var pageSaveBtn = E('button', { class: 'cbi-button cbi-button-save' }, 'Save');
+        var pageRevertBtn = E('button', { class: 'cbi-button', style: 'margin-left: 6px;' }, 'Revert');
+        var pageResetBtn = E('button', { class: 'cbi-button cbi-button-reset', style: 'margin-left: 6px;' }, 'Reset');
+        var pageBusy = function(b) { [pageSaveBtn, pageRevertBtn, pageResetBtn].forEach(function(x) { x.disabled = b; }); };
+
+        pageSaveBtn.addEventListener('click', function() {
+            pageBusy(true); setPageMsg('Saving\u2026');
+            var jobs = [saveConfig()];
+            if (typeof aqlSaveCurrent === 'function') jobs.push(aqlSaveCurrent());
+            Promise.all(jobs).then(function(r) {
+                pageBusy(false);
+                var aqlRes = r[1];
+                if (aqlRes && aqlRes.result && aqlRes.result !== 'ok' && aqlRes.result !== 'skipped') {
+                    setPageMsg('Saved, but AQL was rejected: ' + aqlRes.result, '#ffa726');
+                } else {
+                    setPageMsg('All settings saved.', '#8bc34a');
+                }
+            }).catch(function() { pageBusy(false); setPageMsg('Save failed.', '#ff5252'); });
+        });
+
+        pageRevertBtn.addEventListener('click', function() {
+            pageBusy(true); setPageMsg('Reverting\u2026');
+            // Re-read everything from the router and rebuild the panel state
+            // from it, discarding anything edited but not saved.
+            callHwGetConfig().then(function(cfg) {
+                cfg = cfg || {};
+                self.hiddenCards = Array.isArray(cfg.hidden) ? cfg.hidden : [];
+                self.pingTargets = Array.isArray(cfg.targets) ? cfg.targets : [];
+                self.disabledPings = Array.isArray(cfg.disabledPings) ? cfg.disabledPings : [];
+                self.hiddenWanIfaces = Array.isArray(cfg.wanHidden) ? cfg.wanHidden : [];
+                if (typeof cfg.wanTarget4 === 'string' && cfg.wanTarget4) self.wanTarget4 = cfg.wanTarget4;
+                if (typeof cfg.wanTarget6 === 'string' && cfg.wanTarget6) self.wanTarget6 = cfg.wanTarget6;
+                applyCardVisibility();
+                if (typeof renderTargetList === 'function') renderTargetList();
+                if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
+                aqlLoaded = false; loadAql();
+                pageBusy(false); setPageMsg('Reverted to saved settings.', '');
+            }).catch(function() { pageBusy(false); setPageMsg('Revert failed.', '#ff5252'); });
+        });
+
+        pageResetBtn.addEventListener('click', function() {
+            pageBusy(true); setPageMsg('Resetting\u2026');
+            self.hiddenCards = [];
+            self.pingTargets = [];
+            self.disabledPings = [];
+            self.hiddenWanIfaces = [];
+            self.wanTarget4 = '1.1.1.1';
+            self.wanTarget6 = '2606:4700:4700::1111';
+            self.pingHist = {};
+            applyCardVisibility();
+            if (typeof renderTargetList === 'function') renderTargetList();
+            if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
+            Promise.all([saveConfig(), callHwSetAql({ reset: true }).catch(function() { return null; })])
+                .then(function() {
+                    aqlLoaded = false; loadAql();
+                    pageBusy(false); setPageMsg('All settings reset to defaults.', '#8bc34a');
+                }).catch(function() { pageBusy(false); setPageMsg('Reset failed.', '#ff5252'); });
+        });
+
+        settingsPanel.appendChild(E('div', {
+            style: 'margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); display: flex; align-items: center; flex-wrap: wrap;'
+        }, [pageSaveBtn, pageRevertBtn, pageResetBtn, pageMsg]));
+
         var settingsBtn = E('button', {
             class: 'cbi-button',
             style: 'padding: 4px 14px;',
@@ -3403,7 +3503,15 @@ return view.extend({
                             offRows.push({ k: 'cfg', type: 'row', label: 'Config (SW / HW)', val: (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), color: (off.sw_cfg > 0 || off.hw_cfg > 0) ? '' : '#9e9e9e' });
                         }
                         var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
-                        if (off.sw_flows >= 0) offRows.push({ k: 'swflows', type: 'bar', label: off.qcom ? 'PPE Offloaded Flows' : 'Offloaded / Active Flows', cur: off.sw_flows, tot: connNow, color: '#00bcd4' });
+                        if (off.sw_flows >= 0) offRows.push({ k: 'swflows', type: 'bar', label: off.qcom ? 'Conntrack Offloaded Flows' : 'Offloaded / Active Flows', cur: off.sw_flows, tot: connNow, color: '#00bcd4' });
+                        // Qualcomm PPE keeps its own accounting; conntrack's
+                        // OFFLOAD count is a different (larger) number and was
+                        // previously shown as if it were the hardware figure.
+                        if (off.qcom && off.qcom.bound >= 0) {
+                            offRows.push({ k: 'qbound', type: 'row', label: 'PPE Bound Flows (hardware)', val: String(off.qcom.bound), color: off.qcom.bound > 0 ? '#8bc34a' : '#9e9e9e' });
+                            if (off.qcom.unsupported >= 0) offRows.push({ k: 'qunsup', type: 'row', label: 'Not Accelerable', val: String(off.qcom.unsupported), color: off.qcom.unsupported > 0 ? '#ffa726' : '#9e9e9e' });
+                            if (off.qcom.failed > 0) offRows.push({ k: 'qfail', type: 'row', label: 'PPE Bind Failures', val: String(off.qcom.failed), color: '#ff5252' });
+                        }
                         if (!off.qcom && off.ppe_flows >= 0) offRows.push({ k: 'ppeflows', type: 'bar', label: 'PPE Bind Entries', cur: off.ppe_flows, tot: off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), color: '#8bc34a' });
                         if (off.wed > 0) offRows.push({ k: 'wed', type: 'row', label: 'WED (Wi-Fi offload)', val: off.wed + ' engine' + (off.wed > 1 ? 's' : ''), color: '#00bcd4' });
                         // Accelerator is configured but the kernel exposes no

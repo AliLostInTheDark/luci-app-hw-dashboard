@@ -121,6 +121,12 @@ _aql_wed_state() {
 # Per-PHY live state as a JSON array, into AQL_PHYS. Also sets AQL_AVAIL.
 _aql_scan() {
 	AQL_AVAIL=0; AQL_PHYS=""
+	# 0 = debugfs not mounted at all, 1 = mounted. Reported separately from
+	# AQL_AVAIL so the UI can say *which* piece is missing instead of one
+	# vague "not supported": a kernel without CONFIG_DEBUG_FS and one built
+	# without CONFIG_MAC80211_DEBUGFS need different answers.
+	AQL_DEBUGFS=0
+	[ -d /sys/kernel/debug ] && AQL_DEBUGFS=1
 	local _first=1
 	[ -d "$AQL_DIR" ] || return
 	for _ap in "$AQL_DIR"/phy*; do
@@ -349,7 +355,7 @@ case "$1" in
 				_aql_scan
 				_aql_wed_state
 				_aql_cfg_read
-				echo "{\"available\":$AQL_AVAIL,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
+				echo "{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
 				;;
 			set_aql)
 				# Applies immediately AND persists to UCI, so a reboot doesn't
@@ -1773,6 +1779,28 @@ EOF_DMI
 						elif [ -d /sys/kernel/debug/ppe ]; then
 							_ptot=4096
 							[ "$_sw" -ge 0 ] && _ppe=$_sw || _ppe=0
+							# Qualcomm PPE keeps its own flow accounting, which is
+							# NOT the same number as conntrack's OFFLOAD count.
+							# Using conntrack as a proxy overstated it badly --
+							# measured on an IPQ9554, conntrack reported 16
+							# offloaded while the PPE had exactly 1 flow bound in
+							# hardware. "unsupported" is the useful companion: a
+							# flow the accelerator looked at and could not take.
+							local _qbound=-1 _qunsup=-1 _qfail=-1 _qtok _qline
+							if [ -f /sys/kernel/debug/ppe/flows ]; then
+								read -r _qline < /sys/kernel/debug/ppe/flows
+								for _qtok in $_qline; do
+									case "$_qtok" in
+										bound:*) _qbound=${_qtok#bound:} ;;
+										unsupported:*) _qunsup=${_qtok#unsupported:} ;;
+										failed:*) _qfail=${_qtok#failed:} ;;
+									esac
+								done
+								case "$_qbound" in ''|*[!0-9]*) _qbound=-1 ;; esac
+								case "$_qunsup" in ''|*[!0-9]*) _qunsup=-1 ;; esac
+								case "$_qfail" in ''|*[!0-9]*) _qfail=-1 ;; esac
+								[ "$_qbound" -ge 0 ] && _ppe=$_qbound
+							fi
 							local _cpu_code_json="{}"
 							if [ -f /sys/kernel/debug/ppe/cpu_code ]; then
 								local _line _pkt _port _drop _first=1
@@ -1856,7 +1884,7 @@ EOF_DMI
 								done < /sys/kernel/debug/ppe/edma/stats/err_stats
 								_edma_err_json="$_edma_err_json}"
 							fi
-							_qcom_json="{\"qcom_ppe\":1,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
+							_qcom_json="{\"qcom_ppe\":1,\"bound\":$_qbound,\"unsupported\":$_qunsup,\"failed\":$_qfail,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
 						fi
 					fi
 					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"dbg\":$_dbg,\"qcom\":$_qcom_json}"
@@ -2466,7 +2494,7 @@ EOF
 				# skipped entirely when the directory isn't there).
 				_aql_scan
 				_aql_wed_state
-				AQL_JSON="{\"available\":$AQL_AVAIL,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"phys\":[$AQL_PHYS]}"
+				AQL_JSON="{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"phys\":[$AQL_PHYS]}"
 
 				# UBI device tree + MTD partition table are hardware inventory:
 				# the layout is fixed at flash time and wear/ECC counters move on

@@ -160,7 +160,7 @@ One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, con
 
 ## Settings
 
-Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN Quality rows, edit ping targets, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. Everything persists on the router via UCI (`/etc/config/hwdash`) and survives sysupgrades.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN Quality rows, edit ping targets, tune Wireless AQL, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
 
 ## How it works
 
