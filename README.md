@@ -1,4 +1,5 @@
 # luci-app-hw-dashboard
+## Made with Claude Code as a personal fun project, expect bugs.
 
 A real-time hardware monitoring dashboard for OpenWrt LuCI. Built entirely from scratch using vanilla JavaScript and CSS — no external libraries or frameworks. Every metric is sourced directly from the kernel and system interfaces, polled live, and rendered without page reloads.
 
