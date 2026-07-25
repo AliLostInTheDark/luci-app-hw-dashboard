@@ -356,22 +356,36 @@ return view.extend({
             if (!sorted.length) return null;
             return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
         };
+        // psent/plost carry REAL ICMP packet counts alongside the poll-level
+        // lostN/cnt. The graph keeps using lostN/cnt (a loss tick means a poll
+        // that returned nothing); the table's loss column prefers psent/plost,
+        // which counts individual packets and so still sees a 1-in-2 drop that
+        // the poll-level view cannot distinguish from a clean probe.
         var buildSeriesFrom = function(t, vw) {
+            var pd = t.pdata || [];
             if (vw.raw) {
-                return t.data.slice(-vw.pts).map(function(v) { return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1 }; });
+                var off = Math.max(0, t.data.length - vw.pts);
+                return t.data.slice(-vw.pts).map(function(v, i) {
+                    var p = pd[off + i] || { s: 0, r: 0 };
+                    return { v: v, loss: v === null, lostN: v === null ? 1 : 0, cnt: 1,
+                             psent: p.s, plost: p.s - p.r };
+                });
             }
             var per = vw.group;
             var src = t.agg.slice(-(vw.pts * per));
             var out = [];
             for (var i = 0; i < src.length; i += per) {
-                var sum = 0, n = 0, loss = 0;
+                var sum = 0, n = 0, loss = 0, psent = 0, precv = 0;
                 for (var k = i; k < Math.min(i + per, src.length); k++) {
                     var b = src[k];
                     if (b.a !== null) { sum += b.a * b.n; n += b.n; }
                     loss += b.loss;
+                    psent += b.ps || 0;
+                    precv += b.pr || 0;
                 }
                 var cnt = n + loss;
-                out.push({ v: n > 0 ? sum / n : null, loss: loss > 0 && cnt > 0 && loss / cnt >= 0.02, lostN: loss, cnt: cnt });
+                out.push({ v: n > 0 ? sum / n : null, loss: loss > 0 && cnt > 0 && loss / cnt >= 0.02, lostN: loss, cnt: cnt,
+                           psent: psent, plost: psent - precv });
             }
             return out;
         };
@@ -1490,8 +1504,13 @@ return view.extend({
                             hidden: false,
                             data: [],
                             allData: [],
+                            // Real ICMP packet counts, one entry per poll,
+                            // kept in step with data[] so the loss column can
+                            // report packets lost rather than polls that
+                            // returned nothing at all.
+                            pdata: [],
                             agg: [],
-                            acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
+                            acc: { sum: 0, n: 0, loss: 0, cnt: 0, ps: 0, pr: 0 }
                         };
                     } else if (hist[key].gw && isGwDisabled(hist[key].gw)) {
                         delete hist[key];
@@ -1503,14 +1522,23 @@ return view.extend({
                     var v = typeof t.ms === 'number' ? t.ms : null;
                     h.data.push(v);
                     h.allData.push(v);
+                    // A backend without sent/recv (older package) reports 0/0,
+                    // which the loss column treats as "no packet data" and
+                    // falls back to the old poll-level estimate.
+                    var ps = typeof t.sent === 'number' ? t.sent : 0;
+                    var pr = typeof t.recv === 'number' ? t.recv : 0;
+                    h.pdata.push({ s: ps, r: pr });
                     if (h.data.length > PING_WINDOW) h.data.shift();
+                    if (h.pdata.length > PING_WINDOW) h.pdata.shift();
                     h.acc.cnt++;
+                    h.acc.ps += ps;
+                    h.acc.pr += pr;
                     if (v === null) h.acc.loss++;
                     else { h.acc.sum += v; h.acc.n++; }
                     if (h.acc.cnt >= 10) {
-                        h.agg.push({ a: h.acc.n > 0 ? h.acc.sum / h.acc.n : null, n: h.acc.n, loss: h.acc.loss });
+                        h.agg.push({ a: h.acc.n > 0 ? h.acc.sum / h.acc.n : null, n: h.acc.n, loss: h.acc.loss, ps: h.acc.ps, pr: h.acc.pr });
                         if (h.agg.length > PING_AGG_KEEP) h.agg.shift();
-                        h.acc = { sum: 0, n: 0, loss: 0, cnt: 0 };
+                        h.acc = { sum: 0, n: 0, loss: 0, cnt: 0, ps: 0, pr: 0 };
                     }
                 });
                 if (!res.gateway6 && !isGwDisabled(6)) {
@@ -1519,7 +1547,7 @@ return view.extend({
                         hist[gk6] = {
                             label: 'Gateway v6', gw: 6, na: true, host: '', fam: 6,
                             color: '#9e9e9e', hidden: false,
-                            data: [], allData: [], agg: [], acc: { sum: 0, n: 0, loss: 0, cnt: 0 }
+                            data: [], allData: [], pdata: [], agg: [], acc: { sum: 0, n: 0, loss: 0, cnt: 0, ps: 0, pr: 0 }
                         };
                     }
                     var g6 = hist[gk6];
@@ -1621,8 +1649,12 @@ return view.extend({
                         if (!row) return;
                         row.tr.style.opacity = t.hidden ? '0.35' : '';
                         var sr = curSeries[k] || [];
-                        var vals = [], lostSamples = 0, totSamples = 0;
-                        sr.forEach(function(p) { if (p.v !== null) vals.push(p.v); lostSamples += p.lostN; totSamples += p.cnt; });
+                        var vals = [], lostSamples = 0, totSamples = 0, lostPkts = 0, sentPkts = 0;
+                        sr.forEach(function(p) {
+                            if (p.v !== null) vals.push(p.v);
+                            lostSamples += p.lostN; totSamples += p.cnt;
+                            sentPkts += p.psent || 0; lostPkts += p.plost || 0;
+                        });
                         vals.sort(function(a, b) { return a - b; });
                         var sum = 0;
                         vals.forEach(function(v) { sum += v; });
@@ -1633,7 +1665,11 @@ return view.extend({
                         });
                         var last = t.data.length ? t.data[t.data.length - 1] : null;
                         var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
-                        var lossPct = totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0;
+                        // Packet-level when the backend supplies counts, else
+                        // the old poll-level estimate.
+                        var lossPct = sentPkts > 0
+                            ? Math.round(lostPkts / sentPkts * 1000) / 10
+                            : (totSamples > 0 ? Math.round(lostSamples / totSamples * 1000) / 10 : 0);
                         if (t.na) {
                             row.cells.target.textContent = 'Gateway';
                             row.cells.ip.textContent = 'N/A';

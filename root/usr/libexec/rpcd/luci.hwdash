@@ -534,8 +534,33 @@ EOFN
 								case "$_t" in ''|.|*.*.*) _t="" ;; esac
 								;;
 						esac
-						# "x" marks no-reply so the reader can still pick up the IP
-						[ -n "$_t$_ip" ] && printf '%s %s' "${_t:-x}" "$_ip" > "$_PT_TMP.$_pi"
+						# Real ICMP packet counts off ping's own summary line
+						# ("2 packets transmitted, 1 packets received, ...").
+						# The card's loss column used to infer loss from a poll
+						# returning nothing at all, which only happens when
+						# EVERY packet of a probe is lost -- so with more than
+						# one packet per probe it under-reported real loss.
+						# These are the truthful numbers.
+						_snt=0; _rcv=0
+						case "$_out" in
+							*"packets transmitted"*)
+								_pp=${_out%%" packets transmitted"*}; _pp=${_pp##*[!0-9]}
+								case "$_pp" in ''|*[!0-9]*) _pp=0 ;; esac
+								_snt=$_pp
+								_pp=${_out#*"packets transmitted, "}
+								_pp=${_pp%%" packets received"*}; _pp=${_pp##*[!0-9]}
+								case "$_pp" in ''|*[!0-9]*) _pp=0 ;; esac
+								_rcv=$_pp
+								;;
+						esac
+						# "x" marks no-reply so the reader can still pick up the
+						# IP. Counts come before the address because the address
+						# is the field that can legitimately be empty, and a
+						# trailing empty field is the only one `read` handles
+						# without shifting everything after it.
+						if [ -n "$_t$_ip" ] || [ "$_snt" -gt 0 ]; then
+							printf '%s %s %s %s' "${_t:-x}" "$_snt" "$_rcv" "$_ip" > "$_PT_TMP.$_pi"
+						fi
 					) &
 					_ping_pids="$_ping_pids $!"
 					_pi=$((_pi + 1))
@@ -553,12 +578,15 @@ EOF
 				_MAP_DIRTY=0
 				while read -r _pt_h _pt_f; do
 					[ -z "$_pt_h" ] && continue
-					_ms="null"; _pip=""
+					_ms="null"; _pip=""; _psnt=0; _prcv=0
 					if [ -f "$_PT_TMP.$_pi" ]; then
-						read -r _ms _pip < "$_PT_TMP.$_pi" 2>/dev/null
+						read -r _ms _psnt _prcv _pip < "$_PT_TMP.$_pi" 2>/dev/null
 						rm -f "$_PT_TMP.$_pi" 2>/dev/null
 						case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
 						case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
+						case "$_psnt" in ''|*[!0-9]*) _psnt=0 ;; esac
+						case "$_prcv" in ''|*[!0-9]*) _prcv=0 ;; esac
+						[ "$_prcv" -gt "$_psnt" ] && _prcv=$_psnt
 					fi
 					# maintain the domain->IP cache from this probe result
 					case "$_pt_h" in
@@ -595,7 +623,7 @@ EOF
 					# report hosts without the internal %zone suffix
 					json_esc "${_pt_h%%%*}"
 					[ $_PF -eq 0 ] && PINGS="$PINGS,"
-					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms}"
+					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms,\"sent\":$_psnt,\"recv\":$_prcv}"
 					_PF=0
 					_pi=$((_pi + 1))
 				done <<EOF
