@@ -1389,18 +1389,28 @@ return view.extend({
                     applyBtn.disabled = true;
                     msg.textContent = 'Applying…';
                     msg.style.color = '';
+                    // rpc.declare({params:['perf']}) already wraps the first
+                    // argument as {perf: <arg>}, so passing {perf:{...}} here
+                    // sent {perf:{perf:{...}}}. The backend reads @.perf.governor,
+                    // found nothing, and rejected every apply as invalid --
+                    // pass the value directly, as set_config/set_aql do.
                     callHwSetCpuPerf({
-                        perf: {
-                            governor: govSel.value,
-                            min_freq: minV * 1000,
-                            max_freq: maxV * 1000,
-                            turbo_enabled: turboCb.checked
-                        }
+                        governor: govSel.value,
+                        min_freq: minV * 1000,
+                        max_freq: maxV * 1000,
+                        turbo_enabled: turboCb.checked
                     }).then(function(res) {
                         applyBtn.disabled = false;
                         if (res && res.result === 'ok') {
-                            msg.textContent = '✓ Applied';
-                            msg.style.color = '#8bc34a';
+                            // The backend verifies the boost write actually took;
+                            // some drivers expose the knob and then refuse it.
+                            if (res.turbo === 'unsupported') {
+                                msg.textContent = '✓ Applied (turbo not supported by this driver)';
+                                msg.style.color = '#ffa726';
+                            } else {
+                                msg.textContent = '✓ Applied';
+                                msg.style.color = '#8bc34a';
+                            }
                             return callHwGetCpuPerf().then(function(p) { if (p) buildCpuPerfForm(p); });
                         } else {
                             msg.textContent = 'Rejected — check governor/frequency range';

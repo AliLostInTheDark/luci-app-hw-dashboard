@@ -342,6 +342,15 @@ case "$1" in
 					CPF_TURBO_AVAIL=1
 					read_file _nt /sys/devices/system/cpu/intel_pstate/no_turbo 1
 					[ "$_nt" = "0" ] && CPF_TURBO_ON=1
+				elif [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
+					# The GLOBAL knob, not the per-policy one. Both exist on
+					# cpufreq-dt, but the per-policy cpuN/cpufreq/boost rejects
+					# writes (-EINVAL) on this driver while the global one works
+					# -- and after toggling the global, per-policy still reads 0,
+					# so reading it reported turbo as off right after enabling it.
+					CPF_TURBO_AVAIL=1
+					read_file _bo /sys/devices/system/cpu/cpufreq/boost 0
+					[ "$_bo" = "1" ] && CPF_TURBO_ON=1
 				elif [ -f "$_CF/boost" ]; then
 					CPF_TURBO_AVAIL=1
 					read_file _bo "$_CF/boost" 0
@@ -448,12 +457,26 @@ case "$1" in
 						*) _TWANT="" ;;
 					esac
 					if [ -n "$_TWANT" ]; then
+						_TBOOST=""
 						if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
 							[ "$_TWANT" = on ] && echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
 							[ "$_TWANT" = off ] && echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
+						elif [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
+							_TBOOST=/sys/devices/system/cpu/cpufreq/boost
 						elif [ -f "$_CF/boost" ]; then
-							[ "$_TWANT" = on ] && echo 1 > "$_CF/boost" 2>/dev/null
-							[ "$_TWANT" = off ] && echo 0 > "$_CF/boost" 2>/dev/null
+							_TBOOST="$_CF/boost"
+						fi
+						if [ -n "$_TBOOST" ]; then
+							[ "$_TWANT" = on ] && echo 1 > "$_TBOOST" 2>/dev/null
+							[ "$_TWANT" = off ] && echo 0 > "$_TBOOST" 2>/dev/null
+							# Verify rather than assume: the per-policy knob
+							# accepts the open() and then rejects the write, so a
+							# silent failure here used to look like success.
+							read_file _tnow "$_TBOOST" ""
+							case "$_TWANT" in
+								on)  [ "$_tnow" = "1" ] || _TURBO_FAIL=1 ;;
+								off) [ "$_tnow" = "0" ] || _TURBO_FAIL=1 ;;
+							esac
 						fi
 					fi
 					# Best-effort persistence: only touch /etc/config/cpu-perf if
@@ -471,7 +494,11 @@ case "$1" in
 						done
 						uci -q commit cpu-perf
 					fi
-					echo '{"result":"ok"}'
+					if [ "${_TURBO_FAIL:-0}" = "1" ]; then
+						echo '{"result":"ok","turbo":"unsupported"}'
+					else
+						echo '{"result":"ok"}'
+					fi
 				else
 					echo '{"result":"invalid"}'
 				fi
