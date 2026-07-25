@@ -1,291 +1,167 @@
+<div align="center">
+
 # luci-app-hw-dashboard
 ## Made with Claude Code as a personal fun project, expect bugs.
 
-A real-time hardware monitoring dashboard for OpenWrt LuCI. Built entirely from scratch using vanilla JavaScript and CSS — no external libraries or frameworks. Every metric is sourced directly from the kernel and system interfaces, polled live, and rendered without page reloads.
+A real-time hardware & network monitoring dashboard for OpenWrt LuCI, built from scratch in vanilla JavaScript — no external libraries, no frameworks. Every metric is read directly from the kernel and system interfaces, polled live, and rendered without page reloads.
 
-The dashboard is designed to be genuinely informative rather than decorative. It surfaces data that standard LuCI status pages omit: CPU cache topology, NAND wear levels, SoC identity, PCIe negotiated link state, WiFi PHY capabilities, and more. Layout is fully responsive; all cards collapse correctly on mobile.
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Release](https://img.shields.io/github/v/release/AliLostInTheDark/luci-app-hw-dashboard?label=release)](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-any%20target-1f6feb.svg)](https://openwrt.org)
+
+</div>
+
+---
+
+Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negotiated link state, per-radio WiFi PHY capabilities, or which WAN link actually belongs to which ISP. This dashboard does — and it's tuned to spawn as few processes as an embedded router can get away with, so leaving it open costs almost nothing.
+
+## Contents
+
+- [Highlights](#highlights)
+- [Installation](#installation)
+- [Supported devices](#supported-devices)
+- [Dashboard cards](#dashboard-cards)
+- [Settings](#settings)
+- [How it works](#how-it-works)
+- [License](#license)
+
+## Highlights
+
+| | |
+|---|---|
+| **CPU & Memory** | Per-core load, cache topology (even without kernel support), frequency residency, context switches, top IRQs by rate |
+| **Storage** | NAND/UBI wear & ECC trend, SquashFS + overlay breakdown, real disk I/O throughput, NVMe/SATA SMART health |
+| **Topology** | PCIe, USB and Ethernet link state — negotiated speed/width shown next to the hardware's rated maximum |
+| **WiFi** | Per-band PHY details (channel, TX power, NSS, bitrate, noise floor) straight from `iwinfo`/`iw` |
+| **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess — plus a bufferbloat grade |
+| **WAN Quality** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3` or carrier-grade NAT |
+| **Privacy** | Every background DNS lookup this package makes is automatically kept off a filtering resolver (AdGuard Home, Pi‑hole, Unbound) |
+| **Settings** | Persist on-device via UCI — follow the router across browsers, sysupgrades and backups |
 
 ## Installation
 
-### From pre-built package (recommended)
+### Pre-built package (recommended)
 
-Download the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it on your router:
+Grab the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-1.2.0-r1.apk
+apk add --allow-untrusted luci-app-hw-dashboard-<version>.apk
 ```
 
-The package depends on `ethtool-full` (pulled in automatically when repository feeds are configured) for per-port PHY details; without it those rows are simply omitted. The post-install script restarts `rpcd` automatically. Reload the LuCI interface and navigate to **Status > Hardware Dashboard**.
+Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
+
+> [!TIP]
+> Installing a newer release over an existing one clears all cached hardware data automatically, so stale readings from a previous version are never served.
 
 ### From source
 
-Clone into your OpenWrt build tree and compile:
-
 ```sh
 git clone https://github.com/AliLostInTheDark/luci-app-hw-dashboard.git package/luci/luci-app-hw-dashboard
-make menuconfig   # LuCI -> Applications -> luci-app-hw-dashboard
+make menuconfig   # LuCI → Applications → luci-app-hw-dashboard
 make package/luci/luci-app-hw-dashboard/compile V=s
 ```
 
-### Upgrading
+## Supported devices
 
-Installing a newer release over an existing one automatically clears all persisted hardware caches (`/etc/hwdash/`) and the LuCI module cache, so stale data from a previous version is never served.
-
-
-## Supported Devices
-
-The dashboard runs on any OpenWrt device. It has been developed and validated on the following JioRouter hardware:
+Runs on any OpenWrt device. Developed and validated against:
 
 | Model | Variants | SoC | Notes |
-|-------|----------|-----|-------|
-| JIDU6J11 | JIDU6111 to JIDU6911 | Qualcomm IPQ9554 | Primary development target |
-| JIDU6J01 | JIDU6101 to JIDU6801 | MediaTek MT7986a | Primary development target |
-| JIDU6700 | JIDU6700 | MediaTek MT7981BA | Primary development tagret {WiFi chip temperatures non-functional — calibration data absent from Factory partition (Jio never bothered to check those and just shipped it in a broken state)} |
+|---|---|---|---|
+| JIDU6J11 | JIDU6111 – JIDU6911 | Qualcomm IPQ9554 | Primary development target |
+| JIDU6J01 | JIDU6101 – JIDU6801 | MediaTek MT7986a | Primary development target |
+| JIDU6700 | JIDU6700 | MediaTek MT7981BA | WiFi chip temperature sensors are non-functional — calibration data is absent from the factory partition |
 
-On x86/x86\_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family, SoC ID, machine name) are silently omitted. All other functionality is platform-independent.
+On x86/x86_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family, SoC ID, machine name) are silently omitted. Everything else is platform-independent.
 
+## Dashboard cards
 
-## Dashboard Cards
+<details>
+<summary><b>CPU & Per-Core Usage</b></summary>
 
-### CPU
+Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts, top IRQ sources by per-core rate, softnet backlog drops, active connections vs. the conntrack limit, and cumulative frequency residency.
+</details>
 
-An SVG arc dial shows aggregate CPU utilization at a glance. Below it:
+<details>
+<summary><b>Memory</b></summary>
 
-- **Cores / Threads** — physical core and logical thread counts
-- **Cache** — L0 through L4 sizes read from `/sys/devices/system/cpu/cpu*/cache/`. On kernels without `CONFIG_CPU_CACHE_INFO` (common on QSDK-derived builds), cache sizes are resolved from the ARM CPU implementer and part number in `/proc/cpuinfo` using a built-in lookup table covering Cortex-A5 through Cortex-X4, Falkor, and Neoverse families
-- **Current / Max Frequency** — live per-core frequency from `cpufreq`, maximum from `cpuinfo_max_freq`
-- **Load Average** — 1 / 5 / 15 minute averages
-- **CPU Governor** — active scaling governor
-- **Uptime** — formatted as days, hours, minutes
+Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used/free/cached/buffers, swap, ZRAM with live compression ratio, and kernel slab/page-table overhead.
+</details>
 
-Per-core utilization lives in its own dedicated full-width **Per-Core Usage** card below the CPU/Memory/Detailed-Load row, laid out as a responsive grid of bordered per-core cells (name, live frequency, utilization bar) rather than a single tall list — on low core-count boards it's a short single row, on high thread-count CPUs (e.g. 6C/12T desktop-class x86) it wraps into a clean multi-row grid instead of dwarfing its siblings in height.
+<details>
+<summary><b>System Info</b></summary>
 
-The advanced CPU panel (shown alongside) breaks down aggregate time into: Idle, User, Nice, System, I/O Wait, IRQ, Soft IRQ, and tracks Context Switches/s, Hardware Interrupts/s, System Tasks (running / total), and Active Connections against the conntrack limit (with the since-boot peak). It also shows:
+Hostname, distro string, kernel version, CPU model, SoC identity (Qualcomm platforms), and CPU vulnerability mitigation status, color-coded by severity.
+</details>
 
-- **Top IRQs** — the five hottest interrupt sources by rate with a per-core stacked split, so you can see at a glance which core services the NIC/Wi-Fi interrupts and whether packet steering spreads the load
-- **Backlog Drops / Squeezed** — softnet counters; drops mean a CPU could not keep up with packet input
-- **Freq Residency** — cumulative time spent at each frequency step since boot (hidden when the kernel lacks `CONFIG_CPU_FREQ_STAT`)
+<details>
+<summary><b>Internal Storage</b></summary>
 
-### Memory
+Root filesystem usage with real read/write throughput (measured against actual elapsed time between polls, not the nominal poll interval), the read-only SquashFS base image shown separately from writable overlay space, and a summary section that adapts to the underlying storage type — NAND/UBI, eMMC, or SSD/NVMe. NAND details include erase-cycle counts, PEB/bad-block status, geometry and ECC strength; NVMe adds identity, TRIM support, and full SMART health (wear, TBW, spare, power-on hours, error counts) via the optional `smartmontools` package.
+</details>
 
-An SVG arc dial shows RAM utilization. The stats list includes:
+<details>
+<summary><b>External Storage</b></summary>
 
-- Physical Total (rounded up to the nearest standard DRAM size: 32 MB through 64 GB)
-- Memory Speed (e.g. "DDR4 2133 MT/s") — decoded from SMBIOS via the optional `dmidecode` package. Not installed by default (pointless on embedded boards with no DMI tables at all), so this row is simply absent unless `dmidecode` is installed separately; the value is genuinely static hardware data, cached for a day rather than re-decoded every poll
-- Usable Total (as reported by the kernel)
-- Used, Free, Cached, Buffers — each with a proportional progress bar
-- Swap — shown only when a swap partition or file is active
-- ZRAM — compressed RAM block device utilization with the live compression ratio
-- Slab Kernel and PageTables — kernel memory overhead
+USB mass storage devices with format and mount state shown separately (an unformatted partition isn't the same as an unmounted one), sizes scaled to the right unit automatically, and loop-mounted overlay partitions shown with their real backing relationship.
+</details>
 
-### System Info
+<details>
+<summary><b>Power, Fans & Thermal Sensors</b></summary>
 
-Static system identity collected once and persisted:
+Voltage/current/fan/power rails from `hwmon`, plus Intel RAPL package/core/DRAM power on x86. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and a cooling-device row showing active throttling plus the peak temperature seen since boot.
+</details>
 
-- Hostname and OpenWrt distribution string
-- Kernel version and CPU architecture
-- CPU model (from `/proc/cpuinfo` or `/tmp/sysinfo/model` fallback)
-- **SoC Family, Machine, SoC ID, SoC Revision, SoC Serial** — read from `/sys/devices/soc0/` (present on Qualcomm platforms; silently absent elsewhere)
-- CPU vulnerability mitigations (`/sys/devices/system/cpu/vulnerabilities/`) with color coding: green for mitigated, amber for partially mitigated, red for vulnerable
+<details>
+<summary><b>Ports & PCIe Topology</b></summary>
 
-### Internal Storage
+Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers and connected peripherals with real negotiated speed. PCIe devices with negotiated link speed/width shown next to the controller's rated maximum, so a device running below capability is obvious at a glance.
+</details>
 
-The card leads with the rootfs filesystem as a progress bar showing used vs. usable space, with read/write I/O speed for disk-backed filesystems and percentage utilization for NAND/flash. Additional mounted filesystems appear as separate bars.
+<details>
+<summary><b>Offload Engines</b></summary>
 
-Root's I/O speed is read from whichever block device actually backs `/`, resolved server-side — UBI block device or loop device backing `/overlay` on a squashfs+overlay layout, falling back to the mount's own major:minor (cross-referenced against `/proc/diskstats`) when root is a plain writable filesystem with no overlay split at all, e.g. an x86 image installed directly to a NVMe/SSD partition. This matters on layouts where the naming convention differs from the typical embedded assumption.
+Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence.
+</details>
 
-The reported rate is real bytes/sec — the raw `/proc/diskstats` sector delta between polls divided by the actual measured wall-clock time between them, not just assumed to equal the nominal 3-second poll interval. Poll ticks aren't a precise metronome (browser tab throttling, slower `ubus` round-trips under heavy I/O contention), so a fixed-divisor assumption swings wildly under load — most visibly during sustained sequential transfers, where it could show numbers several times higher than the drive's real throughput.
+<details>
+<summary><b>Ping Latency</b></summary>
 
-`/rom` — the read-only squashfs base image every OpenWrt device boots from underneath its writable overlay — gets its own bar, labeled `[SquashFS]`, showing size and percentage used (it's always 100%, being read-only) rather than a meaningless "0 B/s" speed readout, and a static color rather than the usual usage-based red/amber/cyan scale, since "100% used" is normal here, not a warning. It's excluded from the headline Usable Total/Free figures since it isn't extra capacity — it's the static layer the overlay sits on top of, already accounted for via the root mount.
+Realtime graph of router-side latency to configurable targets (defaults: `dns.google`, `one.one.one.one`, `google.com`, `youtube.com`), dual-stack by default. A per-target table adds **cur / min / avg / p95 / max / jitter / loss** — loss is counted from individual ICMP packets received, not from polls that came back empty, so a single dropped packet on an otherwise healthy link no longer reads as either "fine" or "down" incorrectly. A bufferbloat grade (A+–F) compares latency under load against idle, reusing the existing WAN throughput samples.
+</details>
 
-A **SquashFS Root Image** detail section (alongside the UBI/eMMC/NVMe/f2fs ones) shows Compression, Block Size, and Compressed Size, decoded directly from the squashfs superblock — the mount source is a synthetic `/dev/root` node rather than a real block device, so the real backing device is resolved via the kernel's own boot-time mount log line cross-referenced against `/proc/diskstats`. Requires a full `od` (coreutils; not always present on a minimal busybox userland) — silently absent otherwise, same graceful-degradation pattern as Memory Speed.
+<details>
+<summary><b>WAN Quality</b></summary>
 
-Below the filesystem bars, a summary section shows hardware-accurate storage sizes. The content is dynamic based on the detected underlying storage type:
+One row per internet-facing interface — logo, status, rolling 24-hour uptime/downtime, time in current state, and latency. Works with or without `mwan3`, and picks up any interface with a genuine default route automatically, including VPN tunnels used as a full exit path. The ISP is identified by ASN lookup against the link's real public egress IP (never assumed from the interface address, which can sit inside carrier-NAT space announced by a completely different operator), shown with its full registry name, and resolved for IPv6-only links too.
+</details>
 
-| Storage type | Summary rows shown |
-|---|---|
-| NAND / MTD (UBI) | Physical NAND Total, rootfs Physical Total, Overlay Total / Used / Free, MTD Partitions |
-| eMMC | Physical eMMC Total, Usable Total, Usable Free |
-| HDD / SSD / NVMe | Physical Disk Total, rootfs Physical Total (if sub-partitioned), Usable Total, Usable Free |
+<details>
+<summary><b>Hardware Events</b></summary>
 
-**Physical NAND Total** is computed by summing MTD partition sizes directly from `/sys/class/mtd/`, not from block device enumeration. This ensures that externally connected USB drives never contaminate the reported NAND chip capacity.
+A filtered `dmesg` view — thermal, ECC, link-flap, USB, OOM and voltage events with relative timestamps.
+</details>
 
-**Overlay** data (Total / Used / Free) is sourced from `df /overlay` and reflects the actual writable space on UBI-based routers — the only number relevant to day-to-day flash usage.
+<details>
+<summary><b>WiFi PHY & Spectrum</b></summary>
 
-**UBI / NAND Flash** sub-section:
+One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, configured vs. max spatial streams, enabled channel list, current bitrate, client count and noise floor.
+</details>
 
-- Erase Count — minimum / mean / maximum erase cycle counts read from `/sys/class/ubi/`
-- PEB Status — total / available / bad block counts, with bad count shown in amber when non-zero and red when bad blocks exceed the UBI-reserved PEB pool
-- NAND Geometry — page size, physical erase block size, OOB size, and ECC strength in bits (when the kernel exposes `/sys/class/mtd/mtdX/ecc_strength`)
-- Volumes — per-volume name, type, and size; `rootfs_data` shows JFFS2 overlay used/free from `df /overlay`; each volume with a known capacity shows a proportional fill bar
+## Settings
 
-**MTD Partition Table** — all MTD devices with their sizes and types in a compact table.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN Quality rows, edit ping targets, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. Everything persists on the router via UCI (`/etc/config/hwdash`) and survives sysupgrades.
 
-**eMMC** and **F2FS** detail sections are rendered conditionally when those storage types are detected.
+## How it works
 
-**NVMe Details** shows identity (model, serial, firmware, transport) and TRIM support (discard granularity, and whether it's continuous via the mount's `discard` option or periodic via `fstrim`) straight from sysfs — no extra package needed for that part — plus a full SMART health readout when the optional `smartmontools` package is installed. The box header carries a live temperature badge next to the Healthy/Warning/Critical badge — same styling and threshold-driven color as the Thermal Sensors card, but using the drive's own reported warning/critical temperature thresholds directly rather than a derived heuristic. (The "Critical" health state reflects the drive firmware's own SMART overall-health pass/fail verdict, not a guess.) Below that: Wear (Percentage Used), TBW (Total Bytes Written — the standard SSD endurance/warranty figure, shown next to Wear rather than folded into a generic read+write row), Available Spare and Namespace Utilization bars, Power-On Hours, Power Cycles, Unsafe Shutdowns, Media Errors, Error Log Entries, Data Read, Host Read/Write command counts, and decoded critical-warning flags (spare below threshold, temperature threshold, reliability degraded, media read-only, backup device failed) — parsed from `smartctl -a -j`. `smartmontools` isn't installed by default (there's nothing to read it on boards without an NVMe drive), so all of these fields are simply absent without it; identity still shows from sysfs alone. Chosen over `nvme-cli` deliberately: `smartctl` is protocol-universal (SATA/SCSI/NVMe), so the same tool and JSON shape can extend to SATA SSD/HDD SMART data later without a rewrite. Cached for 30 seconds since SMART counters change slowly. All sizes dashboard-wide, including these, scale to TB above 1024GB.
+**Backend** — a single POSIX shell `rpcd` call object (`luci.hwdash`) serving the full hardware readout in one round-trip, plus dedicated ping and settings methods. Slow-changing data (WiFi capabilities, SoC identity, storage layout) is cached with short-lived TTLs so the per-poll process count stays low on embedded hardware.
 
-### External Storage
+**WAN Quality** runs as its own always-on `procd` service (`hwdash-wanmon`) independent of the on-demand `rpcd` calls, since per-link history needs to persist whether or not the dashboard is open. On `mwan3` routers it reuses `mwan3`'s own `LD_PRELOAD` fwmark wrapper to reach the correct WAN; on everything else it binds directly to the right device or address per protocol family.
 
-USB mass storage devices are detected by scanning block devices for the `removable` flag. Each partition shows its **Format** (detected filesystem type, or `—` when none is detected) and **Mounted** state (the mountpoint, or `No`) as two separate rows — a partition with no recognized filesystem is not the same thing as one that's unmounted, and the two used to be conflated into a single misleading "Unmounted" label.
+**DNS privacy** — every lookup this package makes (ASN queries, egress-IP lookups, reverse-DNS, custom domain targets) is automatically routed around the router's own resolver whenever that resolver is a filtering one (AdGuard Home, Pi-hole, Unbound), so a background dashboard never becomes noise in your DNS log. Plain `dnsmasq` is left alone, since it doesn't log per-query.
 
-Sizes are formatted dynamically (B / KB / MB / GB) based on magnitude rather than always rendering in GB, so a small partition doesn't show a meaningless "0.00 GB".
+**Frontend** — a single LuCI view with two independent poll loops (hardware readout, ping probes) that pause entirely while the browser tab is hidden. Every card is a persistent DOM skeleton patched in place each tick rather than rebuilt, so a tab left open indefinitely stays cheap.
 
-Some platforms carve out a raw partition purely as a loop device's backing store — e.g. x86 images that loop-mount a partition directly to host the f2fs `/overlay`, so the partition itself never has a filesystem of its own. The backend correlates this via `/sys/class/block/loopN/loop/backing_file`, and the dashboard shows the real relationship ("f2fs (via loop0)" / "/overlay (via loop0)") instead of a bare, unexplained dash.
-
-### Power & Fans
-
-Voltage, current, fan and power rails from generic `hwmon` channels (present on boards with a PMIC or Super I/O chip) are shown here when available. On x86 targets with an Intel CPU, package/core/DRAM power draw is additionally read from `/sys/class/powercap/intel-rapl*` (RAPL) — the backend reports the raw cumulative energy counter each poll, and the frontend derives instantaneous Watts from the delta between polls, the same client-side pattern used for disk I/O speed. The card is hidden entirely when neither source has anything to report (most embedded routers have no fan or power telemetry at all).
-
-### Thermal Sensors
-
-All thermal zones from `/sys/class/thermal/` and `hwmon` inputs are collected, de-duplicated and laid out alphabetically across up to three columns — no artificial CPU/WiFi/Misc grouping. When a platform exposes more than 12 sensors, additional thermal cards are appended automatically. Each reading is displayed as a color-coded badge whose warning/critical thresholds come from the sensor's own trip points when the hardware exposes them (falling back to 60/80 °C otherwise), so the coloring adapts to each architecture rather than using a single fixed scale. Critical readings get a pulsing glow.
-
-Each sensor row carries an inline sparkline of the last ~60 samples, kept client-side at zero backend cost. Below the sensors, a chip row shows every cooling device (`/sys/class/thermal/cooling_device*`) — cyan when idle, amber with `cur/max` while the kernel is actively throttling, red when saturated — and the peak temperature seen since boot with the sensor name and when it happened.
-
-### Ports Topology
-
-Ethernet and USB share one card. Each physical ethernet interface shows link speed and duplex, live throughput from byte-counter deltas, RX/TX error and drop counters, MAC address, MTU, and the carrier-change counter (highlighted amber when the port flapped after its initial link-up). When `ethtool` is installed, a PHY row adds auto-negotiation state, the **negotiated** flow-control result (often different from the configured one), and EEE status — amber when EEE is actively idling the link, since that causes latency on some PHYs.
-
-The USB section lists host controllers (root hubs, e.g. "xHCI Host Controller") together with connected peripheral devices, each by name, negotiated speed (USB 2.0 / 3.0 / 3.2) and protocol version — both come straight from a live `/sys/bus/usb/devices/` scan, not a hardcoded per-board guess, so the section reflects exactly what the kernel currently sees and is empty (rather than showing a stale claim) on boards with no USB sysfs entries at all.
-
-### PCI-e Topology
-
-PCIe devices are enumerated from `/sys/bus/pci/devices/` in their own card, hidden entirely when there is nothing meaningful to show. Each device shows the negotiated link speed and width alongside the controller maximum, making it immediately visible if a device is running below its rated capability.
-
-### Offload Engines
-
-Shows whether the packet fast path is actually working, not just configured: nftables flowtable state, the software/hardware offload switches from the firewall config, the live count of conntrack-offloaded flows, the number of flows currently **bound to the MTK PPE** (routed fully in hardware, never touching the CPU — with the since-boot peak), and WED (Wireless Ethernet Dispatch) engine presence. Hidden on platforms with none of it.
-
-### Ping Latency
-
-A full-width realtime graph (2-second cadence, 120-sample window) of router-side ping latency to dns.google, one.one.one.one, google.com and youtube.com — all dual-stack v4+v6 by default. All probes run in parallel with a hard 2s deadline, so the RPC returns in roughly the RTT of the slowest target. Timeouts spike to the top of the plot (no gaps), and a target with no successful reply at all (e.g. IPv6 without a v6 uplink) draws no line and shows N/A. A bufferbloat grade (A+ through F) compares median latency under sustained WAN load against idle, reusing the live WAN throughput — zero extra probes.
-
-Below the graph, a per-target table gives **cur / min / avg / p95 / max / jitter / loss** over the selected window. Jitter is the mean absolute change between consecutive samples. Loss counts **individual ICMP packets**, not failed polls: each probe sends two packets, so a single dropped packet still yields a latency reading, and inferring loss from "the poll returned nothing" would only ever catch a probe that lost *every* packet. Large anycast targets rate-limit ICMP enough for this to matter — measured over 60 paired probes to `youtube.com`, one packet per probe came back empty 4 times while two packets came back empty zero times. The second packet is sent as soon as the first reply arrives (`-A`), so it costs about one extra RTT rather than ping's full one-second interval.
-
-Received packets are counted by tallying reply lines, not by reading ping's summary, because neither summary field survives contact with the BusyBox builds in the wild: 1.37 prints `2 packets received` where 1.38 prints `2 received` (a parser keyed on one silently reports 100% loss on the other), and the `transmitted` count is inflated whenever the deadline cuts a run short — a healthy link routinely reports `3 packets transmitted, 2 received, 33% packet loss`. The count actually requested is the honest denominator.
-
-Custom targets accept a hostname as well as an IP. The name is resolved once and the probe then pings the resulting literal, so a domain target doesn't put a DNS query on the wire every two seconds; see [DNS behaviour](#dns-behaviour) for where that lookup is sent.
-
-Custom targets can be added from the settings panel with an IPv4 / IPv6 / both selector (duplicates are rejected), or via `/etc/hwdash-ping.targets` on the router (one `host 4|6` per line).
-
-### WAN Quality
-
-A Ubiquiti-style per-link quality card, one compact row per internet-facing interface: a real ISP logo (or a colored-monogram fallback), current status, rolling 24-hour uptime/downtime %, how long it's been in its current up/down state, and average latency. Works equally on `mwan3`-managed multi-WAN routers (one row per link) and plain single-WAN routers (one row, no `mwan3` needed at all) — and isn't limited to conventional WAN interfaces: WireGuard, Tailscale, or any other VPN profile shows up as its own row too, exactly when it's actually configured to carry general internet traffic (see below). Each row can be individually shown or hidden from Settings, saved the same way every other dashboard preference is — it survives a sysupgrade.
-
-**Discovery** doesn't key off firewall zone or protocol at all — it checks every network interface for a genuine internet-reaching default route (`0.0.0.0/0` or `::/0`) via `ubus`'s own per-interface route report, one `ubus call network.interface dump` per discovery pass rather than several calls per candidate. This single criterion is what makes VPN interfaces work automatically: a WireGuard or Tailscale interface used as a full-tunnel exit path gets a real default route just like a normal WAN, while the same interface used only for private site-to-site access doesn't, and is correctly left out without needing to special-case it by name. It also correctly excludes a secondary interface deliberately parked on the *same physical device* as a real WAN for local ONT/modem management (`option defaultroute '0'`) — checked per-interface, not by device, so it doesn't inherit the real WAN's route just because they share hardware.
-
-**ISPs are identified** via a DNS-based ASN lookup (Team Cymru's `origin.asn.cymru.com`) against each interface's real public egress IP — correctly resolved even when that WAN is a DHCP client sitting behind a *second* private router (not just CGNAT) rather than the address it reports itself. The egress IP is always looked up rather than read off the interface: carrier-NAT space can belong to an entirely different operator, and reading the interface address on an Indian Airtel line (`100.192.35.115`, inside a range announced by T-Mobile US) would attribute the link to the wrong ISP. Resolved once and then retained until the interface's own local address actually changes (a real reconnect), not on any timer.
-
-An IPv6 interface first mirrors whichever ISP its IPv4 sibling resolved (`wan6` alongside `wan` is the same physical link, so this costs a file compare rather than two DNS lookups). A v6-only WAN, or one not named after a v4 sibling, falls back to a real lookup in Cymru's `origin6` zone so it isn't left blank.
-
-The name shown is the operator name exactly as the registry returns it — only the routing-registry handle before the ` - ` is dropped, so `Bharti Airtel Ltd., Telemedia Services, IN` is not truncated to `Bharti Airtel Ltd.`. Logos come from bundled SVGs for common ISPs, with `logos.hunter.io/{domain}` as a fallback and an instant colored monogram shown first and kept if the real logo 404s. A per-ASN override table supplies branding for small operators no logo service knows about, without overriding the registry name.
-
-**Pinging** uses IP anchors, never a domain, so the probes themselves add zero DNS load. Interfaces are spread deterministically across a set of six well-known anchors per address family so two WANs on the same router don't hammer one address and a single anchor going dark can't take every link's card down at once; a backup anchor is tried only if the primary doesn't answer. A custom anchor set from Settings replaces the spread and takes effect on the next tick, without restarting the collector. Each probe sends two packets with `-W 1` — BusyBox `ping` does not honour `-w` as a real deadline (against a blackholed address `ping -c 2 -w 2` runs about 11 seconds, not 2), and one probe overrunning the loop deadline used to get *every* interface's probe killed mid-update.
-
-This is all backed by a small always-running background collector (`hwdash-wanmon`, a separate `procd`-managed service, not the on-demand `rpcd` call everything else in this app uses), since per-WAN state needs to persist independent of whether the dashboard is open. Everything it writes lives in `/tmp` (tmpfs — RAM, never flash, and clears on reboot); the dashboard's `info` call only *reads* what's there, so having the dashboard open doesn't add any extra probing beyond what the collector already does on its own fixed 2-second schedule.
-
-The interesting part is *how* it reaches a specific non-default WAN correctly on a multi-WAN router at all. `mwan3`'s policy routing is driven by an nftables fwmark that's only applied to traffic matching one of its own rules — a plain `ping -I <device>` or `curl --interface <device>` from an arbitrary process silently fails or, worse, silently routes out the *wrong* interface, since the kernel falls back to the default route once the fwmark isn't set. `mwan3` solves this for its own tracker (`mwan3track`) via an `LD_PRELOAD` shim (`libwrap_mwan3_sockopt.so`) that sets the correct fwmark on the socket before routing happens; `hwdash-wanmon` reuses that exact same library rather than reinventing it, reading each interface's real fwmark out of `ip rule` (far cheaper than dumping the whole `nftables` ruleset per interface). On a plain single-WAN router there's no fwmark to look up at all — the wrapper library is skipped entirely and a normal device-bound `ping`/`curl` is used directly, since there's no ambiguity about which interface to use.
-
-That fallback binds IPv4 probes to the **device**, never to the source address. A source-address-bound socket still routes by destination, so on a policy-routed box it egresses via whatever the main table's default route is — carrying another WAN's latency and resolving another WAN's ISP under this interface's name. Forcing that path on a 6-WAN router and comparing against the fwmark-wrapped ground truth, 4 of 6 interfaces left through the wrong link; binding to the device makes all six match. IPv6 is the opposite — BusyBox `ping -6 -I <device>` answers `sendto: Network unreachable` on these builds while the source address works — so the choice is made per address family.
-
-### Hardware Events
-
-A filtered `dmesg` view (10-second TTL) showing thermal, ECC, link-flap, USB, OOM and voltage events with relative timestamps — the dashboard's "what happened while you weren't looking" card. Hidden when there is nothing to report.
-
-### Settings
-
-The gear button (top right) opens a panel styled with standard LuCI `cbi` classes and row structure (`cbi-value` / `cbi-value-title` / `cbi-value-field`): per-card show/hide checkboxes, per-interface show/hide for WAN Quality (populated dynamically as the collector discovers interfaces — see above), the ping-target editor, CPU Performance controls, and a diagnostics snapshot button that downloads the latest full hardware readout as JSON. Settings persist **on the router** in the standard UCI configuration `/etc/config/hwdash` via dedicated `get_config`/`set_config` rpcd methods, so they follow the device across browsers and survive sysupgrades and backups.
-
-**CPU Performance** — reads and writes the live `cpufreq` policy (governor, min/max frequency, turbo/boost) directly via `/sys`, the same interface `luci-app-cpu-perf` uses. The governor dropdown and frequency range are populated from the hardware's own reported bounds and available governors, so the same UI works whether the box exposes `performance`/`powersave` (Intel `intel_pstate`) or the full `ondemand`/`schedutil`/`conservative` set (generic `cpufreq-dt`). Changes apply immediately via an explicit **Apply** button (never automatically on every keystroke, since this is a live production setting) and are additionally synced into `/etc/config/cpu-perf` when that file already exists on the router, so a reboot doesn't silently revert what was just set — but the file is never created by the dashboard itself, since that package owns its own defaults.
-
-### WiFi PHY & Spectrum
-
-A full-width card with one labeled column per band (2.4 / 5 / 6 GHz) — radios of the same band stack vertically at equal heights, and bands the hardware doesn't have are hidden. Each radio is queried via `iwinfo` and `iw`; per-radio data includes:
-
-- Band and channel (with width)
-- TX power
-- Hardware mode (802.11ac / ax / be)
-- Configured and hardware-maximum NSS (spatial streams)
-- Enabled channel list
-- Current bitrate and associated client count
-- Noise floor
-
-WiFi hardware capabilities (`iw list`) are parsed by an AWK script and persisted to `/etc/hwdash/wifi_cap_v4.json` on first run, since `iw list` is expensive and the PHY capabilities never change at runtime.
-
-
-## DNS behaviour
-
-Every name this package resolves is kept **off the router's own resolver** whenever that resolver is anything other than `dnsmasq`.
-
-Filtering resolvers — AdGuard Home, Pi-hole, Unbound — log and chart every query they see, and a dashboard doing background lookups on a timer turns into recurring noise in that log. On one AdGuard Home router, 1,426 of the 1,487 logged queries for the default ping targets had come from the router itself. `dnsmasq` is left on the system path because it does not log per-query.
-
-What gets bypassed:
-
-- Team Cymru ASN lookups, IPv4 (`origin`) and IPv6 (`origin6`)
-- `api.ipify.org`, used to learn a WAN's public egress IP — the hostname is resolved through the bypass and pinned for `curl` with `--resolve`, so `curl` never asks the resolver either
-- Reverse-DNS (`PTR`) lookups for ping targets
-- A custom WAN anchor or ping target entered as a domain
-
-The resolver in use is detected from whatever owns port 53, once at collector startup and cached for an hour in `rpcd`, so this costs nothing per probe. When a bypass is active it is not abandoned on failure — a lookup that fails is retried against a second public resolver and then simply left unresolved, rather than falling back to the local resolver and leaking the query it exists to avoid.
-
-Verified with `tcpdump` on loopback and the LAN address rather than by reading the resolver's own log (which buffers in memory and lags by minutes): a cold start with 13 WAN interfaces resolving, plus a cold Ping Latency call returning latency for every target, puts **zero** packets on the local resolver.
-
-## Caching Architecture
-
-The dashboard is deliberately conservative about process spawning. Shell forks and `awk`/`iw` invocations account for significant CPU time on embedded platforms. Two tiers of caching are used:
-
-**Persistent cache** (`/etc/hwdash/`) — survives reboots; represents data that is physically impossible to change without replacing hardware:
-
-| File | Content | Invalidated |
-|------|---------|-------------|
-| `wifi_cap_v4.json` | WiFi PHY hardware capabilities from `iw list` | On package upgrade |
-| `sys_static_v2.frag` | CPU cache sizes, SoC identity, kernel version, vulnerability status | On package upgrade |
-| `hw_identity_v1.sh` | Board name, CPU model, core/thread counts, max frequency | On package upgrade |
-
-Two files/configs live outside `/etc/hwdash/` so they survive package upgrades: `/etc/config/hwdash` (dashboard settings stored via UCI) and `/etc/hwdash-ecc.baseline` (the first-seen NAND ECC counter snapshot that powers the "+N since date" wear trend; auto-rebuilt if the counters reset after a reflash).
-
-**Volatile cache** (`/tmp/`) — cleared on reboot; represents live data with a short TTL:
-
-| File | Content | TTL |
-|------|---------|-----|
-| `hwdash_wifi_radios_v2.cache` | Live WiFi radio state (channel, bitrate, txpower, noise) | 20 seconds |
-| `hwdash_storage_inv_v2.sh` | MTD partition table + UBI device tree (layout fixed at flash time; wear/ECC move slowly) | 30 seconds |
-| `hwdash_offload.cache` | Flowtable / firewall offload configuration (nft + uci) | 30 seconds |
-| `hwdash_ethtool.cache` | Per-port autoneg / flow control / EEE from ethtool | 30 seconds |
-| `hwdash_events.cache` | Filtered dmesg hardware events | 10 seconds |
-| `hwdash_fstype_*` | fs type of unmounted block devices (`block info`) | 10 minutes |
-| `hwdash_realdev_*` | `/dev/root` → physical device mapping | per boot |
-| `hwdash_peaks.sh` | Since-boot watermarks (peak temperature, conntrack, PPE flows) | per boot, rewritten only on a new record |
-
-Cache freshness is checked with an expiry epoch embedded in each file — a builtin read plus an integer compare, with no `date -r` or `stat` fork per check.
-
-On package upgrade or reinstall, all caches are cleared by the postinst script so that updated parsing logic always runs against fresh data.
-
-
-## Backend
-
-The backend is a single POSIX shell script registered as an `rpcd` call object at `/usr/libexec/rpcd/luci.hwdash` with six methods: `info` (the full hardware readout in one round-trip), `ping` (parallel latency probes, accepting a target list as arguments with hosts validated against a character whitelist before they reach a command line), `get_config`/`set_config` (router-side settings persistence, size-capped and re-serialized through `jsonfilter` so only valid JSON is ever written), and `get_cpu_perf`/`set_cpu_perf` (reads and writes the live `cpufreq` policy). `set_cpu_perf` validates the requested governor against `scaling_available_governors` and the frequency range against the hardware's own `cpuinfo_min_freq`/`cpuinfo_max_freq` before writing anything to `/sys` — an out-of-range or unrecognized value is rejected outright rather than silently clamped.
-
-Data collection covers: CPU statistics, context switches and interrupts from a single pass over `/proc/stat`, per-IRQ per-core counters from `/proc/interrupts`, softnet backlog from `/proc/net/softnet_stat`, memory from `/proc/meminfo`, disk I/O from `/proc/diskstats`, filesystem usage from `df`, MTD layout and ECC counters from `/sys/class/mtd/`, UBI state from `/sys/class/ubi/`, thermal zones and cooling devices from `/sys/class/thermal/`, temperatures plus voltage/fan/power/current rails from `hwmon`, package/core/DRAM energy counters from `/sys/class/powercap/intel-rapl*` (x86 RAPL), cpufreq residency from `time_in_state`, ethernet link state from sysfs plus `ethtool`, offload state from `nft`/`uci`/PPE debugfs, PCIe topology from `/sys/bus/pci/`, USB topology from `/sys/bus/usb/`, WiFi state from `iwinfo` and `iw` (including per-channel airtime survey), eMMC health from `/sys/block/mmcblk*/`, NVMe identity from `/sys/block/nvme*/` and SMART health via the optional `smartmontools` package, F2FS statistics from `/sys/fs/f2fs/`, and hardware events from `dmesg`.
-
-One piece doesn't fit the on-demand `rpcd` model: WAN Quality (see above) needs a day of history that survives the dashboard being closed, so `hwdash-wanmon` (`root/usr/libexec/hwdash-wanmon`) runs as its own always-on `procd` service, independent of and never started by the `rpcd` call object. `info` only reads what it's already written to `/tmp`; it's a no-op on any router without `mwan3`'s `LD_PRELOAD` wrapper library, so it costs nothing on the vast majority of installs.
-
-The script is written to minimize process spawning on embedded hardware: `/proc/stat` is parsed in a single pass for all CPU-tick, context-switch and interrupt counters; per-device `/sys` stat files are read with shell builtins rather than `cat`/`awk` pipelines; and the slow-changing storage inventory is served from cache (see Caching Architecture above) so the per-poll fork count stays low.
-
-The AWK-based WiFi capability parser (`luci.hwdash_wifi_cap.awk`) handles the structured output of `iw list` to extract per-PHY band support, channel lists, NSS capabilities, and hardware mode.
-
-
-## Frontend
-
-The frontend is a single LuCI JavaScript view (`hw_dash.js`) with two poll loops: the main hardware readout every 3 seconds and the ping probes every second. Both stop entirely while the browser tab is hidden — the router does no collection work for a dashboard nobody is looking at — and resume on return.
-
-Every card is built once as a persistent DOM skeleton and patched in place on each tick rather than torn down and rebuilt — CPU (dials, detailed load, frequency residency), Per-Core Usage (its own dedicated grid card), Memory, Internal/External Storage, Thermal Sensors, Ports Topology, PCI-e, Offload Engines, Interrupts, WiFi PHY, Hardware Events, hwmon/RAPL power, and System Info all update via one of two mechanisms: a keyed row-diff that adds, removes, or reorders only the rows whose underlying item actually appeared, disappeared, or moved (everything else is a `textContent`/style write on an already-attached node), or a content-signature gate that skips the rebuild outright when the section's structural inputs are byte-identical to the previous tick — which is the common case for hardware topology that only changes when something is physically plugged in or unplugged. The net effect is that a dashboard tab left open indefinitely does a few dozen text/style writes per tick instead of thousands of `createElement` calls, which is what was driving rising memory/CPU use and jank the longer the page stayed open.
-
-Dynamic color scaling (`getDynColor`) maps utilization percentages to a green → amber → red gradient without hardcoded thresholds that would be wrong for different metric types. The inversion flag is used for metrics like Free memory and CPU Idle where high values are good.
-
-The layout uses CSS flexbox throughout. Multi-column wide cards (the CPU advanced panel, Thermals, and the UBI/MTD detail row) use a flex-row layout that collapses to a flex-column on viewports below 768px. No media query breakpoints are hardcoded into JavaScript.
-
+The AWK-based WiFi capability parser and the full data-source list (which `/proc`, `/sys` and `hwmon` paths back each card) are documented inline in `root/usr/libexec/rpcd/luci.hwdash`. Per-release changes and fixes are listed on the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page.
 
 ## License
 
