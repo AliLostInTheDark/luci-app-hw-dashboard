@@ -534,25 +534,34 @@ EOFN
 								case "$_t" in ''|.|*.*.*) _t="" ;; esac
 								;;
 						esac
-						# Real ICMP packet counts off ping's own summary line
-						# ("2 packets transmitted, 1 packets received, ...").
-						# The card's loss column used to infer loss from a poll
-						# returning nothing at all, which only happens when
-						# EVERY packet of a probe is lost -- so with more than
-						# one packet per probe it under-reported real loss.
-						# These are the truthful numbers.
-						_snt=0; _rcv=0
-						case "$_out" in
-							*"packets transmitted"*)
-								_pp=${_out%%" packets transmitted"*}; _pp=${_pp##*[!0-9]}
-								case "$_pp" in ''|*[!0-9]*) _pp=0 ;; esac
-								_snt=$_pp
-								_pp=${_out#*"packets transmitted, "}
-								_pp=${_pp%%" packets received"*}; _pp=${_pp##*[!0-9]}
-								case "$_pp" in ''|*[!0-9]*) _pp=0 ;; esac
-								_rcv=$_pp
-								;;
-						esac
+						# Real ICMP packet counts, for the card's loss column.
+						# (Inferring loss from a poll returning nothing only
+						# catches a probe that lost EVERY packet, so with more
+						# than one packet per probe it under-reports badly.)
+						#
+						# Counted by tallying reply lines rather than reading
+						# ping's summary, because neither summary field can be
+						# trusted across these builds:
+						#   - BusyBox 1.37 prints "2 packets received",
+						#     1.38 prints "2 received" -- a parser keyed on
+						#     either wording silently yields 0 on the other,
+						#     i.e. a permanent fake 100% loss.
+						#   - "transmitted" is inflated whenever -w cuts the run
+						#     short mid-flight: a healthy link routinely reports
+						#     "3 packets transmitted, 2 received, 33% loss".
+						# The count we asked for is the honest denominator, and
+						# a "time=" line is an unambiguous reply on every build.
+						# ("time 59ms" in the 1.38 summary has no '=', so it
+						# cannot be miscounted as a reply.)
+						_snt=2; _rcv=0
+						_pp=$_out
+						while :; do
+							case "$_pp" in
+								*time=*) _rcv=$((_rcv + 1)); _pp=${_pp#*time=} ;;
+								*) break ;;
+							esac
+						done
+						[ "$_rcv" -gt "$_snt" ] && _rcv=$_snt
 						# "x" marks no-reply so the reader can still pick up the
 						# IP. Counts come before the address because the address
 						# is the field that can legitimately be empty, and a
