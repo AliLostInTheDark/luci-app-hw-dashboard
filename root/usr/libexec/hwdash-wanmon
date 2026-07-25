@@ -262,6 +262,22 @@ run_capped() {
 	wait "$_wd" 2>/dev/null
 }
 
+# Same idea for the per-tick probe, minus the watchdog subshell.
+#
+# run_capped costs two forks per call: the command, plus a shell that sleeps
+# and kills it. That is the right trade for nslookup, which can genuinely hang
+# forever against a resolver that accepts a query and never answers. It is the
+# wrong trade here: this runs once per WAN every INTERVAL seconds -- the single
+# largest source of background forks on an idle router -- and ping already
+# bounds itself with -W 1 (measured 2s against a blackholed target, vs 11s
+# without). The loop's own LOOP_DEADLINE remains as the backstop, and a probe
+# that somehow outlived it would exit on its own within seconds rather than
+# hanging indefinitely the way a DNS query can.
+run_probe() {
+	_outf=$1; shift
+	"$@" > "$_outf" 2>/dev/null
+}
+
 # -W 1 (per-reply timeout) is load-bearing, not belt-and-braces. BusyBox ping
 # does not honour -w as a real deadline: against a silently blackholed target
 # `ping -c 2 -w 2` runs for ~11s on these builds, not 2. That alone is enough
@@ -280,13 +296,13 @@ do_ping() {
 	_famtag="ipv4"; [ "$_family" = "6" ] && _famtag="ipv6"
 	_pf="$RINGDIR/.probe.${_ifn}.ping"
 	if [ "$_mark" != "-" ]; then
-		run_capped "$PING_CAP" "$_pf" \
+		run_probe "$_pf" \
 			env FAMILY="$_famtag" DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
 			ping -"$_family" -c 2 -w 2 -W 1 "$_anchor"
 	else
 		_target_if="$_dev"
 		[ -n "$_srcip" ] && _target_if="$_srcip"
-		run_capped "$PING_CAP" "$_pf" \
+		run_probe "$_pf" \
 			ping -"$_family" -I "$_target_if" -c 2 -w 2 -W 1 "$_anchor"
 	fi
 	tr '\n' ' ' < "$_pf" 2>/dev/null
