@@ -1033,6 +1033,13 @@ return view.extend({
             airtel: L.resource('hwdash-icons/airtel.svg') + '?v=1', bharti: L.resource('hwdash-icons/airtel.svg') + '?v=1',
             jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2'
         };
+        // ASN is a stable, unambiguous identifier (unlike the free-text org
+        // name, which varies in punctuation/casing across lookups) -- so a
+        // small local ISP that never shows up in any public logo service can
+        // still get a real badge, keyed by its ASN rather than a name guess.
+        var ISP_BY_ASN = {
+            'AS151690': { name: 'FAB5', color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fab5.png') + '?v=3' }
+        };
         var ispBadge = function(ispFull) {
             var raw = ispFull || '';
             var asn = '';
@@ -1044,8 +1051,11 @@ return view.extend({
             }
             var isp = org.toLowerCase();
             var name = org ? org.split(' - ')[0].split(',')[0].trim() : 'Unknown ISP';
-            if (name.length > 20) name = name.substring(0, 17) + '...';
             var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
+            if (ISP_BY_ASN[asn]) {
+                var _pin = ISP_BY_ASN[asn];
+                return { color: _pin.color, label: _pin.label, name: _pin.name, asn: asn, domain: _pin.domain || '', logo: _pin.logo || '' };
+            }
             if (isp.indexOf('airtel') !== -1 || isp.indexOf('bharti') !== -1) { name = 'Airtel'; color = '#ED1B24'; label = 'A'; }
             else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { name = 'Jio'; color = '#0F1C4D'; label = 'Jio'; }
             else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { name = 'Vi'; color = '#E60000'; label = 'Vi'; }
@@ -3431,7 +3441,7 @@ return view.extend({
                     logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
                     logoImg.onerror = function() { logoImg.style.display = 'none'; monogramEl.style.display = 'inline-flex'; logoImg.dataset.src = ''; };
                     var badgeWrapper = E('div', { style: 'position: relative; width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;' }, [monogramEl, logoImg]);
-                    var ispNameSpan = E('span', { style: 'font-weight: 600; font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
+                    var ispNameSpan = E('span', { style: 'font-weight: 600; font-size: 1.05em; white-space: normal; word-break: break-word; line-height: 1.25;' });
                     var ifaceAsnSpan = E('span', { style: 'font-size: 0.78em; opacity: 0.55; white-space: nowrap; font-family: monospace; letter-spacing: 0.3px;' });
                     var infoBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px;' }, [ispNameSpan, ifaceAsnSpan]);
 
@@ -3457,7 +3467,7 @@ return view.extend({
 
                     var histGraphEl = E('div', { style: 'width: 100%; height: 32px;' });
                     var histLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; text-align: center; display: block;' }, 'TREND');
-                    var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; width: 108px; flex: 0 0 108px;' }, [histGraphEl, histLbl]);
+                    var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; flex: 1 1 108px; min-width: 108px;' }, [histGraphEl, histLbl]);
 
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [

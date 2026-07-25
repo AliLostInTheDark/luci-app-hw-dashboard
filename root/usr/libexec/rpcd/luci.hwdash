@@ -545,7 +545,8 @@ EOF
 						json_esc "$_wm_isp"; _wm_ispj=$JSV
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
 
-						_wm_total=0; _wm_success=0; _wm_status="unknown"; _wm_streak_start=$(date +%s); _wm_cur_ms="x"
+						read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
+						_wm_total=0; _wm_success=0; _wm_status="unknown"; _wm_streak_start=$_wm_uptime_now; _wm_cur_ms="x"
 						read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_cur_ms < "$_wm_ring" 2>/dev/null
 						# Availability uses the collector's rolling 24-hour bucket
 						# summary, not the daemon's all-time sample count.
@@ -562,8 +563,7 @@ EOF
 						_wm_cur=null
 						case "$_wm_cur_ms" in ''|x) ;; *) _wm_cur="$_wm_cur_ms" ;; esac
 
-						_wm_now=$(date +%s)
-						_wm_streak=$((_wm_now - _wm_streak_start))
+						_wm_streak=$((_wm_uptime_now - _wm_streak_start))
 						[ "$_wm_streak" -lt 0 ] && _wm_streak=0
 
 						# Small ping-stability sparkline: recent samples ring,

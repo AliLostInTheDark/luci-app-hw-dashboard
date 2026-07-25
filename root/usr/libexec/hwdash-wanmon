@@ -354,7 +354,15 @@ process_down_iface() {
 }
 
 while :; do
-	_now=$(date +%s)
+	# Monotonic uptime, not wall-clock epoch -- a router with no
+	# battery-backed RTC boots with a wrong clock until NTP corrects it a
+	# few seconds/minutes in, and that correction can jump the wall clock
+	# by hours. _now feeds _streak_start (how long a link has been up/down)
+	# and the day-bucket index below; either stamped with a pre-NTP epoch
+	# would freeze at the wrong value once the clock jumps, since it's
+	# only re-stamped on an actual status change, not every tick.
+	read -r _now _ < /proc/uptime
+	_now=${_now%%.*}
 	_force_discover=0
 	if [ -f "$RINGDIR/.rediscover" ]; then
 		rm -f "$RINGDIR/.rediscover"
