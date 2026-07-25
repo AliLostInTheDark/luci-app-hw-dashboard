@@ -503,7 +503,17 @@ EOFN
 						# hangs that -W does not cap), -n = no reverse-DNS
 						# (its resolver timeout was the 5s stall when the
 						# internet/DNS was unreachable).
-						_out=$(ping -"$_pt_f" -c 1 -w 2 $PING_N "$_tgt" 2>/dev/null)
+						#
+						# Two packets, not one. Large anycast targets rate-limit
+						# ICMP, so a single probe drops often enough to blank a
+						# row that is perfectly healthy: measured 60 paired
+						# rounds against youtube.com, -c 1 got no reply 4 times
+						# and -c 2 zero times, rescuing every one. -A sends the
+						# second packet as soon as the first reply lands instead
+						# of waiting out the 1s interval, so the cost is ~2x RTT
+						# (~140ms to a distant target, ~25ms to the gateway)
+						# rather than the full second -c 2 would otherwise take.
+						_out=$(ping -"$_pt_f" -c 2 -A -w 2 -W 1 $PING_N "$_tgt" 2>/dev/null)
 						# resolved address from the "PING host (ip)" banner — the
 						# IP this probe ACTUALLY hit (visible through DNS rotation)
 						_ip=""

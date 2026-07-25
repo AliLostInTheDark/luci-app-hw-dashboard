@@ -287,10 +287,11 @@ run_probe() {
 # probe target would take the entire card down to a sample every 20s. With
 # -W 1 the same probe returns in 2s.
 #
-# run_capped on top of that is the guarantee: -W is honoured by the busybox
-# builds seen so far, but nothing here should depend on a ping implementation
-# choosing to exit. It also means a wedged probe is killed outright rather
-# than orphaned to outlive the collector.
+# -A matters just as much. Without it, -c 2 waits out the full 1s interval
+# between the two packets, so every probe subshell lives ~1s: measured 1038ms
+# per probe, against 77ms with -A. On a 13-WAN router that is thirteen extra
+# processes alive for half of every two-second tick, for no benefit -- -A
+# sends the second packet as soon as the first reply lands.
 do_ping() {
 	_dev=$1; _srcip=$2; _mark=$3; _family=$4; _anchor=$5; _ifn=$6
 	_famtag="ipv4"; [ "$_family" = "6" ] && _famtag="ipv6"
@@ -298,12 +299,12 @@ do_ping() {
 	if [ "$_mark" != "-" ]; then
 		run_probe "$_pf" \
 			env FAMILY="$_famtag" DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
-			ping -"$_family" -c 2 -w 2 -W 1 "$_anchor"
+			ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 	else
 		_target_if="$_dev"
 		[ -n "$_srcip" ] && _target_if="$_srcip"
 		run_probe "$_pf" \
-			ping -"$_family" -I "$_target_if" -c 2 -w 2 -W 1 "$_anchor"
+			ping -"$_family" -I "$_target_if" -c 2 -A -w 2 -W 1 "$_anchor"
 	fi
 	tr '\n' ' ' < "$_pf" 2>/dev/null
 }
