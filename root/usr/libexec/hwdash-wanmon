@@ -278,6 +278,33 @@ run_probe() {
 	"$@" > "$_outf" 2>/dev/null
 }
 
+# Which -I / --interface argument binds a probe to THIS interface?
+#
+# This is the no-fwmark path, used when mwan3 isn't installed at all or when
+# an interface has no policy-routing rule of its own. Getting it wrong is not
+# a cosmetic failure: a probe that leaves via the wrong WAN reports that WAN's
+# latency and resolves that WAN's ISP, under this interface's name. It is what
+# made an Airtel-upstream link confidently display as Jio.
+#
+# IPv4 binds to the DEVICE. A source-address-bound socket still routes by
+# destination, so on a policy-routed box it egresses via whatever the main
+# table's default route is. Measured on a 6-WAN router: the source-bound probe
+# for wand came back as 106.222.224.181, the device-bound one as
+# 106.222.224.169 -- the latter matching the fwmark-wrapped ground truth.
+#
+# IPv6 is the opposite. busybox `ping -6 -I <device>` answers "sendto:
+# Network unreachable" on these builds, while the source address works, so v6
+# binds to the address. Each falls back to the other if its preferred value
+# is missing.
+BIND_IF=""
+bind_arg() {
+	if [ "$1" = "6" ]; then
+		BIND_IF=$3; [ -z "$BIND_IF" ] && BIND_IF=$2
+	else
+		BIND_IF=$2; [ -z "$BIND_IF" ] && BIND_IF=$3
+	fi
+}
+
 # -W 1 (per-reply timeout) is load-bearing, not belt-and-braces. BusyBox ping
 # does not honour -w as a real deadline: against a silently blackholed target
 # `ping -c 2 -w 2` runs for ~11s on these builds, not 2. That alone is enough
@@ -301,10 +328,9 @@ do_ping() {
 			env FAMILY="$_famtag" DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
 			ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 	else
-		_target_if="$_dev"
-		[ -n "$_srcip" ] && _target_if="$_srcip"
+		bind_arg "$_family" "$_dev" "$_srcip"
 		run_probe "$_pf" \
-			ping -"$_family" -I "$_target_if" -c 2 -A -w 2 -W 1 "$_anchor"
+			ping -"$_family" -I "$BIND_IF" -c 2 -A -w 2 -W 1 "$_anchor"
 	fi
 	tr '\n' ' ' < "$_pf" 2>/dev/null
 }
@@ -429,9 +455,9 @@ do_curl() {
 			_out=$(env FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
 				curl -s --max-time 5 "$@" "$_url" 2>/dev/null)
 		else
-			_target_if="$_dev"
-			[ -n "$_srcip" ] && _target_if="$_srcip"
-			_out=$(curl -s --interface "$_target_if" --max-time 5 "$@" "$_url" 2>/dev/null)
+			# IPv4 only (ipify), so bind to the device -- see bind_arg.
+			bind_arg 4 "$_dev" "$_srcip"
+			_out=$(curl -s --interface "$BIND_IF" --max-time 5 "$@" "$_url" 2>/dev/null)
 		fi
 	elif command -v uclient-fetch >/dev/null 2>&1; then
 		_out=$(uclient-fetch -q --timeout=5 -O - "$_url" 2>/dev/null)
