@@ -1619,7 +1619,7 @@ EOF_DMI
 							_qcom_json="{\"qcom_ppe\":1,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
 						fi
 					fi
-					_cache_write /tmp/hwdash_offload.json 5 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"qcom\":$_qcom_json}"
+					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"qcom\":$_qcom_json}"
 				}
 				OFFLOAD_JSON=""
 				if _cache_read /tmp/hwdash_offload.json; then
@@ -1679,7 +1679,7 @@ EOF_DMI
 $(dmesg 2>/dev/null | grep -iE 'thermal|throttl|bad block|bad eraseblock| ecc |uncorrectable|link is (up|down)|over-?current|out of memory|oom-killer|under-?voltage|crc error|i/o error|new (high|full|low|super)-speed usb|usb disconnect' | tail -n 12)
 EOF
 					_ev="$_ev]"
-					_cache_write /tmp/hwdash_events.cache 15 "$_ev"
+					_cache_write /tmp/hwdash_events.cache 30 "$_ev"
 				}
 				HW_EVENTS="[]"
 				if _cache_read /tmp/hwdash_events.cache; then
@@ -2164,7 +2164,7 @@ EOF
 					done
 				fi
 				WIFI_RADIOS="$WIFI_RADIOS]"
-				_cache_write "$WIFI_CACHE" 20 "$WIFI_RADIOS"
+				_cache_write "$WIFI_CACHE" 30 "$WIFI_RADIOS"
 				}
 				# Stale-while-revalidate: an expired cache is served instantly
 				# and refreshed by a detached child (stdout closed so rpcd is

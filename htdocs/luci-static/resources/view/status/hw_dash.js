@@ -1671,7 +1671,8 @@ return view.extend({
                 applyCardVisibility();
             }).catch(function() {}).then(function() { self.pingBusy = false; });
         };
-        poll.add(pingTick, 2);
+        // Registered further down by the phased dispatcher, not here -- see the
+        // comment next to it for why all three ticks share one poll entry.
         var infoTick = function() {
             if (document.hidden) return Promise.resolve();
             var _inow = Date.now();
@@ -3442,11 +3443,11 @@ return view.extend({
                 console.error(err);
             }).then(function() { self.infoBusy = false; });
         };
-        poll.add(infoTick, 3);
         infoTick();
 
         // WAN Quality gets its own poll tick at the same 2s cadence as
-        // Ping Latency (poll.add(pingTick, 2) above) instead of piggy-
+        // Ping Latency (both driven by the phased dispatcher below) rather
+        // than piggy-
         // backing on the much heavier 3s info tick -- that heavier tick's
         // rate is what made this card feel a beat behind Ping Latency even
         // after the background collector itself sped up. 2s (not 1s) is a
@@ -3630,9 +3631,30 @@ return view.extend({
                 console.error(err);
             }).then(function() { self.wanQBusy = false; });
         };
-        poll.add(wanQTick, 2);
-        wanQTick();
-        pingTick();
+        // One poll entry drives all three ticks, on distinct phases.
+        //
+        // LuCI's poller runs every registered callback whose interval divides
+        // the global tick counter, so info(3s), ping(2s) and wanQuality(2s)
+        // coincided on every sixth tick -- and, worse, all three fired together
+        // on the very first one. That is the most expensive moment info ever
+        // has: while the page was closed its caches (offload 15s, events 30s,
+        // wifi 20s, ethtool 30s) all expired, so the first call regenerates
+        // every one of them. Measured on a 4-core aarch64 router, that first
+        // info costs 2-3x a warm one -- and it was landing on the same tick as
+        // the other two calls.
+        //
+        // Phasing them here means at most two ever coincide, never three, and
+        // a page load spreads out as info now, wanQuality at +1s, ping at +2s.
+        // Cadence is unchanged: ping and wanQuality still every 2s, info still
+        // every 3s.
+        var hwTick = 0;
+        poll.add(function() {
+            hwTick++;
+            if (hwTick % 2 === 1) wanQTick();
+            if (hwTick % 2 === 0) pingTick();
+            if (hwTick % 3 === 0) infoTick();
+            return Promise.resolve();
+        }, 1);
         return container;
     },
     handleSaveApply: null,
