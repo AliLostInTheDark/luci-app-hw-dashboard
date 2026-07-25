@@ -121,7 +121,7 @@ Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (w
 <details>
 <summary><b>Offload Engines</b></summary>
 
-Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence. Covers both MediaTek (PPE/WED) and Qualcomm (PPE) accelerators. The card hides itself on platforms with no offload at all, and where offload is configured but the kernel exposes no counters for it, it says so instead of showing an “Active” row with nothing under it.
+Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence. Covers both MediaTek (PPE/WED) and Qualcomm (PPE) accelerators. On Qualcomm it additionally decodes the PPE's own diagnostics — the hardware-bound flow count, flows it could not accelerate, and named reasons for packets being punted to the CPU or dropped ("L3 no-route action" rather than a raw code number), plus per-port and per-queue drop counters. The card hides itself on platforms with no offload at all, and where offload is configured but the kernel exposes no counters for it, it says so instead of showing an “Active” row with nothing under it.
 </details>
 
 <details>

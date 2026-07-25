@@ -3528,6 +3528,19 @@ return view.extend({
                         if (off.qcom) {
                             var q = off.qcom;
                             offRows.push({ k: 'qcomhdr', type: 'header', label: 'Qualcomm PPE Diagnostics' });
+                            var qNum = function(n) { return (typeof n === 'number' ? n : 0).toLocaleString(); };
+                            // Named punt reasons straight from the hardware --
+                            // "L3 no-route action" is actionable in a way a raw
+                            // CPU code number never was. Sorted by volume, top
+                            // few only; the long tail is all zeroes.
+                            (q.punts || []).slice().sort(function(a, b) { return b.packets - a.packets; }).slice(0, 4).forEach(function(pt, i) {
+                                offRows.push({ k: 'punt' + i, type: 'row', label: 'Punt: ' + pt.name, val: qNum(pt.packets), color: '#ffa726' });
+                            });
+                            (q.drops || []).slice().sort(function(a, b) { return b.packets - a.packets; }).slice(0, 3).forEach(function(dr, i) {
+                                offRows.push({ k: 'qdrop' + i, type: 'row', label: 'Drop: ' + dr.name + (dr.port >= 0 ? ' (port ' + dr.port + ')' : ''), val: qNum(dr.packets), color: '#ff5252' });
+                            });
+                            if (q.port_drops !== undefined) offRows.push({ k: 'qpdrop', type: 'row', label: 'Port RX Drops', val: qNum(q.port_drops), color: q.port_drops > 0 ? '#ff5252' : '#9e9e9e' });
+                            if (q.queue_drops !== undefined) offRows.push({ k: 'qqdrop', type: 'row', label: 'Queue Drops / Pending', val: qNum(q.queue_drops) + ' / ' + qNum(q.queue_pending), color: q.queue_drops > 0 ? '#ff5252' : '#9e9e9e' });
                             var hits = 0, misses = 0;
                             if (q.cpu_code) {
                                 Object.keys(q.cpu_code).forEach(function(k) {

@@ -1802,6 +1802,98 @@ EOF_DMI
 								[ "$_qbound" -ge 0 ] && _ppe=$_qbound
 							fi
 							local _cpu_code_json="{}"
+							# Named punt/drop reasons, per-port drops and queue
+							# state -- all Qualcomm PPE only. cpu_code below
+							# gives raw numeric codes; reason_counters gives the
+							# same events with the hardware's own English names
+							# and packet/byte counts, which is what's actually
+							# actionable ("L3 no-route action" beats "code 162").
+							#
+							# CAREFUL: a "drop code:0" row is the NOT-dropped
+							# bucket -- its packet count matches PORT RX exactly.
+							# Only a non-zero drop code is a real drop, and
+							# treating code 0 as one would overstate drops by the
+							# entire forwarded volume.
+							local _punts="" _drops="" _pf=1 _df=1
+							if [ -f /sys/kernel/debug/ppe/reason_counters ]; then
+								local _rl _rcode _rpkt _rname _rport
+								while read -r _rl; do
+									case "$_rl" in
+										"cpu code:"*|"drop code:"*) ;;
+										*) continue ;;
+									esac
+									_rcode=${_rl#* code:}; _rcode=${_rcode%% *}
+									case "$_rcode" in ''|*[!0-9]*) continue ;; esac
+									case "$_rl" in
+										*packets:*) _rpkt=${_rl#*packets:}; _rpkt=${_rpkt%% *} ;;
+										*) _rpkt=0 ;;
+									esac
+									case "$_rpkt" in ''|*[!0-9]*) _rpkt=0 ;; esac
+									[ "$_rpkt" -eq 0 ] && continue
+									case "$_rl" in
+										*name:*) _rname=${_rl#*name:} ;;
+										*) _rname="" ;;
+									esac
+									case "$_rname" in ''|unlabelled) _rname="code $_rcode" ;; esac
+									json_esc "$_rname"
+									case "$_rl" in
+										"cpu code:"*)
+											[ $_pf -eq 0 ] && _punts="$_punts,"
+											_punts="$_punts{\"code\":$_rcode,\"packets\":$_rpkt,\"name\":\"$JSV\"}"
+											_pf=0
+											;;
+										*)
+											[ "$_rcode" -eq 0 ] && continue
+											case "$_rl" in
+												*port:*) _rport=${_rl#*port:}; _rport=${_rport%% *} ;;
+												*) _rport=-1 ;;
+											esac
+											case "$_rport" in ''|*[!0-9]*) _rport=-1 ;; esac
+											[ $_df -eq 0 ] && _drops="$_drops,"
+											_drops="$_drops{\"code\":$_rcode,\"port\":$_rport,\"packets\":$_rpkt,\"name\":\"$JSV\"}"
+											_df=0
+											;;
+									esac
+								done < /sys/kernel/debug/ppe/reason_counters
+							fi
+							# Per-port and per-queue drop totals. Tokens look
+							# like "<count>/<drop>(port=0000)"; the VPORT_*
+							# section repeats the same numbers, so only the
+							# PORT_* one is read to avoid double counting.
+							local _pdrop=0 _qdrop=0 _qpend=0
+							if [ -f /sys/kernel/debug/ppe/port_rx ]; then
+								local _sec="" _tk _tv
+								while read -r _rl; do
+									case "$_rl" in
+										VPORT*) _sec=skip; continue ;;
+										PORT*) _sec=use ;;
+									esac
+									[ "$_sec" = "use" ] || continue
+									for _tk in $_rl; do
+										case "$_tk" in
+											*/*\(port=*\)*)
+												_tv=${_tk#*/}; _tv=${_tv%%(*}
+												case "$_tv" in ''|*[!0-9]*) ;; *) _pdrop=$((_pdrop + _tv)) ;; esac
+												;;
+										esac
+									done
+								done < /sys/kernel/debug/ppe/port_rx
+							fi
+							if [ -f /sys/kernel/debug/ppe/qm ]; then
+								local _tk _tv _tp
+								while read -r _rl; do
+									for _tk in $_rl; do
+										case "$_tk" in
+											*/*/*\(queue=*\)*)
+												_tp=${_tk#*/}; _tp=${_tp%%/*}
+												_tv=${_tk##*/}; _tv=${_tv%%(*}
+												case "$_tp" in ''|*[!0-9]*) ;; *) _qpend=$((_qpend + _tp)) ;; esac
+												case "$_tv" in ''|*[!0-9]*) ;; *) _qdrop=$((_qdrop + _tv)) ;; esac
+												;;
+										esac
+									done
+								done < /sys/kernel/debug/ppe/qm
+							fi
 							if [ -f /sys/kernel/debug/ppe/cpu_code ]; then
 								local _line _pkt _port _drop _first=1
 								_cpu_code_json="{"
@@ -1884,7 +1976,7 @@ EOF_DMI
 								done < /sys/kernel/debug/ppe/edma/stats/err_stats
 								_edma_err_json="$_edma_err_json}"
 							fi
-							_qcom_json="{\"qcom_ppe\":1,\"bound\":$_qbound,\"unsupported\":$_qunsup,\"failed\":$_qfail,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
+							_qcom_json="{\"qcom_ppe\":1,\"bound\":$_qbound,\"unsupported\":$_qunsup,\"failed\":$_qfail,\"punts\":[$_punts],\"drops\":[$_drops],\"port_drops\":$_pdrop,\"queue_drops\":$_qdrop,\"queue_pending\":$_qpend,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
 						fi
 					fi
 					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"dbg\":$_dbg,\"qcom\":$_qcom_json}"
