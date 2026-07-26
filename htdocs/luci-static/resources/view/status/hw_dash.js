@@ -1072,6 +1072,13 @@ return view.extend({
             jio: 'jio.com', reliance: 'jio.com',
             vodafone: 'myvi.in', ' vi ': 'myvi.in',
             bsnl: 'bsnl.co.in',
+            // Matched against the whole registry string, which includes the AS
+            // handle -- so one key covers every ASN an operator holds:
+            // "railtel" hits AS24186/AS135750/AS151100, "gtpl" hits
+            // AS135872/AS135257/AS132390, without listing each.
+            // gtpl before hathway: GTPL Hathway should resolve to GTPL.
+            gtpl: 'gtpl.net',
+            railtel: 'railwire.co.in', railwire: 'railwire.co.in',
             hathway: 'hathway.com',
             comcast: 'xfinity.com', xfinity: 'xfinity.com',
             verizon: 'verizon.com',
@@ -1084,7 +1091,13 @@ return view.extend({
         // service supplying a transparent, high-resolution raster image.
         var ISP_LOGO_ASSETS = {
             airtel: L.resource('hwdash-icons/airtel.svg') + '?v=1', bharti: L.resource('hwdash-icons/airtel.svg') + '?v=1',
-            jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2'
+            jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2',
+            // Keyed on the registry string, so one entry covers every ASN the
+            // operator holds. gtpl before hathway, as in ISP_LOGO_DOMAINS.
+            bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=1',
+            gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=1',
+            railtel: L.resource('hwdash-icons/railwire.png') + '?v=1',
+            railwire: L.resource('hwdash-icons/railwire.png') + '?v=1'
         };
         // ASN is a stable, unambiguous identifier (unlike the free-text org
         // name, which varies in punctuation/casing across lookups) -- so a
@@ -1092,7 +1105,13 @@ return view.extend({
         // still get a real badge, keyed by its ASN rather than a name guess.
         var ISP_BY_ASN = {
             'AS151690': { color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fab5.png') + '?v=3' },
-			'AS133661': { color: '#da252b', label: 'NP', logo: L.resource('hwdash-icons/netplus.svg') + '?v=4' }
+            'AS133661': { color: '#da252b', label: 'NP', logo: L.resource('hwdash-icons/netplus.svg') + '?v=4' },
+            // Pinned by ASN rather than matched by name: AS45775 is WISH
+            // NET PRIVATE LIMITED (IN), but AS59034 is "WISHNET - BeiJing
+            // Wish Network Technology" (CN) -- a substring match on
+            // "wishnet" hits both and would badge a Chinese network with
+            // an Indian ISP's logo.
+            'AS45775': { color: '#DA252B', label: 'WN', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=1' }
         };
         var ispBadge = function(ispFull) {
             var raw = ispFull || '';
@@ -1128,6 +1147,9 @@ return view.extend({
             else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { color = '#0F1C4D'; label = 'Jio'; }
             else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { color = '#E60000'; label = 'Vi'; }
             else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; }
+            else if (isp.indexOf('gtpl') !== -1) { color = '#1B75BC'; label = 'GTPL'; }
+            else if (isp.indexOf('railtel') !== -1 || isp.indexOf('railwire') !== -1) { color = '#00AEEF'; label = 'RW'; }
+            else if (isp.indexOf('wish net private') !== -1) { color = '#DA252B'; label = 'WN'; }
             else if (isp.indexOf('hathway') !== -1) { color = '#E31E24'; label = 'HW'; }
             else if (isp.indexOf('comcast') !== -1 || isp.indexOf('xfinity') !== -1) { color = '#111827'; label = 'X'; }
             else if (isp.indexOf('at&t') !== -1) { color = '#00A8E0'; label = 'AT&T'; }
@@ -3958,7 +3980,22 @@ return view.extend({
                     var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
                     var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
                     logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
-                    logoImg.onerror = function() { logoImg.style.display = 'none'; monogramEl.style.display = 'inline-flex'; logoImg.dataset.src = ''; };
+                    // Two-tier fallback: a bundled asset is tried first (local,
+                    // instant, works with no internet and no third party), and
+                    // only if it is missing or fails do we reach for the remote
+                    // logo service. The coloured monogram is the last resort, so
+                    // the badge is never empty.
+                    logoImg.onerror = function() {
+                        var alt = logoImg.dataset.fallback;
+                        if (alt && logoImg.src.indexOf(alt) === -1) {
+                            logoImg.dataset.fallback = '';
+                            logoImg.src = alt;
+                            return;
+                        }
+                        logoImg.style.display = 'none';
+                        monogramEl.style.display = 'inline-flex';
+                        logoImg.dataset.src = '';
+                    };
                     var badgeWrapper = E('div', { style: 'position: relative; width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;' }, [monogramEl, logoImg]);
                     var ispNameSpan = E('span', { style: 'font-weight: 600; font-size: 1.05em; white-space: normal; word-break: break-word; line-height: 1.25;' });
                     var ifaceAsnSpan = E('span', { style: 'font-size: 0.78em; opacity: 0.55; white-space: nowrap; font-family: monospace; letter-spacing: 0.3px;' });
@@ -4024,9 +4061,13 @@ return view.extend({
                     // Only touch img.src when the selected asset actually
                     // changes -- setting src every poll would refetch and
                     // flicker the logo for no reason.
-                    var logoSrc = ib.logo || (ib.domain ? 'https://logos.hunter.io/' + ib.domain : '');
+                    var remoteSrc = ib.domain ? 'https://logos.hunter.io/' + ib.domain : '';
+                    var logoSrc = ib.logo || remoteSrc;
                     if (logoSrc && entry.logoImg.dataset.src !== logoSrc) {
                         entry.logoImg.dataset.src = logoSrc;
+                        // Only meaningful when both exist: bundled asset primary,
+                        // remote service as the standby.
+                        entry.logoImg.dataset.fallback = (ib.logo && remoteSrc) ? remoteSrc : '';
                         entry.logoImg.style.display = 'none';
                         entry.monogramEl.style.display = 'inline-flex';
                         entry.logoImg.src = logoSrc;
