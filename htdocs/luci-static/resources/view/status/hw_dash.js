@@ -1104,7 +1104,7 @@ return view.extend({
         // small local ISP that never shows up in any public logo service can
         // still get a real badge, keyed by its ASN rather than a name guess.
         var ISP_BY_ASN = {
-            'AS151690': { color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fab5.png') + '?v=3' },
+            'AS151690': { color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fabfive.png') + '?v=1' },
             'AS133661': { color: '#da252b', label: 'NP', logo: L.resource('hwdash-icons/netplus.svg') + '?v=4' },
             // Pinned by ASN rather than matched by name: AS45775 is WISH
             // NET PRIVATE LIMITED (IN), but AS59034 is "WISHNET - BeiJing
