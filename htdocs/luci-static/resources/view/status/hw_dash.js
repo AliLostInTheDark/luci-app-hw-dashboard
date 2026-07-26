@@ -57,6 +57,11 @@ var callHwWifiClients = rpc.declare({
     method: 'wifi_clients',
     expect: {}
 });
+var callHwWanIps = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'wan_ips',
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -965,6 +970,10 @@ return view.extend({
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
+        var wanIpCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'WAN Addressing'),
+            E('div', { id: 'hw-wanip', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
+        ]);
         var alertsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('h3', {}, 'Alerts'),
             E('div', { id: 'hw-alerts', style: 'width: 100%; display: flex; flex-direction: column; gap: 6px;' })
@@ -1007,6 +1016,7 @@ return view.extend({
         container.appendChild(wanQualityCard);
         container.appendChild(wifiCard);
         container.appendChild(wifiStaCard);
+        container.appendChild(wanIpCard);
         container.appendChild(thermWrapper);
         container.appendChild(eventsCard);
         var self = this;
@@ -1252,6 +1262,7 @@ return view.extend({
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             wifi_clients: { nodes: [wifiStaCard], label: 'Wi-Fi Clients', show: null },
             alerts: { nodes: [alertsCard], label: 'Alerts', show: null },
+            wan_ips: { nodes: [wanIpCard], label: 'WAN Addressing', show: null },
             thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
             therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
         };
@@ -1988,6 +1999,85 @@ return view.extend({
                 setText(e.ttl, a.title);
                 setText(e.det, a.detail);
             });
+        };
+        // --- WAN addressing -------------------------------------------------
+        // What the ISP actually hands this router, and what that implies for
+        // reaching it from outside. The classification is done in the backend,
+        // where both the interface address and the observed egress address are
+        // available; this only presents it.
+        var WAN_CLASS = {
+            public:    { label: 'Public IPv4',       color: '#69f0ae', note: 'Reachable from the internet; port forwarding works.' },
+            cgnat:     { label: 'CG-NAT',            color: '#ffb300', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding will not work.' },
+            natted:    { label: 'Behind upstream NAT', color: '#ffb300', note: 'The address on this link is not the address the internet sees.' },
+            private:   { label: 'Private address',   color: '#ffb300', note: 'RFC1918 address, so something upstream is doing the NAT.' },
+            v6only:    { label: 'IPv6-only',         color: '#40c4ff', note: 'No IPv4 on this interface.' },
+            linklocal: { label: 'Link-local only',   color: '#ff5252', note: 'No address was obtained -- DHCP or the link itself has failed.' },
+            none:      { label: 'No address',        color: '#ff5252', note: '' },
+            unknown:   { label: 'Unknown',           color: '#90a4ae', note: '' }
+        };
+        var wanIpTick = function() {
+            if (document.hidden) return Promise.resolve();
+            if (self.hiddenCards && self.hiddenCards.indexOf('wan_ips') !== -1) return Promise.resolve();
+            if (self.wanIpBusy) return Promise.resolve();
+            self.wanIpBusy = true;
+            return callHwWanIps().then(function(res) {
+                self.wanIpBusy = false;
+                var wans = (res && res.wans) || [];
+                if (self.hiddenWanIfaces)
+                    wans = wans.filter(function(w) { return self.hiddenWanIfaces.indexOf(w.iface) === -1; });
+                wanIpCard.style.display = wans.length ? 'flex' : 'none';
+                if (!wans.length) return;
+                var box = document.getElementById('hw-wanip');
+                if (!box) return;
+                if (!self._wanIpCache) self._wanIpCache = {};
+                syncRows(box, self._wanIpCache, wans, function(w) { return w.iface; }, function() {
+                    var ifn = E('span', { style: 'font-weight: 700; font-size: 0.95em; font-family: monospace;' });
+                    var proto = E('span', { style: 'font-size: 0.72em; opacity: 0.55; font-family: monospace;' });
+                    var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 7px; border-radius: 10px; white-space: nowrap;' });
+                    var assign = E('span', { style: 'font-size: 0.68em; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.5px;' });
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' }, [ifn, proto, badge, assign]);
+                    var v4 = E('div', { style: 'font-family: monospace; font-size: 0.85em; word-break: break-all;' });
+                    var v6 = E('div', { style: 'font-family: monospace; font-size: 0.85em; opacity: 0.85; word-break: break-all;' });
+                    var note = E('div', { style: 'font-size: 0.74em; opacity: 0.55; word-break: break-word;' });
+                    return {
+                        el: E('div', { style: 'display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px;' }, [head, v4, v6, note]),
+                        ifn: ifn, proto: proto, badge: badge, assign: assign, v4: v4, v6: v6, note: note
+                    };
+                }, function(e, w) {
+                    var cls = WAN_CLASS[w.class] || WAN_CLASS.unknown;
+                    setText(e.ifn, w.iface.toUpperCase());
+                    setText(e.proto, w.proto + (w.device ? ' • ' + w.device : ''));
+                    setText(e.badge, cls.label);
+                    e.badge.style.background = cls.color + '22';
+                    e.badge.style.color = cls.color;
+                    setText(e.assign, w.assign === 'unknown' ? '' : w.assign);
+                    var l4 = '';
+                    if (w.ip4) {
+                        l4 = 'IPv4  ' + w.ip4 + (w.mask4 && w.mask4 !== '0' ? '/' + w.mask4 : '');
+                        // Only worth showing when it differs -- when the link
+                        // terminates on a public address the two are the same
+                        // and repeating it just adds a line to read.
+                        if (w.pub4 && w.pub4 !== w.ip4) l4 += '   → seen as ' + w.pub4;
+                    }
+                    setText(e.v4, l4);
+                    e.v4.style.display = l4 ? '' : 'none';
+                    var l6 = '';
+                    if (w.ip6) {
+                        l6 = 'IPv6  ' + w.ip6;
+                        if (w.prefix6) l6 += '   • delegated ' + w.prefix6 + '/' + w.prefix6_len;
+                    }
+                    setText(e.v6, l6);
+                    e.v6.style.display = l6 ? '' : 'none';
+                    // While the collector has not resolved the egress address
+                    // yet, say so rather than implying the classification is
+                    // settled -- a public-looking address can still turn out to
+                    // be NATed once the real egress is known.
+                    var n = cls.note;
+                    if (w.class === 'public' && !w.pub4) n = 'Checking the egress address… this can still turn out to be NATed.';
+                    setText(e.note, n);
+                    e.note.style.display = n ? '' : 'none';
+                });
+            }).catch(function() { self.wanIpBusy = false; });
         };
         // --- Wi-Fi clients -------------------------------------------------
         // Polled on its own 5s tick rather than folded into info: the backend
@@ -4492,6 +4582,7 @@ return view.extend({
             // Offset by 1 so the station dump never lands on the same tick as
             // info, which is the expensive one.
             if (hwTick % 5 === 1) wifiStaTick();
+            if (hwTick % 5 === 3) wanIpTick();
             return Promise.resolve();
         }, 1);
         return container;

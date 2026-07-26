@@ -550,7 +550,11 @@ resolve_isp() {
 	_ip_file="$RINGDIR/${_ifn}.ispip"
 	_last_ip=""
 	[ -f "$_ip_file" ] && read -r _last_ip < "$_ip_file" 2>/dev/null
-	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ]; then
+	# Re-resolve when the interface address changed, and also when the egress
+	# address has never been recorded -- otherwise a router upgrading from a
+	# version that did not keep it would sit on an already-resolved ISP and
+	# never backfill the file. One extra lookup per interface, once.
+	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ] && [ -f "$RINGDIR/${_ifn}.pubip" ]; then
 		return
 	fi
 	_try_file="$RINGDIR/${_ifn}.isp.try"
@@ -585,6 +589,12 @@ resolve_isp() {
 	[ -z "$_org" ] && return
 	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
 	printf '%s' "$_srcip" > "$_ip_file"
+	# Keep the egress address too, not just the interface one. The pair is
+	# what identifies the connection type: equal means the link terminates
+	# on a public address, different means something is NAT-ing in front of
+	# it -- and if the interface address is in 100.64.0.0/10 that something
+	# is the carrier. Discarding it meant recomputing later or guessing.
+	printf '%s' "$_pub" > "$RINGDIR/${_ifn}.pubip"
 	rm -f "$_try_file"
 }
 

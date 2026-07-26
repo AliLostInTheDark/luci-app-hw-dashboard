@@ -266,7 +266,7 @@ _sync_wan_targets() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { } }'
+		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { }, "wan_ips": { } }'
 		;;
 	call)
 		case "$2" in
@@ -373,6 +373,85 @@ case "$1" in
 				_aql_wed_state
 				_aql_cfg_read
 				echo "{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
+				;;
+			wan_ips)
+				# Addressing and connection type per WAN.
+				#
+				# The interesting part is not the address itself but what it
+				# implies. The collector already resolves the real egress
+				# address (it has to, to identify the ISP at all), so pairing
+				# it with the interface address classifies the link for free:
+				# equal means the link terminates on a public address,
+				# different means something NATs in front of it, and an
+				# interface address in 100.64.0.0/10 (RFC 6598) names that
+				# something as the carrier.
+				HWDASH_NOW=$(date +%s 2>/dev/null)
+				WI_DIR=/tmp/hwdash_wanmon
+				WI_ITEMS=""; WI_FIRST=1
+				# Use the collector's tracked list rather than every interface
+				# ubus knows about: it is the same set the WAN Uptime card
+				# shows, so the two cards can never disagree about what counts
+				# as a WAN, and it keeps modem-management interfaces (a static
+				# RFC1918 address to an ONT) out of a card about internet
+				# connections.
+				_wi_ifaces=""
+				[ -f "$WI_DIR/.tracked" ] && _wi_ifaces=$(tr '\n' ' ' < "$WI_DIR/.tracked" 2>/dev/null)
+				for _wif in $_wi_ifaces; do
+					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
+					[ -z "$_wst" ] && continue
+					# Only interfaces that actually carry a default route are
+					# WANs; without this every bridge and VLAN shows up.
+					_wup=""; _wproto=""; _wdev=""; _wv4=""; _wm4=""; _wv6=""
+					eval "$(printf '%s' "$_wst" | jsonfilter \
+						-e '_wup=@.up' -e '_wproto=@.proto' -e '_wdev=@.l3_device' \
+						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' \
+						-e '_wv6=@["ipv6-address"][0].address' 2>/dev/null)" 2>/dev/null
+					[ -z "$_wv4" ] && [ -z "$_wv6" ] && continue
+					# A delegated prefix means a routed /56 or /64, worth showing.
+					_wpfx=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][0].address' 2>/dev/null)
+					_wpfxlen=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][0].mask' 2>/dev/null)
+
+					_wpub=""
+					[ -f "$WI_DIR/$_wif.pubip" ] && read -r _wpub < "$WI_DIR/$_wif.pubip" 2>/dev/null
+
+					# Classify the IPv4 side.
+					_wclass="unknown"
+					case "$_wv4" in
+						'') _wclass="none" ;;
+						10.*) _wclass="private" ;;
+						192.168.*) _wclass="private" ;;
+						169.254.*) _wclass="linklocal" ;;
+						127.*) _wclass="private" ;;
+						172.1[6-9].*|172.2[0-9].*|172.3[01].*) _wclass="private" ;;
+						# RFC 6598 shared address space: 100.64.0.0/10, i.e.
+						# 100.64.x - 100.127.x. Only the carrier hands these out.
+						100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) _wclass="cgnat" ;;
+						*) _wclass="public" ;;
+					esac
+					# A public-looking interface address that still differs from
+					# the observed egress means another NAT in the path.
+					if [ "$_wclass" = "public" ] && [ -n "$_wpub" ] && [ "$_wpub" != "$_wv4" ]; then
+						_wclass="natted"
+					fi
+					if [ "$_wclass" = "none" ] && [ -n "$_wv6" ]; then
+						_wclass="v6only"
+					fi
+
+					# Static vs dynamic is a property of how the address was
+					# obtained, which only the protocol knows.
+					case "$_wproto" in
+						static) _wassign="static" ;;
+						dhcp|dhcpv6|pppoe|pppoa|ppp|l2tp|pptp|wwan|qmi|ncm|mbim) _wassign="dynamic" ;;
+						'') _wassign="unknown" ;;
+						*) _wassign="dynamic" ;;
+					esac
+
+					json_esc "$_wproto"; _wprotoj=$JSV
+					[ $WI_FIRST -eq 0 ] && WI_ITEMS="$WI_ITEMS,"
+					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\"}"
+					WI_FIRST=0
+				done
+				echo "{\"wans\":[$WI_ITEMS]}"
 				;;
 			wifi_clients)
 				# Associated stations, per VAP.
