@@ -92,6 +92,8 @@ Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), u
 <summary><b>System Info</b></summary>
 
 Hostname, distro string, kernel version, CPU model, SoC identity (Qualcomm platforms), and CPU vulnerability mitigation status, color-coded by severity.
+
+Also reports CPU detail: ISA level (`ARMv8-A`, distinct from the `aarch64` uname value), core microarchitecture and stepping, vendor, operating modes, byte order, BogoMIPS, virtualization support, and which hardware accelerators the CPU actually has — `aes`, `pmull`, `sha2`, `crc32`, `avx2` and friends, which is what determines VPN and crypto throughput on a router. Richest with the optional `lscpu` package installed (it is the only source of the core name on ARM, e.g. `Cortex-A73`); without it everything else is still derived from `/proc/cpuinfo` and the card says so rather than going blank.
 </details>
 
 <details>

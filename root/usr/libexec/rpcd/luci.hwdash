@@ -358,7 +358,15 @@ case "$1" in
 				fi
 				CPF_PERSIST=0
 				[ -f /etc/config/cpu-perf ] && CPF_PERSIST=1
-				echo "{\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
+				# Explicit availability flag. A board with no OPP table has no
+				# cpufreq directory at all -- governor reads back as the literal
+				# string "unknown", which is truthy in JS, so the UI was building
+				# a scaling form with an empty governor list and a 0-0 MHz range
+				# instead of saying scaling is unavailable. MediaTek MT7986a is
+				# one such board.
+				CPF_AVAIL_FLAG=0
+				[ -d "$_CF" ] && [ "$CPF_GOV" != "unknown" ] && [ "${CPF_IMAX:-0}" -gt 0 ] && CPF_AVAIL_FLAG=1
+				echo "{\"available\":$CPF_AVAIL_FLAG,\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
 				;;
 			get_aql)
 				_aql_scan
@@ -3016,6 +3024,67 @@ EOF_DMESG
 							0x51-0xc00) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Falkor (Qualcomm server)
 						esac
 					fi
+					# --- CPU detail -------------------------------------
+					# lscpu (util-linux) gives the richest answer, but it is not
+					# part of a default OpenWrt image, so every field here has a
+					# /proc/cpuinfo fallback and the card degrades instead of
+					# disappearing. Lives in the static cache: none of this can
+					# change without swapping the SoC, so it costs nothing per
+					# poll.
+					CPU_ISA=""; CPU_BOGO=""; CPU_FEATURES=""; CPU_BYTEORDER=""
+					CPU_OPMODE=""; CPU_VENDOR=""; CPU_VIRT=""; CPU_LSCPU=0
+					CPU_CORE=""; CPU_STEPPING=""
+					if command -v lscpu >/dev/null 2>&1; then
+						CPU_LSCPU=1
+						while IFS=: read -r _lk _lv; do
+							trim_ws _lv
+							case "$_lk" in
+								# NOT Architecture: lscpu reports uname -m there,
+								# which the existing arch field already shows.
+								# The ARM ISA level below is the informative one.
+								"Model name") CPU_CORE=$_lv ;;
+								Stepping) CPU_STEPPING=$_lv ;;
+								"Byte Order") CPU_BYTEORDER=$_lv ;;
+								"CPU op-mode(s)") CPU_OPMODE=$_lv ;;
+								"Vendor ID") CPU_VENDOR=$_lv ;;
+								BogoMIPS) CPU_BOGO=$_lv ;;
+								Flags) CPU_FEATURES=$_lv ;;
+								Virtualization) CPU_VIRT=$_lv ;;
+							esac
+						done <<EOF_LSCPU
+$(lscpu 2>/dev/null)
+EOF_LSCPU
+					fi
+					# One awk pass covers every /proc/cpuinfo fallback at once.
+					# "CPU architecture: 8" is the ARM ISA level; x86 has no such
+					# line and reports its ISA through uname instead.
+					if [ -z "$CPU_BOGO" ] || [ -z "$CPU_FEATURES" ] || [ -z "$CPU_ISA" ]; then
+						_cpud=$(awk -F: '
+							/^[Bb]ogo[Mm][Ii][Pp][Ss]/ { if (!b) { gsub(/[ \t]/,"",$2); b=$2 } }
+							/^(Features|flags)/        { if (!f) { sub(/^[ \t]+/,"",$2); f=$2 } }
+							/^CPU architecture/        { if (!a) { gsub(/[ \t]/,"",$2); a=$2 } }
+							/^(model name|Processor)/  { if (!m) { sub(/^[ \t]+/,"",$2); m=$2 } }
+							END { print b "\n" a "\n" f }' /proc/cpuinfo 2>/dev/null)
+						_cb=${_cpud%%"
+"*}; _rest=${_cpud#*"
+"}; _ca=${_rest%%"
+"*}; _cf=${_rest#*"
+"}
+						[ -z "$CPU_BOGO" ] && CPU_BOGO=$_cb
+						[ -z "$CPU_FEATURES" ] && CPU_FEATURES=$_cf
+						if [ -z "$CPU_ISA" ] && [ -n "$_ca" ]; then
+							case "$_ca" in
+								8) CPU_ISA="ARMv8-A (64-bit)" ;;
+								7) CPU_ISA="ARMv7-A (32-bit)" ;;
+								6) CPU_ISA="ARMv6" ;;
+								*) CPU_ISA="ARMv$_ca" ;;
+							esac
+						fi
+					fi
+					[ -z "$CPU_ISA" ] && CPU_ISA=$SYS_ARCH
+					# x86 flag lists run to hundreds of entries; cap so the cached
+					# fragment and the JSON payload stay small.
+					CPU_FEATURES=$(printf '%s' "$CPU_FEATURES" | cut -c1-600)
 					VULNS="{"
 					_FV=1
 					for _vf in /sys/devices/system/cpu/vulnerabilities/*; do
@@ -3032,7 +3101,7 @@ EOF_DMESG
 					SOC0_REVISION=$(cat /sys/devices/soc0/revision 2>/dev/null | tr -d '\n\r')
 					SOC0_SERIAL=$(cat /sys/devices/soc0/serial_number 2>/dev/null | tr -d '\n\r')
 					SOC0_ID=$(cat /sys/devices/soc0/soc_id 2>/dev/null | tr -d '\n\r')
-					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS,\"soc_family\":\"$(json_str "$SOC0_FAMILY")\",\"soc_machine\":\"$(json_str "$SOC0_MACHINE")\",\"soc_revision\":\"$(json_str "$SOC0_REVISION")\",\"soc_serial\":\"$(json_str "$SOC0_SERIAL")\",\"soc_id\":\"$(json_str "$SOC0_ID")\""
+					SYS_STATIC_FRAG="\"kver\":\"$(json_str "$SYS_KVER")\",\"arch\":\"$(json_str "$SYS_ARCH")\",\"distrib\":\"$(json_str "${DISTRIB_ID:-}")\",\"release\":\"$(json_str "${DISTRIB_RELEASE:-}")\",\"revision\":\"$(json_str "${DISTRIB_REVISION:-}")\",\"l0\":$L0_SIZE,\"l1d\":$L1D_SIZE,\"l1i\":$L1I_SIZE,\"l2\":$L2_SIZE,\"l3\":$L3_SIZE,\"l4\":$L4_SIZE,\"vulns\":$VULNS,\"soc_family\":\"$(json_str "$SOC0_FAMILY")\",\"soc_machine\":\"$(json_str "$SOC0_MACHINE")\",\"soc_revision\":\"$(json_str "$SOC0_REVISION")\",\"soc_serial\":\"$(json_str "$SOC0_SERIAL")\",\"soc_id\":\"$(json_str "$SOC0_ID")\",\"cpu_isa\":\"$(json_str "$CPU_ISA")\",\"cpu_core\":\"$(json_str "$CPU_CORE")\",\"cpu_stepping\":\"$(json_str "$CPU_STEPPING")\",\"cpu_bogomips\":\"$(json_str "$CPU_BOGO")\",\"cpu_features\":\"$(json_str "$CPU_FEATURES")\",\"cpu_byteorder\":\"$(json_str "$CPU_BYTEORDER")\",\"cpu_opmode\":\"$(json_str "$CPU_OPMODE")\",\"cpu_vendor\":\"$(json_str "$CPU_VENDOR")\",\"cpu_virt\":\"$(json_str "$CPU_VIRT")\",\"lscpu\":$CPU_LSCPU"
 					mkdir -p "$HWDASH_PERSIST_DIR" 2>/dev/null
 					printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 				fi

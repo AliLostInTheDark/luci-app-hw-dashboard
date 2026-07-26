@@ -1589,10 +1589,17 @@ return view.extend({
             if (cpuPerfLoaded) return;
             cpuPerfLoaded = true;
             callHwGetCpuPerf().then(function(perf) {
-                if (perf && perf.governor) {
+                // Trust the backend's explicit flag rather than inferring from
+                // governor being non-empty: a board with no OPP table reports
+                // the literal string "unknown", which is truthy.
+                var cpfOk = perf && (perf.available !== undefined
+                    ? perf.available === 1
+                    : (perf.governor && perf.governor !== 'unknown' && perf.cpuinfo_max_freq > 0));
+                if (cpfOk) {
                     buildCpuPerfForm(perf);
                 } else {
-                    cpuPerfBody.textContent = 'CPU frequency scaling not available on this device.';
+                    cpuPerfBody.textContent = 'CPU frequency scaling not available on this device (no cpufreq/OPP table exposed by the kernel).';
+                    cpuPerfBody.style.opacity = '1';
                 }
             }).catch(function() {
                 cpuPerfBody.textContent = 'Failed to read CPU performance state.';
@@ -3774,6 +3781,33 @@ return view.extend({
                     if (si.hostname) addSi('Hostname', si.hostname);
                     if (si.kver) addSi('Kernel', si.kver);
                     if (si.arch) addSi('Architecture', si.arch);
+                    // CPU detail. cpu_isa is the ARM ISA level (ARMv8-A), which
+                    // is not the same thing as arch (aarch64) and is the more
+                    // useful of the two; cpu_core is the core microarchitecture
+                    // (Cortex-A73), which ARM /proc/cpuinfo does not expose at
+                    // all and only lscpu can supply. Every row is optional.
+                    if (si.cpu_isa && si.cpu_isa !== si.arch) addSi('ISA', si.cpu_isa);
+                    if (si.cpu_core) addSi('CPU Core', si.cpu_core + (si.cpu_stepping ? ' (' + si.cpu_stepping + ')' : ''));
+                    if (si.cpu_vendor) addSi('CPU Vendor', si.cpu_vendor);
+                    if (si.cpu_opmode) addSi('Op Modes', si.cpu_opmode);
+                    if (si.cpu_byteorder) addSi('Byte Order', si.cpu_byteorder);
+                    if (si.cpu_bogomips) addSi('BogoMIPS', si.cpu_bogomips);
+                    if (si.cpu_virt) addSi('Virtualization', si.cpu_virt);
+                    if (si.cpu_features) {
+                        // Highlight the accelerators that actually matter on a
+                        // router (crypto for VPN throughput, SIMD, RNG) rather
+                        // than dumping a 600-character x86 flag list.
+                        var NOTABLE = ['aes', 'pmull', 'sha1', 'sha2', 'sha512', 'crc32', 'asimd', 'neon', 'sve',
+                                       'avx2', 'avx', 'sse4_2', 'rdrand', 'rdseed', 'vmx', 'svm', 'aesni'];
+                        var have = si.cpu_features.split(/\s+/);
+                        var hit = NOTABLE.filter(function(f) { return have.indexOf(f) !== -1; });
+                        if (hit.length) {
+                            addSi('CPU Accel', hit.join(', ') + (have.length > hit.length ? '  (+' + (have.length - hit.length) + ' more)' : ''));
+                        }
+                    }
+                    if (si.lscpu === 0) {
+                        addSi('CPU Detail', 'limited \u2014 install lscpu for more');
+                    }
                     if (typeof si.wd_bootstatus === 'number' && si.wd_bootstatus >= 0) {
                         var wb = si.wd_bootstatus;
                         var wbTxt = 'Normal (power-on)';
