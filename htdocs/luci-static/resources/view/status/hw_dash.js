@@ -1126,56 +1126,14 @@ return view.extend({
                 org = parts[1];
             }
             var isp = org.toLowerCase();
-            // Show the operator name exactly as the ASN registry gives it.
-            // Cymru returns "<AS handle> - <operator name>", so drop only the
-            // handle (which is routing-registry shorthand, not a name a person
-            // would recognise) and keep everything after it verbatim -- no
-            // trimming at the first comma, which used to turn "Bharti Airtel
-            // Ltd., Telemedia Services, IN" into just "Bharti Airtel Ltd.".
-            var name = 'Unknown ISP';
-            if (org) {
-                var dashIdx = org.indexOf(' - ');
-                var handle = dashIdx !== -1 ? org.substring(0, dashIdx) : '';
-                name = (dashIdx !== -1 ? org.substring(dashIdx + 3) : org).trim() || org.trim();
-                // Usually the handle is redundant shorthand for the operator
-                // name that follows it ("AIRTELBROADBAND-AS-AP - Bharti Airtel
-                // Ltd."), so dropping it loses nothing. But AS9829 is
-                // "BSNL-NIB - National Internet Backbone, IN": there the brand
-                // lives only in the handle, and dropping it left the card
-                // saying "National Internet Backbone" with no clue it is BSNL.
-                // So keep a handle word when the name does not already carry
-                // it. "Carries it" has to be tested both ways round: the name
-                // rarely repeats the handle verbatim, but AIRTELBROADBAND does
-                // contain the name's own word "Airtel", which is what makes it
-                // redundant. Registry shorthand (AS/AP/IN/NIB/...) is never a
-                // brand, so it is dropped outright.
-                if (handle) {
-                    var lname = name.toLowerCase();
-                    var nameWords = lname.split(/[^a-z0-9]+/).filter(function(w) { return w.length >= 3; });
-                    // Initials of the operator name: "Vodafone Idea Ltd" -> "vil",
-                    // which is exactly what the VIL-AS-AP handle abbreviates. An
-                    // acronym of the name is not new information; BSNL is not an
-                    // acronym of "National Internet Backbone" (that would be nib),
-                    // which is what makes it worth keeping.
-                    var initials = nameWords.map(function(w) { return w.charAt(0); }).join('');
-                    // Pure digits are the AS number restated (COMCAST-7922), never a brand.
-                    var words = handle.split(/[^A-Za-z0-9]+/).filter(function(w) {
-                        return w.length >= 3 && !/^\d+$/.test(w) &&
-                            !/^(AS|AP|IN|NET|ASN|ISP|LTD|COM|NIB|PVT|TELECOM)$/i.test(w);
-                    }).sort(function(a, b) { return b.length - a.length; });
-                    var anyCovered = false;
-                    for (var wi = 0; wi < words.length; wi++) {
-                        var hw = words[wi].toLowerCase();
-                        if (lname.indexOf(hw) !== -1 || hw === initials) { anyCovered = true; break; }
-                        for (var ni = 0; ni < nameWords.length; ni++)
-                            if (hw.indexOf(nameWords[ni]) !== -1) { anyCovered = true; break; }
-                        if (anyCovered) break;
-                    }
-                    // One recognisable word already shared with the name means the
-                    // whole handle is restating it, so add nothing.
-                    if (!anyCovered && words.length) name = words[0] + ' - ' + name;
-                }
-            }
+            // Show the operator string exactly as the ASN registry gives it,
+            // handle and all: "BSNL-NIB - National Internet Backbone, IN".
+            // Trimming the handle reads better for operators whose name already
+            // carries the brand, but it is guesswork, and it silently hid the
+            // only recognisable token for the ones where the brand lives solely
+            // in the handle. The full string is always the true answer, and the
+            // ASN it came from is shown right beneath it.
+            var name = (org || '').trim() || 'Unknown ISP';
             var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
             if (ISP_BY_ASN[asn]) {
                 // A pinned entry supplies branding (colour, short label, bundled
