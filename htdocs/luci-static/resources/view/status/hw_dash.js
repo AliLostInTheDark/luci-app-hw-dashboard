@@ -965,6 +965,10 @@ return view.extend({
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
+        var alertsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'Alerts'),
+            E('div', { id: 'hw-alerts', style: 'width: 100%; display: flex; flex-direction: column; gap: 6px;' })
+        ]);
         var wifiStaCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('h3', {}, 'Wi-Fi Clients'),
             E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
@@ -978,6 +982,9 @@ return view.extend({
         sysCard.appendChild(E('h3', {}, 'System Info'));
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
         container.appendChild(style);
+        // Alerts sit above everything: if something is wrong it should be the
+        // first thing on the page, not found by scrolling.
+        container.appendChild(alertsCard);
         container.appendChild(sysCard);
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
@@ -1112,19 +1119,44 @@ return view.extend({
             railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
             railwire: L.resource('hwdash-icons/railwire.png') + '?v=2'
         };
+        // Friendly display names. The registry string is accurate but written
+        // for network operators, not people: "AIRTELBROADBAND-AS-AP - Bharti
+        // Airtel Ltd., Telemedia Services, IN" says Airtel in the least
+        // readable way possible. Rather than take a dependency on a third-party
+        // naming API -- which would add rate limits, a key, and a way for the
+        // card to break when someone else's service is down -- map the handful
+        // of operators worth naming locally. Matched against the whole registry
+        // string exactly like the logo maps, so one entry covers every ASN an
+        // operator holds. The untouched registry string stays available as the
+        // row's tooltip, so nothing is actually lost.
+        var ISP_DISPLAY_NAMES = {
+            airtel: 'Bharti Airtel', bharti: 'Bharti Airtel',
+            jio: 'Reliance Jio', reliance: 'Reliance Jio',
+            bsnl: 'BSNL',
+            vodafone: 'Vodafone Idea', idea: 'Vodafone Idea',
+            // gtpl before hathway: GTPL Hathway should resolve to GTPL.
+            gtpl: 'GTPL Hathway',
+            railtel: 'RailWire', railwire: 'RailWire',
+            hathway: 'Hathway',
+            excitel: 'Excitel', tikona: 'Tikona',
+            comcast: 'Comcast Xfinity', xfinity: 'Comcast Xfinity',
+            verizon: 'Verizon', 't-mobile': 'T-Mobile',
+            spectrum: 'Spectrum', cox: 'Cox Communications',
+            'at&t': 'AT&T'
+        };
         // ASN is a stable, unambiguous identifier (unlike the free-text org
         // name, which varies in punctuation/casing across lookups) -- so a
         // small local ISP that never shows up in any public logo service can
         // still get a real badge, keyed by its ASN rather than a name guess.
         var ISP_BY_ASN = {
-            'AS151690': { color: '#c9432e', label: 'F5', logo: L.resource('hwdash-icons/fabfive.png') + '?v=1' },
-            'AS133661': { color: '#da252b', label: 'NP', logo: L.resource('hwdash-icons/netplus.svg') + '?v=4' },
+            'AS151690': { color: '#c9432e', label: 'F5', name: 'FAB Five Network', logo: L.resource('hwdash-icons/fabfive.png') + '?v=1' },
+            'AS133661': { color: '#da252b', label: 'NP', name: 'Netplus Broadband', logo: L.resource('hwdash-icons/netplus.svg') + '?v=4' },
             // Pinned by ASN rather than matched by name: AS45775 is WISH
             // NET PRIVATE LIMITED (IN), but AS59034 is "WISHNET - BeiJing
             // Wish Network Technology" (CN) -- a substring match on
             // "wishnet" hits both and would badge a Chinese network with
             // an Indian ISP's logo.
-            'AS45775': { color: '#DA252B', label: 'WN', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' }
+            'AS45775': { color: '#DA252B', label: 'WN', name: 'Wish Net', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' }
         };
         var ispBadge = function(ispFull) {
             var raw = ispFull || '';
@@ -1143,7 +1175,13 @@ return view.extend({
             // only recognisable token for the ones where the brand lives solely
             // in the handle. The full string is always the true answer, and the
             // ASN it came from is shown right beneath it.
-            var name = (org || '').trim() || 'Unknown ISP';
+            var full = (org || '').trim() || 'Unknown ISP';
+            // Prefer a readable operator name where we know one; otherwise the
+            // registry string stands as-is, which is always correct if ugly.
+            var name = full;
+            for (var nk in ISP_DISPLAY_NAMES) {
+                if (isp.indexOf(nk) !== -1) { name = ISP_DISPLAY_NAMES[nk]; break; }
+            }
             var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
             if (ISP_BY_ASN[asn]) {
                 // A pinned entry supplies branding (colour, short label, bundled
@@ -1151,7 +1189,7 @@ return view.extend({
                 // deliberately does NOT override the name: the registry name is
                 // still the accurate one, and it is what gets displayed.
                 var _pin = ISP_BY_ASN[asn];
-                return { color: _pin.color, label: _pin.label, name: _pin.name || name, asn: asn, domain: _pin.domain || '', logo: _pin.logo || '' };
+                return { color: _pin.color, label: _pin.label, name: _pin.name || name, full: full, asn: asn, domain: _pin.domain || '', logo: _pin.logo || '' };
             }
             if (isp.indexOf('airtel') !== -1 || isp.indexOf('bharti') !== -1) { color = '#ED1B24'; label = 'A'; }
             else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { color = '#0F1C4D'; label = 'Jio'; }
@@ -1170,7 +1208,7 @@ return view.extend({
             for (var assetKey in ISP_LOGO_ASSETS) {
                 if (isp.indexOf(assetKey) !== -1) { logo = ISP_LOGO_ASSETS[assetKey]; break; }
             }
-            return { color: color, label: label, name: name, asn: asn, domain: domain, logo: logo };
+            return { color: color, label: label, name: name, full: full, asn: asn, domain: domain, logo: logo };
         };
         var fmtDuration = function(s) {
             s = Math.max(0, Math.floor(s || 0));
@@ -1213,6 +1251,7 @@ return view.extend({
             wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             wifi_clients: { nodes: [wifiStaCard], label: 'Wi-Fi Clients', show: null },
+            alerts: { nodes: [alertsCard], label: 'Alerts', show: null },
             thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
             therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
         };
@@ -1840,6 +1879,116 @@ return view.extend({
         var setText = function(el, txt) {
             if (el.textContent !== txt) el.textContent = txt;
         };
+        // --- Alerts ---------------------------------------------------------
+        // Everything here is derived from data the dashboard already polls, so
+        // the card costs nothing on the router. It stays hidden while all is
+        // well: a panel that always says "OK" trains you to stop reading it,
+        // and the whole point is to be noticed on the day it says something.
+        //
+        // Thresholds come from the hardware itself wherever the hardware states
+        // them -- the thermal zones publish their own critical and passive trip
+        // points, which beats a number invented here that would be wrong for
+        // some other SoC.
+        var ALERT_COLORS = { crit: '#ff5252', warn: '#ffb300' };
+        var computeAlerts = function(info, wq) {
+            var out = [];
+            if (!info) return out;
+
+            // Only the critical trip is used. The passive trip is where the
+            // kernel begins gentle throttling, which on plenty of SoCs is a
+            // normal operating point -- MT7986 sets it at 60 °C and idles
+            // above it, so alerting there would light the card up permanently
+            // and teach you to ignore it.
+            var seenTemp = {};
+            (info.thermals || []).forEach(function(t) {
+                var c = (t.temp || 0) / 1000;
+                var crit = (t.crit || 0) / 1000;
+                // Reject non-physical trip points: zones with no trip
+                // configured publish placeholders like -274 °C, which is below
+                // absolute zero and would make every comparison true.
+                if (!(crit > 0 && crit < 200)) return;
+                // One physical sensor can be exposed twice under punctuation
+                // variants (cpu-thermal and cpu_thermal); same reading and same
+                // trip means one alert, not two.
+                var tkey = String(t.type || '').toLowerCase().replace(/[^a-z0-9]/g, '') + '|' + c.toFixed(1) + '|' + crit;
+                if (seenTemp[tkey]) return;
+                seenTemp[tkey] = 1;
+                if (c >= crit)
+                    out.push({ sev: 'crit', title: 'Critical temperature', detail: t.type + ' at ' + c.toFixed(1) + ' °C, trip point ' + crit.toFixed(0) + ' °C' });
+                else if (c >= crit * 0.9)
+                    out.push({ sev: 'warn', title: 'Temperature approaching limit', detail: t.type + ' at ' + c.toFixed(1) + ' °C, 90% of the ' + crit.toFixed(0) + ' °C trip' });
+            });
+
+            // ECC: uncorrectable failures mean data actually got through
+            // corrupted, so they are always critical. Corrected bitflips are
+            // normal NAND behaviour and are only worth raising once they climb
+            // past the sector's correction strength.
+            (info.mtd_parts || []).forEach(function(m) {
+                var fail = (m.ecc_fail || 0) - (m.ecc_fail_base || 0);
+                var corr = (m.ecc_corr || 0) - (m.ecc_corr_base || 0);
+                if (fail > 0)
+                    out.push({ sev: 'crit', title: 'Uncorrectable flash errors', detail: 'mtd' + m.num + ' (' + m.name + '): ' + fail + ' uncorrectable since baseline' });
+                else if (corr > 0 && m.ecc_strength && corr >= m.ecc_strength)
+                    out.push({ sev: 'warn', title: 'Flash bitflips accumulating', detail: 'mtd' + m.num + ' (' + m.name + '): ' + corr + ' corrected since baseline, ECC strength ' + m.ecc_strength });
+            });
+
+            // Worded as "present", not "new": flash ships with factory bad
+            // blocks, and without a recorded starting count claiming they
+            // appeared recently would be a guess.
+            if ((info.ubi_bad_peb || 0) > 0)
+                out.push({ sev: (info.ubi_bad_peb >= 10 ? 'crit' : 'warn'), title: 'Bad flash blocks present', detail: info.ubi_bad_peb + ' bad PEB' + (info.ubi_bad_peb === 1 ? '' : 's') + ' on UBI' });
+
+            var cm = info.cpu_meta || {};
+            if (cm.conntrack_max > 0) {
+                var cpct = (cm.conntrack / cm.conntrack_max) * 100;
+                if (cpct >= 90) out.push({ sev: 'crit', title: 'Connection table nearly full', detail: cm.conntrack + ' of ' + cm.conntrack_max + ' (' + cpct.toFixed(0) + '%) -- new connections will start being dropped' });
+                else if (cpct >= 80) out.push({ sev: 'warn', title: 'Connection table filling', detail: cm.conntrack + ' of ' + cm.conntrack_max + ' (' + cpct.toFixed(0) + '%)' });
+            }
+
+            // /rom is a read-only SquashFS and is 100% full by design, as is
+            // any other fully-packed read-only image -- alerting on those would
+            // fire permanently on every device and drown out the real ones.
+            (info.df || []).forEach(function(d) {
+                if (d.mount === '/rom' || d.hw_type === 'SquashFS') return;
+                var pct = parseInt(d.pct, 10);
+                if (!(pct >= 0)) return;
+                if (pct >= 95) out.push({ sev: 'crit', title: 'Filesystem almost full', detail: d.mount + ' at ' + pct + '% (' + fmtSize(d.avail) + ' free)' });
+                else if (pct >= 90) out.push({ sev: 'warn', title: 'Filesystem filling up', detail: d.mount + ' at ' + pct + '% (' + fmtSize(d.avail) + ' free)' });
+            });
+
+            (wq || []).forEach(function(w) {
+                if (self.hiddenWanIfaces && self.hiddenWanIfaces.indexOf(w.iface) !== -1) return;
+                var up = parseFloat(w.uptime_pct);
+                if (w.status === 'down')
+                    out.push({ sev: 'crit', title: 'WAN down', detail: w.iface.toUpperCase() + ' has been down for ' + fmtDurationFull(w.since_change_s || 0) });
+                else if (up >= 0 && up < 99)
+                    out.push({ sev: 'warn', title: 'WAN unstable', detail: w.iface.toUpperCase() + ' at ' + up.toFixed(2) + '% uptime over 24h' });
+            });
+
+            out.sort(function(a, b) { return (a.sev === b.sev) ? 0 : (a.sev === 'crit' ? -1 : 1); });
+            return out;
+        };
+        var renderAlerts = function() {
+            if (self.hiddenCards && self.hiddenCards.indexOf('alerts') !== -1) { alertsCard.style.display = 'none'; return; }
+            var list = computeAlerts(self.lastInfo, self.lastWq);
+            alertsCard.style.display = list.length ? 'flex' : 'none';
+            if (!list.length) return;
+            var box = document.getElementById('hw-alerts');
+            if (!box) return;
+            if (!self._alertCache) self._alertCache = {};
+            syncRows(box, self._alertCache, list, function(a) { return a.sev + '|' + a.title + '|' + a.detail; }, function(a) {
+                var dot = E('span', { style: 'width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: ' + ALERT_COLORS[a.sev] + ';' });
+                var ttl = E('span', { style: 'font-weight: 700; font-size: 0.9em; color: ' + ALERT_COLORS[a.sev] + ';' });
+                var det = E('span', { style: 'font-size: 0.82em; opacity: 0.75; word-break: break-word;' });
+                return {
+                    el: E('div', { style: 'display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding: 7px 10px; border-radius: 7px; border-left: 3px solid ' + ALERT_COLORS[a.sev] + '; background: rgba(128,128,128,0.07);' }, [dot, ttl, det]),
+                    ttl: ttl, det: det
+                };
+            }, function(e, a) {
+                setText(e.ttl, a.title);
+                setText(e.det, a.detail);
+            });
+        };
         // --- Wi-Fi clients -------------------------------------------------
         // Polled on its own 5s tick rather than folded into info: the backend
         // pays one fork per VAP for the station dump, which has no business on
@@ -2194,6 +2343,7 @@ return view.extend({
             return callHwInfo().then(function(res) {
                 if (!res || !res.cpus) return;
                 self.lastInfo = res;
+                renderAlerts();
                 if (!self._sig) self._sig = {};
                 var coresNode = document.getElementById('hw-cores');
                 var nCores = res.cpus.length - 1;
@@ -4122,6 +4272,8 @@ return view.extend({
                 return callHwGetWanQuality();
             }).then(function(res) {
                 var wqAll = res && res.wan_quality;
+                self.lastWq = wqAll || [];
+                renderAlerts();
                 var wanQBox = document.getElementById('hw-wanq-list');
                 if (!wanQBox) return;
                 var isHidden = self.hiddenCards && self.hiddenCards.indexOf('wan_quality') !== -1;
@@ -4256,7 +4408,10 @@ return view.extend({
                     entry.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
 
                     var ib = ispBadge(r.isp);
-                    entry.ispName.textContent = ib.name;
+                    setText(entry.ispName, ib.name);
+                    // The registry string is what the name was derived from, so
+                    // keep it reachable rather than discarded.
+                    if (entry.ispName.title !== ib.full) entry.ispName.title = ib.full;
                     entry.monogramEl.style.background = ib.color;
                     entry.monogramEl.textContent = ib.label;
                     // Only touch img.src when the selected asset actually
