@@ -3795,24 +3795,6 @@ return view.extend({
                             E('span', {class:'hw-stat-value', style:'font-size:0.88em;'}, val)
                         ]));
                     };
-                    // Its own row shape: a long wrapped list of chips rather
-                    // than a single value string, so nothing needs eliding.
-                    var addSiFeatures = function(lbl, notable, rest) {
-                        var wrap = E('div', {style:'display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end;'});
-                        notable.concat(rest).forEach(function(f) {
-                            var isHot = notable.indexOf(f) !== -1;
-                            wrap.appendChild(E('span', {
-                                style: 'font-size:0.75em; padding:1px 6px; border-radius:4px; font-family:monospace; '
-                                     + (isHot
-                                        ? 'background:rgba(139,195,74,0.18); color:#8bc34a; font-weight:600;'
-                                        : 'background:rgba(128,128,128,0.14); opacity:0.75;')
-                            }, f));
-                        });
-                        siGrid.appendChild(E('div', {style:'grid-column:1/-1; display:flex; align-items:baseline; gap:10px; margin:2px 0;'}, [
-                            E('span', {class:'hw-stat-label', style:'font-size:0.88em; flex:0 0 auto; overflow:visible;'}, lbl),
-                            wrap
-                        ]));
-                    };
                     if (si.hostname) addSi('Hostname', si.hostname);
                     if (si.kver) addSi('Kernel', si.kver);
                     if (si.arch) addSi('Architecture', si.arch);
@@ -3828,19 +3810,7 @@ return view.extend({
                     if (si.cpu_byteorder) addSi('Byte Order', si.cpu_byteorder);
                     if (si.cpu_bogomips) addSi('BogoMIPS', si.cpu_bogomips);
                     if (si.cpu_virt) addSi('Virtualization', si.cpu_virt);
-                    if (si.cpu_features) {
-                        // Full list, never a "+N more" summary. The ones that
-                        // decide crypto/VPN throughput on a router are floated
-                        // to the front so they're still the first thing read,
-                        // but nothing is hidden -- x86 lists ~116 flags and
-                        // they all get their own wrapped, full-width row.
-                        var NOTABLE = ['aes', 'aesni', 'pmull', 'sha1', 'sha2', 'sha512', 'crc32', 'asimd', 'neon', 'sve',
-                                       'avx2', 'avx', 'sse4_2', 'rdrand', 'rdseed', 'vmx', 'svm'];
-                        var have = si.cpu_features.split(/\s+/).filter(function(f) { return f; });
-                        var hit = [], rest = [];
-                        have.forEach(function(f) { (NOTABLE.indexOf(f) !== -1 ? hit : rest).push(f); });
-                        if (have.length) addSiFeatures('CPU Features', hit, rest);
-                    }
+
                     if (si.lscpu === 0) {
                         addSi('CPU Detail', 'limited \u2014 install lscpu for more');
                     }
@@ -3872,6 +3842,32 @@ return view.extend({
                     if (si.l3 > 0) addSi('L3 Cache', fmtCacheBytes(si.l3));
                     if (si.l4 > 0) addSi('L4 Cache', fmtCacheBytes(si.l4));
                     sysInfoGrid.appendChild(siGrid);
+                    // Same section shape as CPU Security below: a labelled band
+                    // of bordered chips. Accelerators that decide crypto/VPN
+                    // throughput are floated to the front and tinted green; the
+                    // rest keep the neutral chip so the whole set is present
+                    // without a "+N more" summary hiding any of it.
+                    if (si.cpu_features) {
+                        var NOTABLE = ['aes', 'aesni', 'pmull', 'sha1', 'sha2', 'sha512', 'crc32', 'asimd', 'neon', 'sve',
+                                       'avx2', 'avx', 'sse4_2', 'rdrand', 'rdseed', 'vmx', 'svm'];
+                        var have = si.cpu_features.split(/\s+/).filter(function(f) { return f; });
+                        if (have.length) {
+                            var hot = [], cold = [];
+                            have.forEach(function(f) { (NOTABLE.indexOf(f) !== -1 ? hot : cold).push(f); });
+                            var featDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
+                            featDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Features'));
+                            var featRow = E('div', {style: 'display:flex; flex-wrap:wrap; gap:6px;'});
+                            hot.concat(cold).forEach(function(f) {
+                                var isHot = NOTABLE.indexOf(f) !== -1;
+                                var fc = isHot ? '#8bc34a' : '#9e9e9e';
+                                featRow.appendChild(E('span', {
+                                    style: 'font-size:0.75em; padding:3px 8px; border-radius:4px; border:1px solid ' + fc + '44; color:' + fc + '; background:' + fc + '18; white-space:nowrap;'
+                                }, f));
+                            });
+                            featDiv.appendChild(featRow);
+                            sysInfoGrid.appendChild(featDiv);
+                        }
+                    }
                     if (si.vulns && typeof si.vulns === 'object' && Object.keys(si.vulns).length > 0) {
                         var vulnDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
                         vulnDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Security'));
