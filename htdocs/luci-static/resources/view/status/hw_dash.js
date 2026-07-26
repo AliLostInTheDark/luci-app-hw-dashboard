@@ -3773,10 +3773,44 @@ return view.extend({
                     siHeader.appendChild(E('span', {style: 'font-size:0.85em; padding:4px 10px; border-radius:6px; background:rgba(0,188,212,0.1); border:1px solid rgba(0,188,212,0.3); color:#00bcd4; white-space:nowrap;'}, osStr));
                     sysInfoGrid.appendChild(siHeader);
                     var siGrid = E('div', {style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:5px 20px; margin-bottom:12px;'});
+                    // .hw-stat-value is flex-shrink:0 + nowrap, so a value wider
+                    // than its grid cell squeezes .hw-stat-label (which IS
+                    // shrinkable, with overflow:hidden) down to zero width and
+                    // the label disappears entirely -- "CPU Accel" vanished
+                    // while its value overflowed into the next column. Values
+                    // past what a 220px cell can hold get their own full-width
+                    // row instead, where the label is fixed and the value wraps.
+                    var SI_WIDE_AT = 24;
                     var addSi = function(lbl, val) {
+                        val = String(val);
+                        if (val.length > SI_WIDE_AT) {
+                            siGrid.appendChild(E('div', {style:'grid-column:1/-1; display:flex; align-items:baseline; gap:10px; margin:0;'}, [
+                                E('span', {class:'hw-stat-label', style:'font-size:0.88em; flex:0 0 auto; overflow:visible;'}, lbl),
+                                E('span', {class:'hw-stat-value', style:'font-size:0.88em; white-space:normal; word-break:break-word; flex:1 1 auto; text-align:right;'}, val)
+                            ]));
+                            return;
+                        }
                         siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;'}, [
                             E('span', {class:'hw-stat-label', style:'font-size:0.88em;'}, lbl),
                             E('span', {class:'hw-stat-value', style:'font-size:0.88em;'}, val)
+                        ]));
+                    };
+                    // Its own row shape: a long wrapped list of chips rather
+                    // than a single value string, so nothing needs eliding.
+                    var addSiFeatures = function(lbl, notable, rest) {
+                        var wrap = E('div', {style:'display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end;'});
+                        notable.concat(rest).forEach(function(f) {
+                            var isHot = notable.indexOf(f) !== -1;
+                            wrap.appendChild(E('span', {
+                                style: 'font-size:0.75em; padding:1px 6px; border-radius:4px; font-family:monospace; '
+                                     + (isHot
+                                        ? 'background:rgba(139,195,74,0.18); color:#8bc34a; font-weight:600;'
+                                        : 'background:rgba(128,128,128,0.14); opacity:0.75;')
+                            }, f));
+                        });
+                        siGrid.appendChild(E('div', {style:'grid-column:1/-1; display:flex; align-items:baseline; gap:10px; margin:2px 0;'}, [
+                            E('span', {class:'hw-stat-label', style:'font-size:0.88em; flex:0 0 auto; overflow:visible;'}, lbl),
+                            wrap
                         ]));
                     };
                     if (si.hostname) addSi('Hostname', si.hostname);
@@ -3795,16 +3829,17 @@ return view.extend({
                     if (si.cpu_bogomips) addSi('BogoMIPS', si.cpu_bogomips);
                     if (si.cpu_virt) addSi('Virtualization', si.cpu_virt);
                     if (si.cpu_features) {
-                        // Highlight the accelerators that actually matter on a
-                        // router (crypto for VPN throughput, SIMD, RNG) rather
-                        // than dumping a 600-character x86 flag list.
-                        var NOTABLE = ['aes', 'pmull', 'sha1', 'sha2', 'sha512', 'crc32', 'asimd', 'neon', 'sve',
-                                       'avx2', 'avx', 'sse4_2', 'rdrand', 'rdseed', 'vmx', 'svm', 'aesni'];
-                        var have = si.cpu_features.split(/\s+/);
-                        var hit = NOTABLE.filter(function(f) { return have.indexOf(f) !== -1; });
-                        if (hit.length) {
-                            addSi('CPU Accel', hit.join(', ') + (have.length > hit.length ? '  (+' + (have.length - hit.length) + ' more)' : ''));
-                        }
+                        // Full list, never a "+N more" summary. The ones that
+                        // decide crypto/VPN throughput on a router are floated
+                        // to the front so they're still the first thing read,
+                        // but nothing is hidden -- x86 lists ~116 flags and
+                        // they all get their own wrapped, full-width row.
+                        var NOTABLE = ['aes', 'aesni', 'pmull', 'sha1', 'sha2', 'sha512', 'crc32', 'asimd', 'neon', 'sve',
+                                       'avx2', 'avx', 'sse4_2', 'rdrand', 'rdseed', 'vmx', 'svm'];
+                        var have = si.cpu_features.split(/\s+/).filter(function(f) { return f; });
+                        var hit = [], rest = [];
+                        have.forEach(function(f) { (NOTABLE.indexOf(f) !== -1 ? hit : rest).push(f); });
+                        if (have.length) addSiFeatures('CPU Features', hit, rest);
                     }
                     if (si.lscpu === 0) {
                         addSi('CPU Detail', 'limited \u2014 install lscpu for more');

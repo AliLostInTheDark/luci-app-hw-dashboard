@@ -3082,9 +3082,13 @@ EOF_LSCPU
 						fi
 					fi
 					[ -z "$CPU_ISA" ] && CPU_ISA=$SYS_ARCH
-					# x86 flag lists run to hundreds of entries; cap so the cached
-					# fragment and the JSON payload stay small.
-					CPU_FEATURES=$(printf '%s' "$CPU_FEATURES" | cut -c1-600)
+					# x86 runs to ~116 flags / ~860 chars, so the old 600-char cap
+					# cut the list mid-token. Bound it well above that and trim
+					# back to a space so a partial flag name is never emitted.
+					if [ ${#CPU_FEATURES} -gt 2048 ]; then
+						CPU_FEATURES=$(printf '%s' "$CPU_FEATURES" | cut -c1-2048)
+						CPU_FEATURES=${CPU_FEATURES% *}
+					fi
 					VULNS="{"
 					_FV=1
 					for _vf in /sys/devices/system/cpu/vulnerabilities/*; do
