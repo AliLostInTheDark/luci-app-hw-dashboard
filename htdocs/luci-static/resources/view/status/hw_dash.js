@@ -3772,27 +3772,19 @@ return view.extend({
                     if (si.revision) osStr += ' (' + si.revision + ')';
                     siHeader.appendChild(E('span', {style: 'font-size:0.85em; padding:4px 10px; border-radius:6px; background:rgba(0,188,212,0.1); border:1px solid rgba(0,188,212,0.3); color:#00bcd4; white-space:nowrap;'}, osStr));
                     sysInfoGrid.appendChild(siHeader);
-                    var siGrid = E('div', {style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:5px 20px; margin-bottom:12px;'});
-                    // .hw-stat-value is flex-shrink:0 + nowrap, so a value wider
-                    // than its grid cell squeezes .hw-stat-label (which IS
-                    // shrinkable, with overflow:hidden) down to zero width and
-                    // the label disappears entirely -- "CPU Accel" vanished
-                    // while its value overflowed into the next column. Values
-                    // past what a 220px cell can hold get their own full-width
-                    // row instead, where the label is fixed and the value wraps.
-                    var SI_WIDE_AT = 24;
+                    var siGrid = E('div', {style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:5px 20px;'});
+                    // .hw-stat-value defaults to flex-shrink:0 + nowrap, which
+                    // let a long value squeeze .hw-stat-label (shrinkable, with
+                    // overflow:hidden) down to zero width -- that is how the
+                    // "CPU Accel" label vanished. Rather than promoting long
+                    // values to their own full-width row (which left the label
+                    // stranded at one end and the value at the other), every row
+                    // stays a normal grid cell: the label is pinned so it can
+                    // never shrink, and the value wraps inside the cell instead.
                     var addSi = function(lbl, val) {
-                        val = String(val);
-                        if (val.length > SI_WIDE_AT) {
-                            siGrid.appendChild(E('div', {style:'grid-column:1/-1; display:flex; align-items:baseline; gap:10px; margin:0;'}, [
-                                E('span', {class:'hw-stat-label', style:'font-size:0.88em; flex:0 0 auto; overflow:visible;'}, lbl),
-                                E('span', {class:'hw-stat-value', style:'font-size:0.88em; white-space:normal; word-break:break-word; flex:1 1 auto; text-align:right;'}, val)
-                            ]));
-                            return;
-                        }
-                        siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;'}, [
-                            E('span', {class:'hw-stat-label', style:'font-size:0.88em;'}, lbl),
-                            E('span', {class:'hw-stat-value', style:'font-size:0.88em;'}, val)
+                        siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0; align-items:baseline;'}, [
+                            E('span', {class:'hw-stat-label', style:'font-size:0.88em; flex:0 0 auto; overflow:visible;'}, lbl),
+                            E('span', {class:'hw-stat-value', style:'font-size:0.88em; white-space:normal; word-break:break-word; text-align:right; flex:1 1 auto; min-width:0;'}, String(val))
                         ]));
                     };
                     if (si.hostname) addSi('Hostname', si.hostname);
@@ -3854,7 +3846,7 @@ return view.extend({
                         if (have.length) {
                             var hot = [], cold = [];
                             have.forEach(function(f) { (NOTABLE.indexOf(f) !== -1 ? hot : cold).push(f); });
-                            var featDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
+                            var featDiv = E('div', {style: 'margin-top:12px; padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
                             featDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Features'));
                             var featRow = E('div', {style: 'display:flex; flex-wrap:wrap; gap:6px;'});
                             hot.concat(cold).forEach(function(f) {
@@ -3869,7 +3861,7 @@ return view.extend({
                         }
                     }
                     if (si.vulns && typeof si.vulns === 'object' && Object.keys(si.vulns).length > 0) {
-                        var vulnDiv = E('div', {style: 'padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
+                        var vulnDiv = E('div', {style: 'margin-top:12px; padding-top:10px; border-top:1px solid var(--border-color,rgba(128,128,128,0.15));'});
                         vulnDiv.appendChild(E('div', {style: 'font-size:0.75em; opacity:0.5; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;'}, 'CPU Security'));
                         var chipRow = E('div', {style: 'display:flex; flex-wrap:wrap; gap:6px;'});
                         for (var vn in si.vulns) {
