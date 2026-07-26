@@ -2050,7 +2050,17 @@ return view.extend({
                     setText(e.badge, cls.label);
                     e.badge.style.background = cls.color + '22';
                     e.badge.style.color = cls.color;
-                    setText(e.assign, w.assign === 'unknown' ? '' : w.assign);
+                    // Say "public" only when the address actually is one. The
+                    // wording is more useful than a bare "static"/"dynamic" --
+                    // what people want to know is whether they can be reached
+                    // and whether the address will move -- but on a link behind
+                    // carrier NAT calling it a public IP would simply be wrong,
+                    // so publicness stays conditional on the classification.
+                    var isPub = (w.class === 'public');
+                    var alabel = '';
+                    if (w.assign === 'static') alabel = isPub ? 'Static public IP' : 'Static IP';
+                    else if (w.assign === 'dynamic') alabel = isPub ? 'Dynamic public IP' : 'Dynamic IP';
+                    setText(e.assign, alabel);
                     var l4 = '';
                     if (w.ip4) {
                         l4 = 'IPv4  ' + w.ip4 + (w.mask4 && w.mask4 !== '0' ? '/' + w.mask4 : '');
@@ -2090,10 +2100,16 @@ return view.extend({
             if (d >= -80) return '#ffb300';
             return '#ff7043';
         };
-        var staCell = function(label, big) {
-            var v = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: ' + (big ? '0.95em' : '0.85em') + '; line-height: 1.2;' });
+        // Fixed width, not content width. These are columns: if each cell sizes
+        // to whatever it currently holds, a station renegotiating from "12 / 48"
+        // to "1922 / 2402" reflows the row and every column after it jumps
+        // sideways on the poll -- and rows never line up with each other either.
+        // A fixed width per metric makes the block's total width identical in
+        // every row, so the columns genuinely align and stay put.
+        var staCell = function(label, width, big) {
+            var v = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: ' + (big ? '0.95em' : '0.85em') + '; line-height: 1.2; white-space: nowrap;' });
             return {
-                el: E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0;' }, [
+                el: E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: 0 0 ' + width + 'px; width: ' + width + 'px;' }, [
                     v,
                     E('span', { style: 'font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;' }, label)
                 ]),
@@ -2130,24 +2146,31 @@ return view.extend({
             syncRows(box, self._staCache, list, function(c) { return c.iface + '/' + c.mac; }, function() {
                 var nameEl = E('span', { style: 'font-weight: 600; font-size: 1em; word-break: break-word;' });
                 var macEl = E('span', { style: 'font-size: 0.72em; opacity: 0.55; font-family: monospace; letter-spacing: 0.3px;' });
-                var idBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 160px;' }, [nameEl, macEl]);
-                var sigVal = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: 0.95em;' });
+                // Modulation and error detail belongs under the name it
+                // describes, not stranded on its own full-width line below the
+                // row -- on a station with only "tx failed N" to report that
+                // line read as an orphan.
+                var phyEl = E('span', { style: 'font-size: 0.68em; opacity: 0.5; font-family: monospace; white-space: normal; word-break: break-word; margin-top: 3px;' });
+                var idBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px;' }, [nameEl, macEl, phyEl]);
+                var sigVal = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: 0.95em; white-space: nowrap;' });
                 var sigBar = E('div', { style: 'height: 4px; border-radius: 2px; transition: width 0.4s, background 0.4s;' });
                 var sigTrack = E('div', { style: 'width: 54px; height: 4px; border-radius: 2px; background: rgba(128,128,128,0.22); overflow: hidden;' }, [sigBar]);
-                var sigBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 3px;' }, [
+                var sigBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 78px; width: 78px;' }, [
                     sigVal, sigTrack,
                     E('span', { style: 'font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px;' }, 'Signal')
                 ]);
-                var rate = staCell('TX / RX Rate', true);
-                var traf = staCell('TX / RX Data');
-                var conn = staCell('Connected');
-                var phyEl = E('span', { style: 'font-size: 0.68em; opacity: 0.5; font-family: monospace; white-space: normal; word-break: break-word;' });
-                var top = E('div', { style: 'display: flex; align-items: center; gap: 14px 18px; flex-wrap: wrap;' }, [
-                    idBlock, sigBlock, rate.el, traf.el, conn.el
+                var rate = staCell('TX / RX Rate', 104, true);
+                var traf = staCell('TX / RX Data', 152);
+                var conn = staCell('Connected', 76);
+                // margin-left:auto pins the whole metric block to the right
+                // edge; since every cell inside is a fixed width the block's
+                // total is identical in every row, so the columns line up.
+                var metrics = E('div', { style: 'display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end;' }, [
+                    sigBlock, rate.el, traf.el, conn.el
                 ]);
                 var el = E('div', {
-                    style: 'display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px;'
-                }, [top, phyEl]);
+                    style: 'display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px;'
+                }, [idBlock, metrics]);
                 return { el: el, nameEl: nameEl, macEl: macEl, sigVal: sigVal, sigBar: sigBar, rate: rate, traf: traf, conn: conn, phyEl: phyEl, sig: {} };
             }, function(e, c) {
                 var host = c.host || '';
