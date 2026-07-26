@@ -266,7 +266,7 @@ _sync_wan_targets() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} } }'
+		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { } }'
 		;;
 	call)
 		case "$2" in
@@ -373,6 +373,125 @@ case "$1" in
 				_aql_wed_state
 				_aql_cfg_read
 				echo "{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
+				;;
+			wifi_clients)
+				# Associated stations, per VAP.
+				#
+				# `iw station dump` rather than `iwinfo assoclist`: only iw
+				# reports rx/tx bytes, retries, failures and connected time,
+				# which are the numbers that make the card worth having at all.
+				#
+				# Deliberately its own method rather than part of info: this
+				# costs one fork per VAP, and putting that on the 3s info poll
+				# would hand back a good part of the poll-cost work.
+				HWDASH_NOW=$(date +%s 2>/dev/null)
+
+				# Station name lookup, built entirely with builtin reads.
+				# odhcpd -- what these builds use once dnsmasq's DHCP is off --
+				# writes hosts-format files keyed by IP, not MAC, so a station's
+				# MAC has to be resolved through the ARP table to reach a name.
+				# dnsmasq's lease file, where present, carries the MAC directly
+				# and is preferred since it needs no ARP entry to be useful.
+				_ipname=""; _macname=""
+				for _hf in /tmp/hosts/odhcpd.hosts.* /tmp/hosts/odhcpd; do
+					[ -f "$_hf" ] || continue
+					while read -r _hip _hn _; do
+						case "$_hip" in ''|\#*) continue ;; esac
+						[ -n "$_hn" ] && _ipname="$_ipname $_hip=$_hn"
+					done < "$_hf"
+				done
+				if [ -f /tmp/dhcp.leases ]; then
+					while read -r _ _lm _li _ln _; do
+						case "$_ln" in ''|'*') continue ;; esac
+						[ -n "$_lm" ] && _macname="$_macname $_lm=$_ln"
+						[ -n "$_li" ] && _ipname="$_ipname $_li=$_ln"
+					done < /tmp/dhcp.leases
+				fi
+				if [ -f /proc/net/arp ]; then
+					while read -r _aip _ _ _amac _ _; do
+						case "$_aip" in ''|IP*) continue ;; esac
+						case "$_amac" in ''|00:00:00:00:00:00) continue ;; esac
+						# A dnsmasq lease already named this MAC; don't override.
+						case "$_macname" in *" $_amac="*) continue ;; esac
+						case "$_ipname" in
+							*" $_aip="*)
+								_t=${_ipname#*" $_aip="}
+								_macname="$_macname $_amac=${_t%% *}"
+								;;
+						esac
+					done < /proc/net/arp
+				fi
+
+				WC_ITEMS=""; WC_FIRST=1; WC_AVAIL=0
+				if command -v iw >/dev/null; then
+					WC_AVAIL=1
+					for _nd in /sys/class/net/*; do
+						[ -e "$_nd/phy80211" ] || continue
+						_ifn=${_nd##*/}
+						read_file _wphy "$_nd/phy80211/name" ""
+						_frag=$(iw dev "$_ifn" station dump 2>/dev/null | awk -v ifn="$_ifn" -v phy="$_wphy" -v names="$_macname" '
+	function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+	# names is " mac=name mac=name ...", so a leading space anchors the key and
+	# stops one MAC matching inside another.
+	function nameof(m,   p, t) {
+		p = index(names, " " m "=")
+		if (p == 0) return ""
+		t = substr(names, p + length(m) + 2)
+		p = index(t, " ")
+		return (p > 0) ? substr(t, 1, p - 1) : t
+	}
+	# "351.0 MBit/s VHT-MCS 4 80MHz VHT-NSS 2" -> "VHT-MCS 4 80MHz VHT-NSS 2"
+	function modinfo(s,   p) {
+		p = index(s, "MBit/s")
+		if (p == 0) return ""
+		s = substr(s, p + 6)
+		sub(/^[ \t]+/, "", s); gsub(/[ \t]+/, " ", s)
+		return s
+	}
+	function flush() {
+		if (mac == "") return
+		# %.0f, not %d: byte counters pass 2^31 within hours.
+		printf "%s{\"iface\":\"%s\",\"phy\":\"%s\",\"mac\":\"%s\",\"host\":\"%s\",\"signal\":%d,\"signal_avg\":%d,\"inactive\":%d,\"conn\":%d,\"rx_bytes\":%.0f,\"tx_bytes\":%.0f,\"rx_pkts\":%.0f,\"tx_pkts\":%.0f,\"tx_retries\":%.0f,\"tx_failed\":%.0f,\"rx_rate\":%.1f,\"tx_rate\":%.1f,\"rx_info\":\"%s\",\"tx_info\":\"%s\",\"auth\":%d}", (n++ ? "," : ""), ifn, phy, mac, esc(nameof(mac)), sig, sigavg, inact, conn, rxb, txb, rxp, txp, txr, txf, rxrate, txrate, esc(rxinfo), esc(txinfo), auth
+		mac = ""
+	}
+	/^Station / {
+		flush()
+		mac = $2
+		sig = 0; sigavg = 0; inact = 0; conn = 0; rxb = 0; txb = 0; rxp = 0
+		txp = 0; txr = 0; txf = 0; rxrate = 0; txrate = 0
+		rxinfo = ""; txinfo = ""; auth = 0
+		next
+	}
+	{
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		ci = index(line, ":")
+		if (ci == 0) next
+		k = substr(line, 1, ci - 1)
+		v = substr(line, ci + 1)
+		sub(/^[ \t]+/, "", v)
+		if (k == "signal") sig = v + 0
+		else if (k == "signal avg") sigavg = v + 0
+		else if (k == "inactive time") inact = v + 0
+		else if (k == "connected time") conn = v + 0
+		else if (k == "rx bytes") rxb = v + 0
+		else if (k == "tx bytes") txb = v + 0
+		else if (k == "rx packets") rxp = v + 0
+		else if (k == "tx packets") txp = v + 0
+		else if (k == "tx retries") txr = v + 0
+		else if (k == "tx failed") txf = v + 0
+		else if (k == "authorized") auth = (v ~ /^yes/) ? 1 : 0
+		else if (k == "rx bitrate") { rxrate = v + 0; rxinfo = modinfo(v) }
+		else if (k == "tx bitrate") { txrate = v + 0; txinfo = modinfo(v) }
+	}
+	END { flush() }')
+						[ -z "$_frag" ] && continue
+						[ $WC_FIRST -eq 0 ] && WC_ITEMS="$WC_ITEMS,"
+						WC_ITEMS="$WC_ITEMS$_frag"
+						WC_FIRST=0
+					done
+				fi
+				echo "{\"available\":$WC_AVAIL,\"clients\":[$WC_ITEMS]}"
 				;;
 			set_aql)
 				# Applies immediately AND persists to UCI, so a reboot doesn't

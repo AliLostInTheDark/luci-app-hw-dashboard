@@ -3,7 +3,7 @@
 		"description": "Grant access to Hardware Dashboard",
 		"read": {
 			"ubus": {
-				"luci.hwdash": [ "info", "ping", "wan_quality", "get_config", "get_cpu_perf", "get_aql" ]
+				"luci.hwdash": [ "info", "ping", "wan_quality", "get_config", "get_cpu_perf", "get_aql", "wifi_clients" ]
 			},
 			"cgi-io": [ "exec" ]
 		},

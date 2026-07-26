@@ -52,6 +52,11 @@ var callHwSetAql = rpc.declare({
     params: ['aql'],
     expect: {}
 });
+var callHwWifiClients = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'wifi_clients',
+    expect: {}
+});
 var parseCpu = function(line) {
     var parts = line.trim().split(/\s+/);
     var name = parts[0];
@@ -960,6 +965,10 @@ return view.extend({
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
+        var wifiStaCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'Wi-Fi Clients'),
+            E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
+        ]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var aqlCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wireless AQL'), E('div', { id: 'hw-aql', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
@@ -990,6 +999,7 @@ return view.extend({
         container.appendChild(pingCard);
         container.appendChild(wanQualityCard);
         container.appendChild(wifiCard);
+        container.appendChild(wifiStaCard);
         container.appendChild(thermWrapper);
         container.appendChild(eventsCard);
         var self = this;
@@ -1202,6 +1212,7 @@ return view.extend({
             ping_graph: { nodes: [pingGraphWrapper], label: 'Ping Graph', show: 'block' },
             wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
+            wifi_clients: { nodes: [wifiStaCard], label: 'Wi-Fi Clients', show: null },
             thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
             therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
         };
@@ -1821,6 +1832,120 @@ return view.extend({
             if (cache[key] === sig) return false;
             cache[key] = sig;
             return true;
+        };
+        // Only touch the DOM when the text actually changed. An unconditional
+        // write on every poll drops any selection the user is making inside
+        // the row, which is exactly the kind of churn the persistent-skeleton
+        // rendering exists to avoid.
+        var setText = function(el, txt) {
+            if (el.textContent !== txt) el.textContent = txt;
+        };
+        // --- Wi-Fi clients -------------------------------------------------
+        // Polled on its own 5s tick rather than folded into info: the backend
+        // pays one fork per VAP for the station dump, which has no business on
+        // the 3s poll.
+        var staSigColor = function(d) {
+            if (d >= -55) return '#69f0ae';
+            if (d >= -65) return '#b2ff59';
+            if (d >= -72) return '#ffee58';
+            if (d >= -80) return '#ffb300';
+            return '#ff7043';
+        };
+        var staCell = function(label, big) {
+            var v = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: ' + (big ? '0.95em' : '0.85em') + '; line-height: 1.2;' });
+            return {
+                el: E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0;' }, [
+                    v,
+                    E('span', { style: 'font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;' }, label)
+                ]),
+                val: v
+            };
+        };
+        var renderWifiSta = function(res) {
+            var avail = res && res.available;
+            var list = (res && res.clients) || [];
+            // No iw on the box at all: the card can never say anything, so it
+            // stays hidden rather than showing a permanently empty panel.
+            if (!avail) { wifiStaCard.style.display = 'none'; return; }
+            if (self.hiddenCards && self.hiddenCards.indexOf('wifi_clients') !== -1) return;
+            wifiStaCard.style.display = 'flex';
+            // Sorted by radio then MAC, deliberately not by signal: signal
+            // fluctuates every poll and would make rows swap places under the
+            // cursor while you are reading them.
+            list = list.slice().sort(function(a, b) {
+                if (a.iface !== b.iface) return a.iface < b.iface ? -1 : 1;
+                return a.mac < b.mac ? -1 : (a.mac > b.mac ? 1 : 0);
+            });
+            var box = wifiStaCard.querySelector('#hw-wifi-sta');
+            if (!self._staCache) self._staCache = {};
+            if (!list.length) {
+                for (var k in self._staCache) { self._staCache[k].el.remove(); delete self._staCache[k]; }
+                if (!self._staEmpty) {
+                    self._staEmpty = E('div', { style: 'opacity: 0.5; font-size: 0.85em; padding: 6px 2px;' }, 'No stations associated.');
+                    box.appendChild(self._staEmpty);
+                }
+                return;
+            }
+            if (self._staEmpty) { self._staEmpty.remove(); self._staEmpty = null; }
+
+            syncRows(box, self._staCache, list, function(c) { return c.iface + '/' + c.mac; }, function() {
+                var nameEl = E('span', { style: 'font-weight: 600; font-size: 1em; word-break: break-word;' });
+                var macEl = E('span', { style: 'font-size: 0.72em; opacity: 0.55; font-family: monospace; letter-spacing: 0.3px;' });
+                var idBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 160px;' }, [nameEl, macEl]);
+                var sigVal = E('span', { style: 'font-family: monospace; font-weight: 700; font-size: 0.95em;' });
+                var sigBar = E('div', { style: 'height: 4px; border-radius: 2px; transition: width 0.4s, background 0.4s;' });
+                var sigTrack = E('div', { style: 'width: 54px; height: 4px; border-radius: 2px; background: rgba(128,128,128,0.22); overflow: hidden;' }, [sigBar]);
+                var sigBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 3px;' }, [
+                    sigVal, sigTrack,
+                    E('span', { style: 'font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px;' }, 'Signal')
+                ]);
+                var rate = staCell('TX / RX Rate', true);
+                var traf = staCell('TX / RX Data');
+                var conn = staCell('Connected');
+                var phyEl = E('span', { style: 'font-size: 0.68em; opacity: 0.5; font-family: monospace; white-space: normal; word-break: break-word;' });
+                var top = E('div', { style: 'display: flex; align-items: center; gap: 14px 18px; flex-wrap: wrap;' }, [
+                    idBlock, sigBlock, rate.el, traf.el, conn.el
+                ]);
+                var el = E('div', {
+                    style: 'display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px;'
+                }, [top, phyEl]);
+                return { el: el, nameEl: nameEl, macEl: macEl, sigVal: sigVal, sigBar: sigBar, rate: rate, traf: traf, conn: conn, phyEl: phyEl, sig: {} };
+            }, function(e, c) {
+                var host = c.host || '';
+                setText(e.nameEl, host || c.mac);
+                // Showing the MAC twice when there is no hostname is noise.
+                setText(e.macEl, (host ? c.mac + '  •  ' : '') + c.iface);
+                var d = c.signal || 0;
+                setText(e.sigVal, d + ' dBm');
+                var col = staSigColor(d);
+                e.sigVal.style.color = col;
+                // -90 dBm (unusable) to -30 (touching the AP) mapped across the bar.
+                var pct = Math.max(0, Math.min(100, ((d + 90) / 60) * 100));
+                if (sigGate(e.sig, 'bar', pct.toFixed(0) + col)) {
+                    e.sigBar.style.width = pct.toFixed(0) + '%';
+                    e.sigBar.style.background = col;
+                }
+                setText(e.rate.val, (c.tx_rate || 0).toFixed(0) + ' / ' + (c.rx_rate || 0).toFixed(0));
+                setText(e.traf.val, fmtBytesS(c.tx_bytes || 0) + ' / ' + fmtBytesS(c.rx_bytes || 0));
+                setText(e.conn.val, fmtDuration(c.conn || 0));
+                var bits = [];
+                if (c.tx_info) bits.push('TX ' + c.tx_info);
+                if (c.rx_info) bits.push('RX ' + c.rx_info);
+                // tx failed is the one that means trouble; retries alone are normal.
+                if (c.tx_failed) bits.push('tx failed ' + c.tx_failed);
+                if (!c.auth) bits.push('not authorized');
+                setText(e.phyEl, bits.join('   •   '));
+            });
+        };
+        var wifiStaTick = function() {
+            if (document.hidden) return Promise.resolve();
+            if (self.hiddenCards && self.hiddenCards.indexOf('wifi_clients') !== -1) return Promise.resolve();
+            if (self.staBusy) return Promise.resolve();
+            self.staBusy = true;
+            return callHwWifiClients().then(function(res) {
+                self.staBusy = false;
+                renderWifiSta(res || {});
+            }).catch(function() { self.staBusy = false; });
         };
         var pingTick = function() {
             if (document.hidden) return Promise.resolve();
@@ -4209,6 +4334,9 @@ return view.extend({
             if (hwTick % 2 === 1) wanQTick();
             if (hwTick % 2 === 0) pingTick();
             if (hwTick % 3 === 0) infoTick();
+            // Offset by 1 so the station dump never lands on the same tick as
+            // info, which is the expensive one.
+            if (hwTick % 5 === 1) wifiStaTick();
             return Promise.resolve();
         }, 1);
         return container;
