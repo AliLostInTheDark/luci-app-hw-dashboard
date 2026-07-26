@@ -1086,12 +1086,15 @@ return view.extend({
             spectrum: 'spectrum.com',
             cox: 'cox.com'
         };
-        // Keep commonly seen providers in the package as SVGs.  They stay
-        // sharp at every size and do not depend on a third-party favicon
-        // service supplying a transparent, high-resolution raster image.
+        // Keep commonly seen providers bundled in the package. They do not
+        // depend on a third-party favicon service supplying a transparent,
+        // high-resolution image, and they render offline. Every asset is
+        // trimmed and capped at 256px: the badge draws at 34px with
+        // object-fit:contain, so that is still ~7x headroom for hi-DPI while
+        // keeping each file small.
         var ISP_LOGO_ASSETS = {
-            airtel: L.resource('hwdash-icons/airtel.svg') + '?v=1', bharti: L.resource('hwdash-icons/airtel.svg') + '?v=1',
-            jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2',
+            airtel: L.resource('hwdash-icons/airtel.png') + '?v=1', bharti: L.resource('hwdash-icons/airtel.png') + '?v=1',
+            jio: L.resource('hwdash-icons/jio.png') + '?v=1', reliance: L.resource('hwdash-icons/jio.png') + '?v=1',
             // Keyed on the registry string, so one entry covers every ASN the
             // operator holds. gtpl before hathway, as in ISP_LOGO_DOMAINS.
             bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=3',
@@ -1132,7 +1135,46 @@ return view.extend({
             var name = 'Unknown ISP';
             if (org) {
                 var dashIdx = org.indexOf(' - ');
+                var handle = dashIdx !== -1 ? org.substring(0, dashIdx) : '';
                 name = (dashIdx !== -1 ? org.substring(dashIdx + 3) : org).trim() || org.trim();
+                // Usually the handle is redundant shorthand for the operator
+                // name that follows it ("AIRTELBROADBAND-AS-AP - Bharti Airtel
+                // Ltd."), so dropping it loses nothing. But AS9829 is
+                // "BSNL-NIB - National Internet Backbone, IN": there the brand
+                // lives only in the handle, and dropping it left the card
+                // saying "National Internet Backbone" with no clue it is BSNL.
+                // So keep a handle word when the name does not already carry
+                // it. "Carries it" has to be tested both ways round: the name
+                // rarely repeats the handle verbatim, but AIRTELBROADBAND does
+                // contain the name's own word "Airtel", which is what makes it
+                // redundant. Registry shorthand (AS/AP/IN/NIB/...) is never a
+                // brand, so it is dropped outright.
+                if (handle) {
+                    var lname = name.toLowerCase();
+                    var nameWords = lname.split(/[^a-z0-9]+/).filter(function(w) { return w.length >= 3; });
+                    // Initials of the operator name: "Vodafone Idea Ltd" -> "vil",
+                    // which is exactly what the VIL-AS-AP handle abbreviates. An
+                    // acronym of the name is not new information; BSNL is not an
+                    // acronym of "National Internet Backbone" (that would be nib),
+                    // which is what makes it worth keeping.
+                    var initials = nameWords.map(function(w) { return w.charAt(0); }).join('');
+                    // Pure digits are the AS number restated (COMCAST-7922), never a brand.
+                    var words = handle.split(/[^A-Za-z0-9]+/).filter(function(w) {
+                        return w.length >= 3 && !/^\d+$/.test(w) &&
+                            !/^(AS|AP|IN|NET|ASN|ISP|LTD|COM|NIB|PVT|TELECOM)$/i.test(w);
+                    }).sort(function(a, b) { return b.length - a.length; });
+                    var anyCovered = false;
+                    for (var wi = 0; wi < words.length; wi++) {
+                        var hw = words[wi].toLowerCase();
+                        if (lname.indexOf(hw) !== -1 || hw === initials) { anyCovered = true; break; }
+                        for (var ni = 0; ni < nameWords.length; ni++)
+                            if (hw.indexOf(nameWords[ni]) !== -1) { anyCovered = true; break; }
+                        if (anyCovered) break;
+                    }
+                    // One recognisable word already shared with the name means the
+                    // whole handle is restating it, so add nothing.
+                    if (!anyCovered && words.length) name = words[0] + ' - ' + name;
+                }
             }
             var color = '#607d8b', label = name.charAt(0).toUpperCase() || '?', domain = '', logo = '';
             if (ISP_BY_ASN[asn]) {
@@ -1350,12 +1392,11 @@ return view.extend({
             }, 'Reset to defaults')
         ]));
         // Brand logos carry fixed colours, so legibility depends on what is
-        // behind them: RailWire's wordmark is dark grey and Jio's mark is navy,
-        // both of which disappear on a dark card, while a white tile would be
-        // pointless on a light one. Probe the theme actually in use -- walking
-        // up for the first opaque background beats prefers-color-scheme, since
-        // a LuCI theme can be dark while the OS is light. Cached: a LuCI theme
-        // change reloads the page anyway.
+        // behind them: RailWire's wordmark is dark grey and vanishes on a dark
+        // card, while a white tile would be pointless on a light one. Probe the
+        // theme actually in use -- walking up for the first opaque background
+        // beats prefers-color-scheme, since a LuCI theme can be dark while the
+        // OS is light. Cached: a LuCI theme change reloads the page anyway.
         var _pageDark = null;
         var pageIsDark = function() {
             if (_pageDark !== null) return _pageDark;
@@ -1374,6 +1415,45 @@ return view.extend({
             }
             _pageDark = dark;
             return _pageDark;
+        };
+        // Whether a logo needs a light backing tile is a property of the
+        // artwork, not of the ISP, so measure it instead of keeping a
+        // hand-maintained list -- that way a logo swapped in later, or one
+        // pulled from the remote service, is judged on what it actually looks
+        // like. Take the median of the max RGB channel ("value") over the
+        // non-transparent pixels.
+        //
+        // Value, not luminance: Airtel's red is dark by luminance (0.19) yet
+        // vivid on a dark card, while RailWire's grey is brighter by luminance
+        // (0.35) and all but invisible -- luminance ranks those two backwards.
+        // Measured medians: wishnet 11, railwire 64 | jio 144, gtpl 165,
+        // fabfive 204, airtel 233, bsnl 241. The threshold sits in that gap.
+        //
+        // A remote logo comes from another origin and taints the canvas, so
+        // getImageData throws; keep the tile then, the safe default for
+        // artwork we are not allowed to inspect.
+        var LOGO_TILE_MAX_VALUE = 110;
+        var logoNeedsTile = function(img) {
+            try {
+                var c = document.createElement('canvas');
+                c.width = 32; c.height = 32;
+                var ctx = c.getContext('2d');
+                if (!ctx) return true;
+                ctx.drawImage(img, 0, 0, 32, 32);
+                var d = ctx.getImageData(0, 0, 32, 32).data, vals = [];
+                for (var i = 0; i < d.length; i += 4) {
+                    if (d[i + 3] < 128) continue;
+                    var m = d[i];
+                    if (d[i + 1] > m) m = d[i + 1];
+                    if (d[i + 2] > m) m = d[i + 2];
+                    vals.push(m);
+                }
+                if (!vals.length) return true;
+                vals.sort(function(a, b) { return a - b; });
+                return vals[vals.length >> 1] < LOGO_TILE_MAX_VALUE;
+            } catch (e) {
+                return true;
+            }
         };
         var cbiRow = function(labelTxt, field) {
             return E('div', { class: 'hw-set-row' }, [
@@ -4004,14 +4084,20 @@ return view.extend({
 
                 syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
                     var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
-                    // Tile only where it earns its keep: on a dark theme it keeps
-                    // dark-inked logos readable; on a light one it would just be
-                    // a white square on a white card.
-                    var logoTile = pageIsDark()
-                        ? 'background: #fff; border-radius: 7px; padding: 2px;'
-                        : 'background: transparent;';
-                    var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; ' + logoTile + ' box-sizing: border-box; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
-                    logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
+                    var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; box-sizing: border-box; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
+                    // Tile only where it earns its keep. Most brand logos are
+                    // vivid enough to sit straight on the card, which looks far
+                    // better than a white square on every row; only genuinely
+                    // dark artwork gets a backing. Decided per image on load,
+                    // so a changed src is always re-judged.
+                    logoImg.onload = function() {
+                        var tile = pageIsDark() && logoNeedsTile(logoImg);
+                        logoImg.style.background = tile ? '#fff' : 'transparent';
+                        logoImg.style.borderRadius = tile ? '7px' : '0';
+                        logoImg.style.padding = tile ? '2px' : '0';
+                        monogramEl.style.display = 'none';
+                        logoImg.style.display = '';
+                    };
                     // Two-tier fallback: a bundled asset is tried first (local,
                     // instant, works with no internet and no third party), and
                     // only if it is missing or fails do we reach for the remote
