@@ -2190,9 +2190,17 @@ return view.extend({
                 setText(e.rate.val, (c.tx_rate || 0).toFixed(0) + ' / ' + (c.rx_rate || 0).toFixed(0));
                 setText(e.traf.val, fmtBytesS(c.tx_bytes || 0) + ' / ' + fmtBytesS(c.rx_bytes || 0));
                 setText(e.conn.val, fmtDuration(c.conn || 0));
-                var bits = [];
-                if (c.tx_info) bits.push('TX ' + c.tx_info);
-                if (c.rx_info) bits.push('RX ' + c.rx_info);
+                // The driver stops reporting a bitrate for a station that has
+                // gone quiet, so tx_info and rx_info blink in and out between
+                // polls. Rendering only whichever happened to be present made
+                // the line rewrite itself every few seconds -- "TX … • RX …",
+                // then "RX … •  tx failed N", then the failure count alone.
+                // Both slots are always drawn, and the last rate actually
+                // reported is kept: a modulation does not stop being true
+                // because the station went idle for a moment.
+                if (c.tx_info) e.lastTx = c.tx_info;
+                if (c.rx_info) e.lastRx = c.rx_info;
+                var bits = ['TX ' + (e.lastTx || '—'), 'RX ' + (e.lastRx || '—')];
                 // tx failed is the one that means trouble; retries alone are normal.
                 if (c.tx_failed) bits.push('tx failed ' + c.tx_failed);
                 if (!c.auth) bits.push('not authorized');
