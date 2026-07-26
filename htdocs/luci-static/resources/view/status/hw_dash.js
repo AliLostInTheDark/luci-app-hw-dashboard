@@ -1094,10 +1094,10 @@ return view.extend({
             jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2',
             // Keyed on the registry string, so one entry covers every ASN the
             // operator holds. gtpl before hathway, as in ISP_LOGO_DOMAINS.
-            bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=1',
-            gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=1',
-            railtel: L.resource('hwdash-icons/railwire.png') + '?v=1',
-            railwire: L.resource('hwdash-icons/railwire.png') + '?v=1'
+            bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=2',
+            gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=2',
+            railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
+            railwire: L.resource('hwdash-icons/railwire.png') + '?v=2'
         };
         // ASN is a stable, unambiguous identifier (unlike the free-text org
         // name, which varies in punctuation/casing across lookups) -- so a
@@ -1111,7 +1111,7 @@ return view.extend({
             // Wish Network Technology" (CN) -- a substring match on
             // "wishnet" hits both and would badge a Chinese network with
             // an Indian ISP's logo.
-            'AS45775': { color: '#DA252B', label: 'WN', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=1' }
+            'AS45775': { color: '#DA252B', label: 'WN', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' }
         };
         var ispBadge = function(ispFull) {
             var raw = ispFull || '';
@@ -1349,6 +1349,32 @@ return view.extend({
                 }
             }, 'Reset to defaults')
         ]));
+        // Brand logos carry fixed colours, so legibility depends on what is
+        // behind them: RailWire's wordmark is dark grey and Jio's mark is navy,
+        // both of which disappear on a dark card, while a white tile would be
+        // pointless on a light one. Probe the theme actually in use -- walking
+        // up for the first opaque background beats prefers-color-scheme, since
+        // a LuCI theme can be dark while the OS is light. Cached: a LuCI theme
+        // change reloads the page anyway.
+        var _pageDark = null;
+        var pageIsDark = function() {
+            if (_pageDark !== null) return _pageDark;
+            var el = document.body, dark;
+            while (el) {
+                var c = window.getComputedStyle(el).backgroundColor || '';
+                var m = c.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+                if (m && (m[4] === undefined || parseFloat(m[4]) > 0.5)) {
+                    dark = (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255 < 0.5;
+                    break;
+                }
+                el = el.parentElement;
+            }
+            if (dark === undefined) {
+                dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            }
+            _pageDark = dark;
+            return _pageDark;
+        };
         var cbiRow = function(labelTxt, field) {
             return E('div', { class: 'hw-set-row' }, [
                 E('label', { class: 'hw-set-label' }, labelTxt),
@@ -3978,7 +4004,13 @@ return view.extend({
 
                 syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
                     var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
-                    var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
+                    // Tile only where it earns its keep: on a dark theme it keeps
+                    // dark-inked logos readable; on a light one it would just be
+                    // a white square on a white card.
+                    var logoTile = pageIsDark()
+                        ? 'background: #fff; border-radius: 7px; padding: 2px;'
+                        : 'background: transparent;';
+                    var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; ' + logoTile + ' box-sizing: border-box; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
                     logoImg.onload = function() { monogramEl.style.display = 'none'; logoImg.style.display = ''; };
                     // Two-tier fallback: a bundled asset is tried first (local,
                     // instant, works with no internet and no third party), and
