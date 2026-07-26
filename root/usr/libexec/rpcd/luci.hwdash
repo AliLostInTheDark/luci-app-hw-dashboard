@@ -2739,9 +2739,26 @@ EOF
 				done
 				UBI_DEVS="$UBI_DEVS]"
 
-				# ECC baseline: first-seen counter snapshot, persisted in tmpfs RAM.
-				# Accumulating bitflips since a fixed baseline are the real NAND health signal.
-				ECC_BASE_FILE=/tmp/hwdash/ecc.baseline
+				# ECC baseline: first-seen counter snapshot. Accumulating bitflips
+				# since a fixed baseline are the real NAND health signal, so the
+				# baseline has to outlive a reboot -- kept in tmpfs it was rebuilt
+				# from the current counters on every boot, which made "+N since
+				# <date>" measure nothing but uptime.
+				#
+				# It lives outside /tmp/hwdash* on purpose: postinst clears those
+				# so a schema change can never serve stale cache, but this is
+				# recorded hardware history, not cache, and must survive upgrades.
+				# Writes cost nothing in flash wear -- the file is written once
+				# per device, and again only if the counters regress, which means
+				# the chip was reflashed.
+				ECC_BASE_DIR=/etc/hwdash
+				ECC_BASE_FILE=$ECC_BASE_DIR/ecc.baseline
+				# Carry over a baseline left by a version that kept it in tmpfs,
+				# so upgrading does not discard history that is still valid.
+				if [ ! -f "$ECC_BASE_FILE" ] && [ -f /tmp/hwdash/ecc.baseline ]; then
+					mkdir -p "$ECC_BASE_DIR" 2>/dev/null
+					cat /tmp/hwdash/ecc.baseline > "$ECC_BASE_FILE" 2>/dev/null
+				fi
 				ECC_BASE_DATE=0
 				if [ -f "$ECC_BASE_FILE" ]; then
 					read -r _eb_hdr < "$ECC_BASE_FILE" 2>/dev/null
@@ -2792,6 +2809,7 @@ EOF
 				fi
 				MTD_PARTS="$MTD_PARTS]"
 				if [ -n "$_ECC_SNAP" ] && { [ "$ECC_BASE_DATE" = "0" ] || [ "$_ECC_RESET" = "1" ]; }; then
+					mkdir -p "$ECC_BASE_DIR" 2>/dev/null
 					{
 						printf 'DATE=%s\n' "${HWDASH_NOW:-0}"
 						printf '%s' "$_ECC_SNAP"

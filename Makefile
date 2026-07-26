@@ -17,6 +17,14 @@ define Package/luci-app-hw-dashboard/postinst
 [ -n "$${IPKG_INSTROOT}" ] || {
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
+	# Rescue the ECC baseline before the caches go. Older versions kept it
+	# in tmpfs alongside them, so wiping first would destroy the recorded
+	# NAND history on the very upgrade that gives it a permanent home --
+	# the backend's own migration never gets the chance to run.
+	[ -f /tmp/hwdash/ecc.baseline ] && [ ! -f /etc/hwdash/ecc.baseline ] && {
+		mkdir -p /etc/hwdash
+		cat /tmp/hwdash/ecc.baseline > /etc/hwdash/ecc.baseline 2>/dev/null
+	}
 	rm -rf /tmp/hwdash*
 	/etc/init.d/rpcd restart 2>/dev/null
 	[ -x /etc/init.d/hwdash-wanmon ] && {
