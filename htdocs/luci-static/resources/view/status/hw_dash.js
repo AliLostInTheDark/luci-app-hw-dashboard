@@ -1094,7 +1094,7 @@ return view.extend({
             jio: L.resource('hwdash-icons/jio.svg') + '?v=2', reliance: L.resource('hwdash-icons/jio.svg') + '?v=2',
             // Keyed on the registry string, so one entry covers every ASN the
             // operator holds. gtpl before hathway, as in ISP_LOGO_DOMAINS.
-            bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=2',
+            bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=3',
             gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=2',
             railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
             railwire: L.resource('hwdash-icons/railwire.png') + '?v=2'
