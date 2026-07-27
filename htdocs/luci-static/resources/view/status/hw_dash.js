@@ -1046,6 +1046,17 @@ return view.extend({
                 wanTarget6: self.wanTarget6
             }).catch(function() {});
         };
+        // Settings are staged, not written the instant a control moves. The
+        // control still updates the live view -- that is the preview, and it
+        // is what makes the choice reviewable -- but nothing reaches the
+        // router until Save. Revert re-reads the saved config, so anything
+        // staged and not saved is discarded, which is what makes it safe to
+        // experiment in here.
+        var settingsDirty = false;
+        var markDirty = function() {
+            settingsDirty = true;
+            if (typeof setPageMsg === 'function') setPageMsg('Unsaved changes \u2014 press Save to apply.', '#ffb300');
+        };
         if (!Array.isArray(savedCfg.hidden) && (self.hiddenCards.length > 0 || self.pingTargets.length > 0)) {
             saveConfig();
         }
@@ -1290,7 +1301,7 @@ return view.extend({
                     var idx = self.hiddenCards.indexOf(key);
                     if (ev.target.checked && idx !== -1) self.hiddenCards.splice(idx, 1);
                     else if (!ev.target.checked && idx === -1) self.hiddenCards.push(key);
-                    saveConfig();
+                    markDirty();
                     applyCardVisibility();
                 }
             });
@@ -1322,7 +1333,7 @@ return view.extend({
                     var idx = self.disabledPings.indexOf(dKey);
                     if (ev.target.checked && idx !== -1) self.disabledPings.splice(idx, 1);
                     else if (!ev.target.checked && idx === -1) self.disabledPings.push(dKey);
-                    saveConfig();
+                    markDirty();
                     self.pingHist = {};
                 }
             });
@@ -1337,7 +1348,7 @@ return view.extend({
                         self.pingTargets.splice(customIdx, 1);
                         var di = self.disabledPings.indexOf(dKey);
                         if (di !== -1) self.disabledPings.splice(di, 1);
-                        saveConfig();
+                        markDirty();
                         self.pingHist = {};
                         renderTargetList();
                     }
@@ -1345,31 +1356,42 @@ return view.extend({
             }
             return E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.88em; cursor: pointer; min-width: 200px;' }, kids);
         };
+        // Split by address family rather than by category. The two families
+        // fail for completely different reasons -- a broken IPv6 deployment
+        // says nothing about IPv4 -- so the common job is "turn all of one
+        // family off", which needed picking through an interleaved list.
         var renderTargetList = function() {
             targetList.innerHTML = '';
-            targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Default Targets'));
-            var defGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
-            DEFAULT_PING_TARGETS.forEach(function(t) {
-                expandFams(t).forEach(function(fam) {
-                    defGrid.appendChild(makePingToggle(t.host, fam, t.host + ' (IPv' + fam + ')', false, -1));
+            var famBox = function(fam) {
+                var rows = [];
+                var group = function(title, items) {
+                    if (!items.length) return;
+                    rows.push(E('div', { style: 'font-size: 0.72em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; margin: 6px 0 3px;' }, title));
+                    items.forEach(function(i) { rows.push(i); });
+                };
+                var defs = [];
+                DEFAULT_PING_TARGETS.forEach(function(t) {
+                    if (expandFams(t).indexOf(fam) !== -1) defs.push(makePingToggle(t.host, fam, t.host, false, -1));
                 });
-            });
-            targetList.appendChild(defGrid);
-            targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Gateway (auto-detected)'));
-            var gwGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
-            gwGrid.appendChild(makePingToggle('__gateway', 4, 'Gateway (IPv4)', false, -1));
-            gwGrid.appendChild(makePingToggle('__gateway', 6, 'Gateway (IPv6)', false, -1));
-            targetList.appendChild(gwGrid);
-            if (self.pingTargets.length > 0) {
-                targetList.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;' }, 'Custom Targets'));
-                var custGrid = E('div', { style: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; margin-bottom: 10px;' });
+                group('Default', defs);
+                group('Gateway', [makePingToggle('__gateway', fam, 'Gateway (auto-detected)', false, -1)]);
+                var cust = [];
                 self.pingTargets.forEach(function(t, i) {
-                    expandFams(t).forEach(function(fam) {
-                        custGrid.appendChild(makePingToggle(t.host, fam, t.host + ' (IPv' + fam + ')', true, i));
-                    });
+                    if (expandFams(t).indexOf(fam) !== -1) cust.push(makePingToggle(t.host, fam, t.host, true, i));
                 });
-                targetList.appendChild(custGrid);
-            }
+                group('Custom', cust);
+                var kids = [E('div', { style: 'font-weight: 700; font-size: 0.9em; letter-spacing: 0.5px;' }, 'IPv' + fam)];
+                // Say it plainly when the family cannot work at all, rather
+                // than leaving a box of targets that will only ever report as
+                // down and look like a fault in the dashboard.
+                if (fam === 6 && self.hasV6 === false) {
+                    kids.push(E('div', { style: 'font-size: 0.76em; color: #ffb300; margin-top: 4px; line-height: 1.35;' },
+                        'No IPv6 WAN detected on this router. These targets cannot be reached and will report as down.'));
+                }
+                rows.forEach(function(r) { kids.push(r); });
+                return E('div', { style: 'flex: 1 1 240px; min-width: 0; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; padding: 10px 12px;' }, kids);
+            };
+            targetList.appendChild(E('div', { style: 'display: flex; gap: 12px; flex-wrap: wrap;' }, [famBox(4), famBox(6)]));
         };
         renderTargetList();
         settingsPanel.appendChild(targetList);
@@ -1391,7 +1413,7 @@ return view.extend({
             if (missing.length === 0) { tgtInput.style.borderColor = '#ff5252'; return; }
             tgtInput.style.borderColor = '';
             self.pingTargets.push({ host: h, fam: missing.length === 2 ? 'both' : missing[0] });
-            saveConfig();
+            markDirty();
             self.pingHist = {};
             tgtInput.value = '';
             renderTargetList();
@@ -1404,7 +1426,7 @@ return view.extend({
                 click: function() {
                     self.pingTargets = [];
                     self.disabledPings = [];
-                    saveConfig();
+                    markDirty();
                     self.pingHist = {};
                     renderTargetList();
                 }
@@ -1490,7 +1512,7 @@ return view.extend({
             var v6 = wanTgt6Input.value.trim() || '2606:4700:4700::1111';
             self.wanTarget4 = v4;
             self.wanTarget6 = v6;
-            saveConfig();
+            markDirty();
         };
         wanTgt4Input.addEventListener('change', saveWanTargets);
         wanTgt6Input.addEventListener('change', saveWanTargets);
@@ -1797,6 +1819,7 @@ return view.extend({
                 if (aqlRes && aqlRes.result && aqlRes.result !== 'ok' && aqlRes.result !== 'skipped') {
                     setPageMsg('Saved, but AQL was rejected: ' + aqlRes.result, '#ffa726');
                 } else {
+                    settingsDirty = false;
                     setPageMsg('All settings saved.', '#8bc34a');
                 }
             }).catch(function() { pageBusy(false); setPageMsg('Save failed.', '#ff5252'); });
@@ -1818,6 +1841,7 @@ return view.extend({
                 if (typeof renderTargetList === 'function') renderTargetList();
                 if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
                 aqlLoaded = false; loadAql();
+                settingsDirty = false;
                 pageBusy(false); setPageMsg('Reverted to saved settings.', '');
             }).catch(function() { pageBusy(false); setPageMsg('Revert failed.', '#ff5252'); });
         });
@@ -1837,6 +1861,7 @@ return view.extend({
             Promise.all([saveConfig(), callHwSetAql({ reset: true }).catch(function() { return null; })])
                 .then(function() {
                     aqlLoaded = false; loadAql();
+                    settingsDirty = false;
                     pageBusy(false); setPageMsg('All settings reset to defaults.', '#8bc34a');
                 }).catch(function() { pageBusy(false); setPageMsg('Reset failed.', '#ff5252'); });
         });
@@ -2023,6 +2048,15 @@ return view.extend({
             return callHwWanIps().then(function(res) {
                 self.wanIpBusy = false;
                 var wans = (res && res.wans) || [];
+                // A link-local address is not connectivity, so fe80:: does not
+                // count -- a router with only those has no working IPv6 WAN.
+                var v6 = wans.some(function(w) {
+                    return (w.ip6 && w.ip6.toLowerCase().indexOf('fe80') !== 0) || !!w.prefix6;
+                });
+                if (self.hasV6 !== v6) {
+                    self.hasV6 = v6;
+                    if (typeof renderTargetList === 'function') renderTargetList();
+                }
                 if (self.hiddenWanIfaces)
                     wans = wans.filter(function(w) { return self.hiddenWanIfaces.indexOf(w.iface) === -1; });
                 wanIpCard.style.display = wans.length ? 'flex' : 'none';
@@ -4422,7 +4456,7 @@ return view.extend({
                             } else {
                                 self.hiddenWanIfaces.push(r.iface);
                             }
-                            saveConfig();
+                            markDirty();
                         };
                     });
                 }

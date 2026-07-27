@@ -233,11 +233,47 @@ discover_ifaces() {
 	# Keep monitoring interfaces across ifdown. A quality card must show
 	# the outage and collect its downtime, not disappear merely because
 	# netifd temporarily withdrew the default route.
+	#
+	# But "brought down" and "deleted" are not the same thing. An interface
+	# removed from the configuration, or administratively disabled, is not
+	# having an outage -- keeping it here reported it as permanently down
+	# forever, kept it in the settings list, and (since the Alerts card
+	# landed) raised a standing "WAN down" alert for something that no
+	# longer exists. Drop those, and delete the ring state with them.
+	#
+	# One uci snapshot rather than a lookup per interface; this runs every
+	# DISCOVER_INTERVAL, not every tick, so it is a fork per five minutes.
+	_uci_net=$(uci -q show network 2>/dev/null)
 	_old_tracked=""
 	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
-	TRACKED_IFACES="$_old_tracked"
+	TRACKED_IFACES=""
+	for _ifn in $_old_tracked; do
+		_keep=1
+		# Only trust the snapshot if uci actually produced one -- a failed
+		# call must never look like "every interface was deleted".
+		if [ -n "$_uci_net" ]; then
+			case "$_uci_net" in
+				*"network.$_ifn=interface"*) ;;
+				*) _keep=0 ;;
+			esac
+			case "$_uci_net" in
+				*"network.$_ifn.disabled='1'"*) _keep=0 ;;
+			esac
+		fi
+		if [ "$_keep" = "1" ]; then
+			TRACKED_IFACES="$TRACKED_IFACES $_ifn"
+		else
+			# Both namings: the ring/state files are "<iface>.*", but the
+			# per-interface scratch buffers are ".probe.<iface>.*" and would
+			# not be matched by the first glob.
+			rm -f "$RINGDIR/$_ifn".* "$RINGDIR/.probe.$_ifn".* 2>/dev/null
+		fi
+	done
+	# Actives are appended after the prune, so an interface that is up but
+	# has no uci section of its own (created by a protocol handler) is put
+	# straight back and never disappears from the card.
 	for _ifn in $ACTIVE_IFACES; do
-		_case=" $_old_tracked "
+		_case=" $TRACKED_IFACES "
 		case "$_case" in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
 	done
 	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' > "$RINGDIR/.tracked"
