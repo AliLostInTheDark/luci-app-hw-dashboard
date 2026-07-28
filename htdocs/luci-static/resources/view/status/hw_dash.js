@@ -2082,15 +2082,32 @@ return view.extend({
         // reaching it from outside. The classification is done in the backend,
         // where both the interface address and the observed egress address are
         // available; this only presents it.
+        // Two palettes for the same five meanings. The bright set reads well on
+        // the dark theme and washes out to 1.4-2.6:1 on the light one, which is
+        // fine for a badge that also has a tinted pill behind it but not for the
+        // addresses themselves -- the moment colour carries meaning it has to be
+        // legible in the theme actually in use. The light values are the same
+        // hues darkened until each clears 3:1 on white.
+        var SEV = {
+            good: { dark: '#69f0ae', light: '#0f9d58' },
+            warn: { dark: '#ffb300', light: '#b26a00' },
+            info: { dark: '#40c4ff', light: '#0277bd' },
+            bad:  { dark: '#ff5252', light: '#c62828' },
+            mute: { dark: '#90a4ae', light: '#546e7a' }
+        };
+        var sevColor = function(k) {
+            var s = SEV[k] || SEV.mute;
+            return pageIsDark() ? s.dark : s.light;
+        };
         var WAN_CLASS = {
-            public:    { label: 'Public IPv4',       color: '#69f0ae', note: 'Reachable from the internet; port forwarding works.' },
-            cgnat:     { label: 'CG-NAT',            color: '#ffb300', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding will not work.' },
-            natted:    { label: 'Behind upstream NAT', color: '#ffb300', note: 'The address on this link is not the address the internet sees.' },
-            private:   { label: 'Private address',   color: '#ffb300', note: 'RFC1918 address, so something upstream is doing the NAT.' },
-            v6only:    { label: 'IPv6-only',         color: '#40c4ff', note: 'No IPv4 on this interface.' },
-            linklocal: { label: 'Link-local only',   color: '#ff5252', note: 'No address was obtained -- DHCP or the link itself has failed.' },
-            none:      { label: 'No address',        color: '#ff5252', note: '' },
-            unknown:   { label: 'Unknown',           color: '#90a4ae', note: '' }
+            public:    { label: 'Public IPv4',       sev: 'good', note: 'Reachable from the internet; port forwarding works.' },
+            cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding will not work.' },
+            natted:    { label: 'Behind upstream NAT', sev: 'warn', note: 'The address on this link is not the address the internet sees.' },
+            private:   { label: 'Private address',   sev: 'warn', note: 'RFC1918 address, so something upstream is doing the NAT.' },
+            v6only:    { label: 'IPv6-only',         sev: 'info', note: 'No IPv4 on this interface.' },
+            linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No address was obtained -- DHCP or the link itself has failed.' },
+            none:      { label: 'No address',        sev: 'bad',  note: '' },
+            unknown:   { label: 'Unknown',           sev: 'mute', note: '' }
         };
         var wanIpTick = function() {
             if (document.hidden) return Promise.resolve();
@@ -2122,17 +2139,17 @@ return view.extend({
                 if (!box) return;
                 if (!self._wanIpCache) self._wanIpCache = {};
                 syncRows(box, self._wanIpCache, wans, function(w) { return w.iface; }, function() {
-                    var ifn = E('span', { style: 'font-weight: 700; font-size: 0.95em; font-family: monospace;' });
+                    var ifn = E('span', { style: 'font-weight: 700; font-size: 1.05em; font-family: monospace; letter-spacing: 0.5px;' });
                     var proto = E('span', { style: 'font-size: 0.72em; opacity: 0.55; font-family: monospace;' });
-                    var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 7px; border-radius: 10px; white-space: nowrap;' });
-                    var assign = E('span', { style: 'font-size: 0.68em; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.5px;' });
+                    var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
+                    var assign = E('span', { style: 'font-size: 0.66em; font-weight: 600; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 10px; background: rgba(128,128,128,0.16); white-space: nowrap;' });
                     var head = E('div', { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' }, [ifn, proto, badge, assign]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
                     var kv4 = kvRow('IPv4'), kvPub = kvRow('Seen as');
                     var kv6 = kvRow('IPv6'), kvPfx = kvRow('Delegated');
-                    var note = E('div', { style: 'font-size: 0.74em; opacity: 0.55; word-break: break-word; margin-top: 2px;' });
+                    var note = E('div', { style: 'font-size: 0.74em; opacity: 0.8; word-break: break-word; margin-top: 3px;' });
                     return {
                         el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note]),
                         ifn: ifn, proto: proto, badge: badge, assign: assign,
@@ -2140,11 +2157,22 @@ return view.extend({
                     };
                 }, function(e, w) {
                     var cls = WAN_CLASS[w.class] || WAN_CLASS.unknown;
+                    var col = sevColor(cls.sev);
                     setText(e.ifn, w.iface.toUpperCase());
+                    // The verdict, carried by the row itself rather than only by
+                    // the badge. Scanning the left edge answers the question the
+                    // card exists for -- a column of green means every link is
+                    // reachable from outside, and one amber edge picks out the
+                    // one that is not, without reading a single address.
+                    e.ifn.style.color = col;
+                    e.el.style.borderLeftWidth = '3px';
+                    e.el.style.borderLeftColor = col;
+                    e.el.style.background = col + '14';
                     setText(e.proto, w.proto + (w.device ? ' • ' + w.device : ''));
                     setText(e.badge, cls.label);
-                    e.badge.style.background = cls.color + '22';
-                    e.badge.style.color = cls.color;
+                    e.badge.style.background = col + '22';
+                    e.badge.style.color = col;
+                    e.badge.style.border = '1px solid ' + col + '66';
                     // Say "public" only when the address actually is one. The
                     // wording is more useful than a bare "static"/"dynamic" --
                     // what people want to know is whether they can be reached
@@ -2156,17 +2184,39 @@ return view.extend({
                     if (w.assign === 'static') alabel = isPub ? 'Static public IP' : 'Static IP';
                     else if (w.assign === 'dynamic') alabel = isPub ? 'Dynamic public IP' : 'Dynamic IP';
                     setText(e.assign, alabel);
-                    var showKv = function(kv, val) {
+                    // Each address is coloured by what it means, not uniformly:
+                    // the whole point of the card is that two addresses on the
+                    // same row can disagree, and a wall of identical monospace
+                    // grey is exactly what hides that.
+                    var C_GOOD = sevColor('good'), C_WARN = sevColor('warn'),
+                        C_SEEN = sevColor('info'), C_BAD = sevColor('bad');
+                    var showKv = function(kv, val, color, dim) {
                         setText(kv.val, val || '');
+                        kv.val.style.color = color || '';
+                        kv.val.style.opacity = dim ? '0.65' : '';
                         kv.el.style.display = val ? '' : 'none';
                     };
-                    showKv(e.kv4, w.ip4 ? w.ip4 + (w.mask4 && w.mask4 !== '0' ? '/' + w.mask4 : '') : '');
+                    showKv(e.kv4, w.ip4 ? w.ip4 + (w.mask4 && w.mask4 !== '0' ? '/' + w.mask4 : '') : '',
+                        w.class === 'public' ? C_GOOD : (w.class === 'none' ? C_BAD : C_WARN));
                     // Only worth a line when it differs -- when the link
                     // terminates on a public address the two are the same and
-                    // repeating it just adds something else to read.
-                    showKv(e.kvPub, (w.pub4 && w.pub4 !== w.ip4) ? w.pub4 : '');
-                    showKv(e.kv6, w.ip6 || '');
-                    showKv(e.kvPfx, w.prefix6 ? w.prefix6 + '/' + w.prefix6_len : '');
+                    // repeating it just adds something else to read. When it
+                    // does differ it is the evidence for the whole verdict, so
+                    // it gets a colour of its own rather than matching the
+                    // interface address it contradicts.
+                    showKv(e.kvPub, (w.pub4 && w.pub4 !== w.ip4) ? w.pub4 : '', C_SEEN);
+                    // fe80:: is not connectivity. Labelled and dimmed rather
+                    // than shown as a plain "IPv6", which read as though the
+                    // link had working IPv6 when it has none -- the same
+                    // distinction the settings panel already makes when it
+                    // decides whether any IPv6 WAN exists at all.
+                    var isLL = !!(w.ip6 && w.ip6.toLowerCase().indexOf('fe80') === 0);
+                    setText(e.kv6.key, isLL ? 'IPv6 link-local' : 'IPv6');
+                    showKv(e.kv6, w.ip6 || '', isLL ? '' : C_GOOD, isLL);
+                    // A delegated prefix is routed IPv6 for the whole LAN --
+                    // unambiguously good news, and the one thing on this card
+                    // that no amount of upstream NAT can take away.
+                    showKv(e.kvPfx, w.prefix6 ? w.prefix6 + '/' + w.prefix6_len : '', C_GOOD);
                     // While the collector has not resolved the egress address
                     // yet, say so rather than implying the classification is
                     // settled -- a public-looking address can still turn out to
@@ -2174,6 +2224,7 @@ return view.extend({
                     var n = cls.note;
                     if (w.class === 'public' && !w.pub4) n = 'Checking the egress address… this can still turn out to be NATed.';
                     setText(e.note, n);
+                    e.note.style.color = col;
                     e.note.style.display = n ? '' : 'none';
                 });
             }).catch(function() { self.wanIpBusy = false; });
@@ -2207,8 +2258,9 @@ return view.extend({
         // Label/value line: label left, value right. Used by the WAN card and
         // by the client metrics once they stack on a narrow screen.
         var kvRow = function(k) {
+            var kk = E('span', { class: 'hw-kv-k' }, k);
             var vv = E('span', { class: 'hw-kv-v' });
-            return { el: E('div', { class: 'hw-kv' }, [E('span', { class: 'hw-kv-k' }, k), vv]), val: vv };
+            return { el: E('div', { class: 'hw-kv' }, [kk, vv]), key: kk, val: vv };
         };
         var renderWifiSta = function(res) {
             var avail = res && res.available;
