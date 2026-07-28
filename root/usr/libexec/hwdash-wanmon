@@ -36,6 +36,11 @@ LOOP_DEADLINE=20
 # healthy v6 link (ICMP6 occasionally filtered by ISP) no longer flicks the
 # sparkline red or clears the latency display.
 MISS_THRESHOLD=3
+# How often the netifd state of a DOWN interface is re-read to explain WHY it
+# is down. That costs a ubus fork, so it is not done on every tick -- but the
+# answer does change while an outage runs (a cable goes back in before DHCP
+# has handed out a lease), so it cannot be resolved once and cached either.
+REASON_INTERVAL=20
 # Built-in fallbacks. Only reached when a user-supplied target list has no
 # distinct second entry to fail over to -- pinging the same host twice
 # proves nothing about the link when that one host is simply unreachable.
@@ -276,7 +281,11 @@ discover_ifaces() {
 		_case=" $TRACKED_IFACES "
 		case "$_case" in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
 	done
-	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' > "$RINGDIR/.tracked"
+	# Sorted, so every reader presents the same interfaces in the same order.
+	# Unsorted this file is in first-discovery order, which is whatever netifd
+	# happened to bring up first on this boot -- the NAT Type card inherited it
+	# directly and put wanb above wan on a router where wanb won the race.
+	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' | sort > "$RINGDIR/.tracked"
 }
 
 # Run one command with a hard wall-clock cap of its own.
@@ -759,7 +768,141 @@ process_iface() {
 		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
 	append_history "$_ifn" "$_hist_val"
 	record_window_sample "$_ifn" "$_sample_up"
+	# Down here means something different than in process_down_iface: netifd
+	# still has the interface up with a route, the probes are simply not
+	# coming back. No ubus call can add to that, and no rate limit is needed
+	# because the answer is already in hand.
+	if [ "$_status" = "down" ]; then
+		printf '%d unreachable %s\n' "$_now" \
+			"the link is up on $_dev, but ${_tgt:-the probe target} is not answering" \
+			> "$RINGDIR/${_ifn}.reason"
+	elif [ -f "$RINGDIR/${_ifn}.reason" ]; then
+		rm -f "$RINGDIR/${_ifn}.reason" 2>/dev/null
+	fi
 	resolve_isp "$_dev" "$_srcip" "$_mark" "$_ifn" "$_family"
+}
+
+# Explain WHY netifd has an interface down, in the words someone would use
+# to go and fix it. "WAN has been down for 4 minutes" tells you nothing you
+# could act on; "no link on eth1 -- cable unplugged or the peer is off" sends
+# you to the right end of the cable.
+#
+# Ordered physical-cause-first, because that is the order in which one cause
+# masks the next: with no carrier there is nothing to run DHCP over, so
+# reporting the missing lease would name a symptom and hide the cause.
+#
+# Emits "<code> <human text>" on stdout. One ubus fork per call, rate-limited
+# by REASON_INTERVAL at the only call site.
+wan_down_reason() {
+	_r_ifn=$1
+	_r_st=$(ubus call "network.interface.$_r_ifn" status 2>/dev/null)
+	if [ -z "$_r_st" ]; then
+		echo "missing netifd no longer has this interface -- it was deleted or renamed"
+		return
+	fi
+	_r_up=""; _r_avail=""; _r_auto=""; _r_dev=""; _r_l3=""; _r_proto=""; _r_pending=""
+	_r_v4=""; _r_v6=""
+	eval "$(printf '%s' "$_r_st" | jsonfilter \
+		-e '_r_up=@.up' -e '_r_avail=@.available' -e '_r_auto=@.autostart' \
+		-e '_r_dev=@.device' -e '_r_l3=@.l3_device' \
+		-e '_r_proto=@.proto' -e '_r_pending=@.pending' \
+		-e '_r_v4=@["ipv4-address"][0].address' \
+		-e '_r_v6=@["ipv6-address"][0].address' 2>/dev/null)" 2>/dev/null
+
+	# Carrier is the one fact the kernel knows for certain, and reading it is
+	# a file read rather than another fork. Both names are tried because
+	# neither is always a kernel netdev: netifd's "device" is a uci device
+	# name, which for a bridge is br-something the kernel never sees under
+	# that spelling, and l3_device is the ppp/tunnel device that does not
+	# exist at all while the session is down.
+	#
+	# A device that is administratively down returns EINVAL on this file
+	# rather than 0, so only an explicit "0" counts as unplugged -- an
+	# unreadable carrier is not evidence of anything.
+	for _r_nd in "$_r_dev" "$_r_l3"; do
+		[ -n "$_r_nd" ] || continue
+		[ -f "/sys/class/net/$_r_nd/carrier" ] || continue
+		_r_car=""
+		read -r _r_car < "/sys/class/net/$_r_nd/carrier" 2>/dev/null
+		if [ "$_r_car" = "0" ]; then
+			echo "nocarrier no link on $_r_nd -- cable unplugged, or the device at the other end is off"
+			return
+		fi
+		break
+	done
+
+	case "$_r_auto" in
+		0|false) echo "admin the interface is configured not to start automatically"; return ;;
+	esac
+	case "$_r_avail" in
+		0|false) echo "nodevice its device (${_r_dev:-unknown}) is not present -- the port or module is missing"; return ;;
+	esac
+
+	# netifd's own error stack, when it has one, beats anything inferred.
+	# The codes below are the ones netifd core and the stock protocol handlers
+	# actually emit (netifd ubus.c, ppp.sh's exit-code table, the dhcp/modem
+	# handlers) -- not a guess at what they might be called. Anything outside
+	# the list still gets reported verbatim rather than swallowed.
+	_r_err=$(printf '%s' "$_r_st" | jsonfilter -e '@.errors[0].code' 2>/dev/null)
+	if [ -n "$_r_err" ]; then
+		case "$_r_err" in
+			NO_DEVICE|NO_IFACE|NO_IFNAME|BAD_DEVICE)
+			                  echo "netifd the configured device is missing" ;;
+			DEVICE_CLAIM_FAILED)
+			                  echo "netifd its device could not be claimed -- another interface is probably using it" ;;
+			NO_ADDRESS|ADDRESS_MISSING|NO_IPADDRESS)
+			                  echo "netifd no address could be obtained from the upstream" ;;
+			PREFIX_MISSING)   echo "netifd the ISP did not delegate an IPv6 prefix" ;;
+			PEER_AUTH_FAILED|CNID_AUTH_FAILED|AUTH_FAILED)
+			                  echo "netifd the ISP rejected the PPP username or password" ;;
+			AUTH_TOPEER_FAILED)
+			                  echo "netifd the ISP failed to authenticate to us" ;;
+			CONNECT_FAILED|CALL_FAILED)
+			                  echo "netifd the connection attempt to the ISP failed" ;;
+			NEGOTIATION_FAILED)
+			                  echo "netifd PPP negotiation with the ISP failed" ;;
+			PEER_DEAD|HANGUP) echo "netifd the ISP dropped the PPP session" ;;
+			IDLE_TIMEOUT)     echo "netifd the PPP session was closed for being idle" ;;
+			TRAFFIC_LIMIT)    echo "netifd the PPP session hit its configured traffic limit" ;;
+			INVALID_ADDRESS|INVALID_GATEWAY|INVALID_NETMASK|INVALID_BROADCAST|INVALID_PTPADDR)
+			                  echo "netifd the addressing handed out by the upstream is not usable" ;;
+			OPTION_ERROR|INVALID_PROTO|INVALID_OPTIONS)
+			                  echo "netifd this interface's own configuration was rejected" ;;
+			SETUP_FAILED|CONFIGURE_FAILED|INITIALIZE_FAILED)
+			                  echo "netifd bringing the interface up failed" ;;
+			NO_APN|NO_REGISTRATION|NETWORK_REGISTRATION_FAILED)
+			                  echo "netifd the mobile network did not accept this connection" ;;
+			PIN_FAILED|PIN_NOT_SPECIFIED|MM_PINCODE_REQUIRED|MM_PINCODE_WRONG|PUK_NEEDED)
+			                  echo "netifd the SIM is locked and needs its PIN" ;;
+			*)                echo "netifd reported by netifd as $_r_err" ;;
+		esac
+		return
+	fi
+
+	case "$_r_pending" in
+		1|true) echo "pending the interface is still negotiating -- give it a moment"; return ;;
+	esac
+
+	if [ "$_r_up" = "1" ] || [ "$_r_up" = "true" ]; then
+		if [ -z "$_r_v4" ] && [ -z "$_r_v6" ]; then
+			case "$_r_proto" in
+				dhcp|dhcpv6)
+					echo "nolease no DHCP lease -- the server did not answer, or the lease expired and could not be renewed" ;;
+				pppoe|pppoa|ppp|l2tp|pptp)
+					echo "nosession the ${_r_proto} session is not established" ;;
+				static)
+					echo "noaddress the static address configured here is not on the interface" ;;
+				*)
+					echo "noaddress the link is up but no address was obtained" ;;
+			esac
+			return
+		fi
+		# Up, addressed, but discovery still skipped it -- the one remaining
+		# requirement is a default route, which is the upstream's to hand out.
+		echo "noroute up with an address, but the upstream is not providing a default route"
+		return
+	fi
+	echo "stopped netifd has the interface stopped"
 }
 
 # Record an actual outage sample for an interface netifd has taken down.
@@ -784,6 +927,15 @@ process_down_iface() {
 		"$_lastgood_ms" "$MISS_THRESHOLD" > "$_stats_file"
 	append_history "$_ifn" x
 	record_window_sample "$_ifn" 0
+	# Refresh the explanation on the transition and then only every
+	# REASON_INTERVAL, so a long outage does not cost a ubus fork per tick.
+	_reason_file="$RINGDIR/${_ifn}.reason"
+	_r_at=0; _r_rest=""
+	[ -f "$_reason_file" ] && read -r _r_at _r_rest < "$_reason_file" 2>/dev/null
+	case "$_r_at" in ''|*[!0-9]*) _r_at=0 ;; esac
+	if [ -z "$_r_rest" ] || [ $((_now - _r_at)) -ge "$REASON_INTERVAL" ]; then
+		printf '%d %s\n' "$_now" "$(wan_down_reason "$_ifn")" > "$_reason_file"
+	fi
 }
 
 while :; do

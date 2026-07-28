@@ -1170,8 +1170,21 @@ EOF
 							fi
 						fi
 
+						# Why it is down, as classified by the collector (which
+						# is where the netifd state is already being read). Only
+						# meaningful while down, so it is not carried otherwise
+						# -- a leftover explanation next to a healthy link would
+						# read as a fault.
+						_wm_rcode=""; _wm_reason=""
+						if [ "$_wm_status" = "down" ] && [ -f "$_wm_dir/$_wm_ifn.reason" ]; then
+							_wm_rts=""
+							read -r _wm_rts _wm_rcode _wm_reason < "$_wm_dir/$_wm_ifn.reason" 2>/dev/null
+						fi
+						json_esc "$_wm_rcode"; _wm_rcodej=$JSV
+						json_esc "$_wm_reason"; _wm_reasonj=$JSV
+
 						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
-						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"history\":$_wm_hist_json}"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"history\":$_wm_hist_json}"
 						_wm_first=0
 					done
 					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"

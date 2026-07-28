@@ -102,7 +102,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-set-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: nowrap; }  .hw-set-label { flex: 0 0 auto; min-width: 160px; opacity: 0.8; text-align: left; font-size: 0.95em; }  .hw-set-label:empty { display: none; }  .hw-set-field { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }  .hw-set-field input, .hw-set-field select { max-width: 100%; }  @media (max-width: 600px) {  .hw-set-label { min-width: 108px; font-size: 0.9em; }  .hw-set-field input[type=text], .hw-set-field select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; }  }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; }  } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; }  }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; }  }  .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -804,6 +804,15 @@ return view.extend({
             return (bytes / 1048576).toFixed(1) + ' MB/s';
         };
         var fmtKb = function(kb) { return kb >= 1048576 ? (kb/1048576).toFixed(1)+' GB' : kb >= 1024 ? (kb/1024).toFixed(0)+' MB' : kb+' KB'; };
+        // One ordering for every list of names on the page, matching how LuCI
+        // itself sorts interfaces and sections: case-insensitive, with embedded
+        // digits compared as numbers so wan2 comes before wan10 rather than
+        // after it. Anything the user reads as a list gets sorted with this --
+        // an order that depends on discovery time means the same router shows
+        // the same cards in a different order on the next boot.
+        var byName = function(a, b) {
+            return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+        };
         var fmtSize = function(kb) {
             if (kb >= 1048576) return (kb / 1048576).toFixed(2) + ' GB';
             return (kb / 1024).toFixed(0) + ' MB';
@@ -1287,14 +1296,41 @@ return view.extend({
                 });
             }
         };
-        var settingsPanel = E('div', {
-            class: 'cbi-section',
-            style: 'display: none; width: 100%; padding: 14px 18px; border: 1px solid var(--border-color, rgba(128,128,128,0.25)); border-radius: 8px; background: var(--background-color-high, rgba(128,128,128,0.05));'
-        });
-        settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Visible Cards'));
-        var cardChecks = E('div', { class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' });
+        // LuCI's own CBI markup rather than a hand-rolled panel. cbi-map,
+        // cbi-section and cbi-value are what every other settings page on the
+        // router is built from, so the active theme styles this one to match --
+        // and goes on matching when the theme changes, which the hardcoded
+        // paddings, borders and background colours here never did.
+        var settingsPanel = E('div', { class: 'cbi-map', style: 'display: none; width: 100%;' });
+        var cbiSection = function(title, descr, body) {
+            var kids = [E('h3', {}, title)];
+            if (descr) kids.push(E('div', { class: 'cbi-section-descr' }, descr));
+            kids.push(E('div', { class: 'cbi-section-node' }, body));
+            return E('div', { class: 'cbi-section' }, kids);
+        };
+        var cbiRow = function(labelTxt, field, descr) {
+            var f = [field];
+            if (descr) f.push(E('div', { class: 'cbi-value-description' }, descr));
+            return E('div', { class: 'cbi-value' }, [
+                E('label', { class: 'cbi-value-title' }, labelTxt),
+                E('div', { class: 'cbi-value-field' }, f)
+            ]);
+        };
+        // Buttons are NOT a cbi-value with an empty title. A titled row still
+        // reserves the whole label column, and on a phone that squeezed the
+        // buttons into a wrap -- the reason the panel stopped using CBI markup
+        // the last time round. They get their own full-width row instead.
+        var cbiActions = function(kids) {
+            return E('div', { class: 'hw-actions' }, kids);
+        };
+        var cardChecks = E('div', { class: 'hw-check-grid' });
         var cardCheckboxes = {};
-        Object.keys(cardRegistry).forEach(function(key) {
+        // Alphabetical by the label the user actually reads. Registry order is
+        // the order the cards were written, which is no help at all when
+        // hunting for one entry in a list of twenty-odd.
+        Object.keys(cardRegistry).sort(function(a, b) {
+            return byName(cardRegistry[a].label, cardRegistry[b].label);
+        }).forEach(function(key) {
             var cb = E('input', {
                 type: 'checkbox',
                 change: function(ev) {
@@ -1307,7 +1343,9 @@ return view.extend({
             });
             cb.checked = self.hiddenCards.indexOf(key) === -1;
             cardCheckboxes[key] = cb;
-            cardChecks.appendChild(E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, cardRegistry[key].label]));
+            cardChecks.appendChild(E('label', { class: 'hw-tgt' }, [
+                cb, E('span', { class: 'hw-tgt-name' }, cardRegistry[key].label)
+            ]));
         });
         // Revert/Reset change self.hiddenCards directly; without this the
         // boxes would keep showing the old state.
@@ -1316,15 +1354,15 @@ return view.extend({
                 cardCheckboxes[k].checked = self.hiddenCards.indexOf(k) === -1;
             });
         };
-        settingsPanel.appendChild(cardChecks);
-        var wanIfaceSection = E('div', { style: 'display: none;' }, [
-            E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'WAN Uptime Status Interfaces'),
-            E('div', { id: 'hw-wanq-checks', class: 'cbi-value-field', style: 'display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 14px;' })
-        ]);
+        settingsPanel.appendChild(cbiSection('Visible Cards',
+            'Cards unticked here are hidden from the dashboard and stop being polled.', cardChecks));
+        var wanIfaceSection = cbiSection('WAN Uptime Status Interfaces',
+            'Which WAN interfaces the uptime, NAT type and alert cards report on.',
+            E('div', { id: 'hw-wanq-checks', class: 'hw-check-grid' }));
+        wanIfaceSection.style.display = 'none';
         settingsPanel.appendChild(wanIfaceSection);
         self._wanIfaceCheckCache = {};
-        settingsPanel.appendChild(E('h4', { style: 'margin: 0 0 8px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;' }, 'Ping Targets'));
-        var targetList = E('div', { class: 'cbi-value-field', style: 'margin-bottom: 10px;' });
+        var targetList = E('div', { style: 'margin-bottom: 10px;' });
         var makePingToggle = function(host, fam, label, isCustom, customIdx) {
             var dKey = host + '|' + fam;
             var cb = E('input', {
@@ -1338,11 +1376,15 @@ return view.extend({
                 }
             });
             cb.checked = self.disabledPings.indexOf(dKey) === -1;
-            var kids = [cb, E('span', { style: 'flex: 1;' }, label)];
+            var kids = [cb, E('span', { class: 'hw-tgt-name', title: label }, label)];
             if (isCustom) {
+                // Deliberately not a cbi-button: the theme's own padding and
+                // border made a 3-character control as tall as the row and put
+                // its glyph off-centre, and since each row is a grid cell the
+                // ragged right edge showed up as a column of misaligned X's.
                 kids.push(E('button', {
-                    class: 'cbi-button cbi-button-remove',
-                    style: 'padding: 1px 6px; font-size: 0.8em; margin-left: 4px;',
+                    type: 'button',
+                    class: 'hw-tgt-x',
                     title: 'Remove target',
                     click: function() {
                         self.pingTargets.splice(customIdx, 1);
@@ -1352,9 +1394,9 @@ return view.extend({
                         self.pingHist = {};
                         renderTargetList();
                     }
-                }, '\u2715'));
+                }, '\u00d7'));
             }
-            return E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.88em; cursor: pointer; min-width: 200px;' }, kids);
+            return E('label', { class: 'hw-tgt' }, kids);
         };
         // Split by address family rather than by category. The two families
         // fail for completely different reasons -- a broken IPv6 deployment
@@ -1364,22 +1406,29 @@ return view.extend({
             targetList.innerHTML = '';
             var famBox = function(fam) {
                 var rows = [];
+                // A grid, not inline-flex wrapping: every cell is the same
+                // width, so the remove buttons land in a straight column
+                // instead of trailing whatever the hostname happened to be.
                 var group = function(title, items) {
                     if (!items.length) return;
-                    rows.push(E('div', { style: 'font-size: 0.72em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; margin: 6px 0 3px;' }, title));
-                    items.forEach(function(i) { rows.push(i); });
+                    rows.push(E('div', { style: 'font-size: 0.72em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 3px;' }, title));
+                    rows.push(E('div', { class: 'hw-tgt-grid' }, items));
                 };
                 var defs = [];
                 DEFAULT_PING_TARGETS.forEach(function(t) {
-                    if (expandFams(t).indexOf(fam) !== -1) defs.push(makePingToggle(t.host, fam, t.host, false, -1));
+                    if (expandFams(t).indexOf(fam) !== -1) defs.push(t.host);
                 });
-                group('Default', defs);
+                group('Default', defs.sort(byName).map(function(h) { return makePingToggle(h, fam, h, false, -1); }));
                 group('Gateway', [makePingToggle('__gateway', fam, 'Gateway (auto-detected)', false, -1)]);
+                // Sorted for display, but each toggle keeps the index it has in
+                // self.pingTargets -- that is what removal splices, and it must
+                // not follow the sorted position.
                 var cust = [];
                 self.pingTargets.forEach(function(t, i) {
-                    if (expandFams(t).indexOf(fam) !== -1) cust.push(makePingToggle(t.host, fam, t.host, true, i));
+                    if (expandFams(t).indexOf(fam) !== -1) cust.push({ host: t.host, idx: i });
                 });
-                group('Custom', cust);
+                cust.sort(function(a, b) { return byName(a.host, b.host); });
+                group('Custom', cust.map(function(c) { return makePingToggle(c.host, fam, c.host, true, c.idx); }));
                 var kids = [E('div', { style: 'font-weight: 700; font-size: 0.9em; letter-spacing: 0.5px;' }, 'IPv' + fam)];
                 // Say it plainly when the family cannot work at all, rather
                 // than leaving a box of targets that will only ever report as
@@ -1394,7 +1443,6 @@ return view.extend({
             targetList.appendChild(E('div', { style: 'display: flex; gap: 12px; flex-wrap: wrap;' }, [famBox(4), famBox(6)]));
         };
         renderTargetList();
-        settingsPanel.appendChild(targetList);
         var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'host or IP (e.g. quad9.net)', style: 'width: 220px; max-width: 60%;' });
         var tgtFam = E('select', { class: 'cbi-input-select' }, [
             E('option', { value: '4' }, 'IPv4'),
@@ -1418,20 +1466,26 @@ return view.extend({
             tgtInput.value = '';
             renderTargetList();
         };
-        settingsPanel.appendChild(E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
-            tgtInput, tgtFam,
-            E('button', { class: 'cbi-button cbi-button-add', click: addTarget }, 'Add'),
-            E('button', {
-                class: 'cbi-button cbi-button-reset',
-                click: function() {
-                    self.pingTargets = [];
-                    self.disabledPings = [];
-                    markDirty();
-                    self.pingHist = {};
-                    renderTargetList();
-                }
-            }, 'Reset to defaults')
-        ]));
+        settingsPanel.appendChild(cbiSection('Ping Targets',
+            'Hosts the Ping Latency and Ping Graph cards probe, split by address family.',
+            [
+                targetList,
+                E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
+                    tgtInput, tgtFam,
+                    E('button', { type: 'button', class: 'cbi-button cbi-button-add', click: addTarget }, 'Add'),
+                    E('button', {
+                        type: 'button',
+                        class: 'cbi-button cbi-button-reset',
+                        click: function() {
+                            self.pingTargets = [];
+                            self.disabledPings = [];
+                            markDirty();
+                            self.pingHist = {};
+                            renderTargetList();
+                        }
+                    }, 'Reset to defaults')
+                ])
+            ]));
         // Brand logos carry fixed colours, so legibility depends on what is
         // behind them: RailWire's wordmark is dark grey and vanishes on a dark
         // card, while a white tile would be pointless on a light one. Probe the
@@ -1496,15 +1550,6 @@ return view.extend({
                 return true;
             }
         };
-        var cbiRow = function(labelTxt, field) {
-            return E('div', { class: 'hw-set-row' }, [
-                E('label', { class: 'hw-set-label' }, labelTxt),
-                E('div', { class: 'hw-set-field' }, field)
-            ]);
-        };
-        settingsPanel.appendChild(E('h4', {
-            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
-        }, 'WAN Uptime Status Probing Targets'));
         var wanTgt4Input = E('input', { type: 'text', class: 'cbi-input-text', value: self.wanTarget4, placeholder: 'IP or domain (e.g. 1.1.1.1 or dns.google)', style: 'width: 260px;' });
         var wanTgt6Input = E('input', { type: 'text', class: 'cbi-input-text', value: self.wanTarget6, placeholder: 'IP or domain (e.g. 2606:4700:4700::1111)', style: 'width: 260px;' });
         var saveWanTargets = function() {
@@ -1516,15 +1561,15 @@ return view.extend({
         };
         wanTgt4Input.addEventListener('change', saveWanTargets);
         wanTgt6Input.addEventListener('change', saveWanTargets);
-        settingsPanel.appendChild(cbiRow('IPv4 Quality Target', wanTgt4Input));
-        settingsPanel.appendChild(cbiRow('IPv6 Quality Target', wanTgt6Input));
+        settingsPanel.appendChild(cbiSection('WAN Uptime Status Probing Targets',
+            'What the background collector pings to decide whether each WAN is up.', [
+                cbiRow('IPv4 Quality Target', wanTgt4Input),
+                cbiRow('IPv6 Quality Target', wanTgt6Input)
+            ]));
 
-        settingsPanel.appendChild(E('h4', {
-            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
-        }, 'CPU Performance'));
         var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
         var cpuPerfSection = E('div', {}, [cpuPerfBody]);
-        settingsPanel.appendChild(cpuPerfSection);
+        settingsPanel.appendChild(cbiSection('CPU Performance', null, cpuPerfSection));
         var buildCpuPerfForm = function(perf) {
             cpuPerfBody.innerHTML = '';
             cpuPerfBody.style.opacity = '1';
@@ -1593,14 +1638,14 @@ return view.extend({
                     });
                 }
             }, 'Apply');
-            cpuPerfBody.appendChild(cbiRow('Current Frequency:', E('span', {}, mhz(perf.cur_freq) + ' MHz')));
-            cpuPerfBody.appendChild(cbiRow('Governor:', govSel));
-            cpuPerfBody.appendChild(cbiRow('Min Frequency (MHz):', minInput));
-            cpuPerfBody.appendChild(cbiRow('Max Frequency (MHz):', maxInput));
+            cpuPerfBody.appendChild(cbiRow('Current Frequency', E('span', {}, mhz(perf.cur_freq) + ' MHz')));
+            cpuPerfBody.appendChild(cbiRow('Governor', govSel));
+            cpuPerfBody.appendChild(cbiRow('Min Frequency (MHz)', minInput));
+            cpuPerfBody.appendChild(cbiRow('Max Frequency (MHz)', maxInput));
             if (perf.turbo_available) {
-                cpuPerfBody.appendChild(cbiRow('Turbo / Boost:', turboCb));
+                cpuPerfBody.appendChild(cbiRow('Turbo / Boost', turboCb));
             }
-            cpuPerfBody.appendChild(cbiRow('', [applyBtn, msg]));
+            cpuPerfBody.appendChild(cbiActions([applyBtn, msg]));
             cpuPerfBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px;' },
                 perf.persist_available
                     ? 'Applies immediately and persists across reboot (synced to /etc/config/cpu-perf).'
@@ -1611,11 +1656,8 @@ return view.extend({
         //   Save   - apply to the live radios AND persist to UCI
         //   Revert - discard unsaved edits, reload what is persisted
         //   Reset  - drop the persisted section and restore mac80211 defaults
-        settingsPanel.appendChild(E('h4', {
-            style: 'margin: 18px 0 8px 0; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px;'
-        }, 'Wireless AQL (Airtime Queue Limits)'));
         var aqlBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
-        settingsPanel.appendChild(aqlBody);
+        settingsPanel.appendChild(cbiSection('Wireless AQL (Airtime Queue Limits)', null, aqlBody));
 
         var AQL_PRESETS = {
             latency:   { low: 1500, high: 2500, label: 'Latency (1500 / 2500)' },
@@ -1731,12 +1773,12 @@ return view.extend({
                     .catch(function() { return { result: 'error' }; });
             };
 
-            aqlBody.appendChild(cbiRow('Preset:', presetSel));
-            aqlBody.appendChild(cbiRow('TX queue low (\u00b5s):', lowInput));
-            aqlBody.appendChild(cbiRow('TX queue high (\u00b5s):', highInput));
-            aqlBody.appendChild(cbiRow('Threshold (\u00b5s):', thInput));
-            aqlBody.appendChild(cbiRow('AQL enabled:', enCb));
-            aqlBody.appendChild(cbiRow('', [saveBtn, revertBtn, resetBtn, msg]));
+            aqlBody.appendChild(cbiRow('Preset', presetSel));
+            aqlBody.appendChild(cbiRow('TX queue low (\u00b5s)', lowInput));
+            aqlBody.appendChild(cbiRow('TX queue high (\u00b5s)', highInput));
+            aqlBody.appendChild(cbiRow('Threshold (\u00b5s)', thInput));
+            aqlBody.appendChild(cbiRow('AQL enabled', enCb));
+            aqlBody.appendChild(cbiActions([saveBtn, revertBtn, resetBtn, msg]));
             aqlBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px; line-height: 1.5;' },
                 'Lower limits cut latency under load at some cost to peak throughput; 1500\u20132500 is the usual sweet spot, and Balanced matches the mac80211 defaults. Applies to every radio immediately and is replayed on boot, since debugfs itself does not persist.'));
         };
@@ -1775,8 +1817,9 @@ return view.extend({
                 cpuPerfBody.textContent = 'Failed to read CPU performance state.';
             });
         };
-        settingsPanel.appendChild(E('div', { style: 'margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2));' }, [
+        settingsPanel.appendChild(cbiSection('Diagnostics', null, [
             E('button', {
+                type: 'button',
                 class: 'cbi-button cbi-button-action',
                 click: function() {
                     if (!self.lastInfo) return;
@@ -1802,11 +1845,11 @@ return view.extend({
         // Reset are the ones that really needed to be page-wide: previously
         // there was no way to undo a settings change short of reversing each
         // control by hand.
-        var pageMsg = E('span', { style: 'margin-left: 10px; font-size: 0.85em;' });
+        var pageMsg = E('span', { style: 'margin-right: 12px; font-size: 0.85em;' });
         var setPageMsg = function(t, c) { pageMsg.textContent = t || ''; pageMsg.style.color = c || ''; };
-        var pageSaveBtn = E('button', { class: 'cbi-button cbi-button-save' }, 'Save');
-        var pageRevertBtn = E('button', { class: 'cbi-button' }, 'Revert');
-        var pageResetBtn = E('button', { class: 'cbi-button cbi-button-reset' }, 'Reset');
+        var pageSaveBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-save' }, 'Save');
+        var pageRevertBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-neutral' }, 'Revert');
+        var pageResetBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-reset' }, 'Reset');
         var pageBusy = function(b) { [pageSaveBtn, pageRevertBtn, pageResetBtn].forEach(function(x) { x.disabled = b; }); };
 
         pageSaveBtn.addEventListener('click', function() {
@@ -1866,9 +1909,11 @@ return view.extend({
                 }).catch(function() { pageBusy(false); setPageMsg('Reset failed.', '#ff5252'); });
         });
 
-        settingsPanel.appendChild(E('div', {
-            style: 'margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.2)); display: flex; align-items: center; flex-wrap: wrap;'
-        }, [pageSaveBtn, pageRevertBtn, pageResetBtn, pageMsg]));
+        // cbi-page-actions is where LuCI puts Save/Revert on every config page,
+        // so the theme gives it the same right-aligned, sticky-footer treatment
+        // it gives the rest of the router's settings.
+        settingsPanel.appendChild(E('div', { class: 'cbi-page-actions' },
+            [pageMsg, pageSaveBtn, pageRevertBtn, pageResetBtn]));
 
         var settingsBtn = E('button', {
             class: 'cbi-button',
@@ -1995,8 +2040,15 @@ return view.extend({
             (wq || []).forEach(function(w) {
                 if (self.hiddenWanIfaces && self.hiddenWanIfaces.indexOf(w.iface) !== -1) return;
                 var up = parseFloat(w.uptime_pct);
-                if (w.status === 'down')
-                    out.push({ sev: 'crit', title: 'WAN down', detail: w.iface.toUpperCase() + ' has been down for ' + fmtDurationFull(w.since_change_s || 0) });
+                if (w.status === 'down') {
+                    // The cause, when the collector could work one out. How
+                    // long it has been down says only that something is wrong;
+                    // the reason is what decides whether you go and look at a
+                    // cable or wait for the ISP.
+                    var d = w.iface.toUpperCase() + ' has been down for ' + fmtDurationFull(w.since_change_s || 0);
+                    if (w.down_reason) d += ' — ' + w.down_reason;
+                    out.push({ sev: 'crit', title: 'WAN down', detail: d });
+                }
                 else if (up >= 0 && up < 99)
                     out.push({ sev: 'warn', title: 'WAN unstable', detail: w.iface.toUpperCase() + ' at ' + up.toFixed(2) + '% uptime over 24h' });
             });
@@ -2059,6 +2111,11 @@ return view.extend({
                 }
                 if (self.hiddenWanIfaces)
                     wans = wans.filter(function(w) { return self.hiddenWanIfaces.indexOf(w.iface) === -1; });
+                // The backend walks the collector's tracked list, which is in
+                // the order interfaces were first discovered -- so a router that
+                // brought wanb up before wan showed the cards that way round,
+                // and differently again after the next reboot.
+                wans = wans.slice().sort(function(a, b) { return byName(a.iface, b.iface); });
                 wanIpCard.style.display = wans.length ? 'flex' : 'none';
                 if (!wans.length) return;
                 var box = document.getElementById('hw-wanip');
@@ -2930,6 +2987,11 @@ return view.extend({
                         });
                     });
                     if (dskNode) {
+                        // By mount point. df reports in mount order, which is
+                        // the order the filesystems happened to be mounted in
+                        // this boot -- so /overlay and /tmp could swap places
+                        // between two routers running the same image.
+                        dskItems.sort(function(a, b) { return byName(a.k, b.k); });
                         if (!self._dskCache) self._dskCache = {};
                         syncRows(dskNode, self._dskCache, dskItems, function(r) { return r.k; }, function(r) {
                             var lblSpan = E('span', { style: 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' });
@@ -4424,7 +4486,11 @@ return view.extend({
             return new Promise(function(res) { setTimeout(res, 150); }).then(function() {
                 return callHwGetWanQuality();
             }).then(function(res) {
-                var wqAll = res && res.wan_quality;
+                // Sorted once here, so the uptime rows, the settings checkboxes
+                // and the alerts all agree on an order that does not depend on
+                // which interface netifd happened to bring up first.
+                var wqAll = (res && res.wan_quality) || null;
+                if (wqAll) wqAll = wqAll.slice().sort(function(a, b) { return byName(a.iface, b.iface); });
                 self.lastWq = wqAll || [];
                 renderAlerts();
                 var wanQBox = document.getElementById('hw-wanq-list');
@@ -4439,7 +4505,9 @@ return view.extend({
                 if (wanqChecks) {
                     syncRows(wanqChecks, self._wanIfaceCheckCache, wqAll, function(r) { return r.iface; }, function(r) {
                         var cb = E('input', { type: 'checkbox' });
-                        var lbl = E('label', { style: 'display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;' }, [cb, r.iface.toUpperCase()]);
+                        var lbl = E('label', { class: 'hw-tgt' }, [
+                            cb, E('span', { class: 'hw-tgt-name' }, r.iface.toUpperCase())
+                        ]);
                         return { el: lbl, cb: cb, iface: r.iface };
                     }, function(entry, r) {
                         var isDead = r.status === 'down' && (r.uptime_pct === 0 || r.uptime_pct === '0.00' || r.uptime_pct === 0.0);
