@@ -1204,8 +1204,21 @@ EOF
 						json_esc "$_wm_rcode"; _wm_rcodej=$JSV
 						json_esc "$_wm_reason"; _wm_reasonj=$JSV
 
+						# Throughput, already worked out by the collector from
+						# the kernel's byte counters -- two builtin reads here,
+						# no fork, on a method polled every second.
+						_wm_rxbps=0; _wm_txbps=0; _wm_rdev=""
+						if [ -f "$_wm_dir/$_wm_ifn.rate" ]; then
+							_wm_r1=""; _wm_r2=""; _wm_r3=""
+							read -r _wm_r1 _wm_r2 _wm_r3 _wm_rxbps _wm_txbps _wm_rdev < "$_wm_dir/$_wm_ifn.rate" 2>/dev/null
+						fi
+						case "$_wm_rxbps" in ''|*[!0-9]*) _wm_rxbps=0 ;; esac
+						case "$_wm_txbps" in ''|*[!0-9]*) _wm_txbps=0 ;; esac
+						case "$_wm_rdev" in -) _wm_rdev="" ;; esac
+						json_esc "$_wm_rdev"; _wm_rdevj=$JSV
+
 						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
-						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"history\":$_wm_hist_json}"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\",\"history\":$_wm_hist_json}"
 						_wm_first=0
 					done
 					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"

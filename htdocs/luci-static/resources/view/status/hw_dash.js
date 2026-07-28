@@ -1355,7 +1355,7 @@ return view.extend({
             });
         };
         settingsPanel.appendChild(cbiSection('Visible Cards',
-            'Cards unticked here are hidden from the dashboard and stop being polled.', cardChecks));
+            'Cards unticked here are hidden from the dashboard.', cardChecks));
         var wanIfaceSection = cbiSection('WAN Uptime Status Interfaces',
             'Which WAN interfaces the uptime, NAT type and alert cards report on.',
             E('div', { id: 'hw-wanq-checks', class: 'hw-check-grid' }));
@@ -4731,6 +4731,12 @@ return view.extend({
                     return self.hiddenWanIfaces.indexOf(r.iface) === -1;
                 });
                 if (!self._wanQCache) self._wanQCache = {};
+                // First row (the list is already sorted) owns its device's
+                // counters; any later row on the same device defers to it.
+                self._rateOwner = {};
+                wq.forEach(function(r) {
+                    if (r.rate_dev && !self._rateOwner[r.rate_dev]) self._rateOwner[r.rate_dev] = r.iface;
+                });
 
                 syncRows(wanQBox, self._wanQCache, wq, function(r) { return r.iface; }, function(r) {
                     var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
@@ -4789,6 +4795,14 @@ return view.extend({
                     var downtimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN 24H');
                     var downtimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [downtimeVal, downtimeLbl]);
 
+                    // What the link is actually carrying. The card had latency
+                    // and availability for each WAN but no idea whether any
+                    // traffic was moving over it, which is the first thing you
+                    // want when deciding which link a problem is on.
+                    var rateVal = E('span', { style: 'font-size: 0.82em; font-weight: 700; font-family: monospace; line-height: 1.25; white-space: nowrap;' });
+                    var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
+                    var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [rateVal, rateLbl]);
+
                     var histGraphEl = E('div', { style: 'width: 100%; height: 32px;' });
                     var histLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; text-align: center; display: block;' }, 'TREND');
                     var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; flex: 1 1 108px; min-width: 108px;' }, [histGraphEl, histLbl]);
@@ -4801,7 +4815,7 @@ return view.extend({
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
                             E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
-                            E('div', { style: 'display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 360px; flex: 1 1 280px;' }, [statusBlock, latBlock, uptimeBlock, downtimeBlock]),
+                            E('div', { style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock]),
                             histBlock
                         ]),
                         reasonEl
@@ -4819,6 +4833,7 @@ return view.extend({
                         lat: latVal,
                         uptime: uptimeVal,
                         downtime: downtimeVal,
+                        rate: rateVal,
                         histGraph: histGraphEl,
                         reason: reasonEl
                     };
@@ -4832,6 +4847,28 @@ return view.extend({
                     // card. Repeating it here costs nothing and saves reading
                     // "OFFLINE" on one card and going to another to find out
                     // whether that means a cable, a lease or the ISP.
+                    // Bytes per second from the kernel counters, shown the way
+                    // a link is normally described: down first, then up.
+                    //
+                    // A v4/v6 pair shares one device, so both rows would report
+                    // the same wire and a reader adding the column up would get
+                    // double the real traffic. The counter belongs to the
+                    // device, so it is shown once -- on whichever row comes
+                    // first -- and the sibling says who it is sharing with.
+                    var rxb = r.rx_bps || 0, txb = r.tx_bps || 0;
+                    var owner = r.rate_dev ? self._rateOwner[r.rate_dev] : null;
+                    entry.rate.style.whiteSpace = 'pre';
+                    if (owner && owner !== r.iface) {
+                        setText(entry.rate, 'shared\n' + owner.toUpperCase());
+                        entry.rate.title = 'This interface shares device ' + r.rate_dev +
+                            ' with ' + owner.toUpperCase() + '; the traffic is counted there.';
+                        entry.rate.style.opacity = '0.5';
+                    } else {
+                        setText(entry.rate, fmtSpeedDf(rxb) + '\n' + fmtSpeedDf(txb));
+                        entry.rate.title = r.rate_dev ? 'On ' + r.rate_dev : '';
+                        entry.rate.style.opacity = (rxb || txb) ? '1' : '0.45';
+                    }
+
                     var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
                     if (entry.reason.textContent !== rsn) setText(entry.reason, rsn);
                     entry.reason.style.display = rsn ? '' : 'none';

@@ -765,6 +765,62 @@ record_window_sample() {
 	printf '%d %d\n' "$_total" "$_success" > "$_summary_file"
 }
 
+# Announce a WAN going down or coming back, once per transition.
+#
+# The Alerts card only exists while a browser has the page open, so a link
+# that dies at 3am was diagnosed and then thrown away. syslog is where the
+# router already records things worth knowing, and it is what any existing
+# tooling -- logread, a log server, a notification script -- is already
+# watching. One fork per transition, not per tick: a link that stays down for
+# a day logs twice, when it leaves and when it returns.
+log_transition() {
+	_lt_ifn=$1; _lt_new=$2; _lt_reason=$3
+	command -v logger >/dev/null 2>&1 || return
+	if [ "$_lt_new" = "down" ]; then
+		logger -t hwdash -p daemon.warn \
+			"WAN $_lt_ifn is DOWN${_lt_reason:+ -- $_lt_reason}"
+	else
+		logger -t hwdash -p daemon.notice "WAN $_lt_ifn is UP"
+	fi
+}
+
+# Throughput for one WAN, from the kernel's own byte counters.
+#
+# Costs two builtin reads and no fork, which is why it lives here rather than
+# in the RPC: wan_quality is polled every second by every open dashboard, and
+# this way it stays a pure reader of what the collector already worked out.
+#
+# The counter is 64-bit on any kernel this runs on, but it still resets to
+# zero whenever the device is recreated -- which for pppoe-wan is every
+# reconnect, i.e. exactly when a link is interesting. A negative delta is
+# therefore normal, not corruption, and is treated as "start again from here"
+# rather than being clamped to a spike of several gigabits.
+sample_rate() {
+	_rt_ifn=$1; _rt_dev=$2
+	_rt_file="$RINGDIR/${_rt_ifn}.rate"
+	[ -n "$_rt_dev" ] || return
+	_rt_rx=""; _rt_tx=""
+	read -r _rt_rx < "/sys/class/net/$_rt_dev/statistics/rx_bytes" 2>/dev/null || return
+	read -r _rt_tx < "/sys/class/net/$_rt_dev/statistics/tx_bytes" 2>/dev/null || return
+	case "$_rt_rx$_rt_tx" in ''|*[!0-9]*) return ;; esac
+	_pr=0; _pt=0; _pw=0
+	[ -f "$_rt_file" ] && read -r _pr _pt _pw _ < "$_rt_file" 2>/dev/null
+	case "$_pr" in ''|*[!0-9]*) _pr=0 ;; esac
+	case "$_pt" in ''|*[!0-9]*) _pt=0 ;; esac
+	case "$_pw" in ''|*[!0-9]*) _pw=0 ;; esac
+	_rt_dt=$((_now - _pw))
+	_rt_rbps=0; _rt_tbps=0
+	if [ "$_pw" -gt 0 ] && [ "$_rt_dt" -gt 0 ] && \
+	   [ "$_rt_rx" -ge "$_pr" ] && [ "$_rt_tx" -ge "$_pt" ]; then
+		_rt_rbps=$(( (_rt_rx - _pr) / _rt_dt ))
+		_rt_tbps=$(( (_rt_tx - _pt) / _rt_dt ))
+	fi
+	# Device name last: two interfaces can share one device (a v4/v6 pair, an
+	# alias), and then this rate is the same wire counted twice. The reader
+	# needs to know that to avoid presenting it as two independent flows.
+	printf '%s %s %s %s %s %s\n' "$_rt_rx" "$_rt_tx" "$_now" "$_rt_rbps" "$_rt_tbps" "$_rt_dev" > "$_rt_file"
+}
+
 # One interface's full per-tick update: ping, roll the stats/history
 # rings, resolve ISP. Run backgrounded (one subshell per interface, see
 # the main loop below) so a single slow or timed-out link can't stall
@@ -834,6 +890,15 @@ process_iface() {
 		fi
 	fi
 	if [ "$_new_status" != "$_status" ]; then
+		# Only a real flip is worth a log line. The first probe after a
+		# collector restart moves every link from "unknown" to "up", which is
+		# not something that happened to the network -- it logged a full set of
+		# spurious UP lines on every package upgrade and every reboot, and
+		# netifd already records genuine interface events itself.
+		case "$_status" in
+			up|down) log_transition "$_ifn" "$_new_status" \
+				"the link is up on $_dev, but ${_tgt:-the probe target} is not answering" ;;
+		esac
 		_status="$_new_status"
 		_streak_start=$_now
 	fi
@@ -842,6 +907,7 @@ process_iface() {
 		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
 	append_history "$_ifn" "$_hist_val"
 	record_window_sample "$_ifn" "$_sample_up"
+	sample_rate "$_ifn" "$_dev"
 	# Down here means something different than in process_down_iface: netifd
 	# still has the interface up with a route, the probes are simply not
 	# coming back. No ubus call can add to that, and no rate limit is needed
@@ -990,6 +1056,7 @@ process_down_iface() {
 	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _lastgood_ms _consec_miss < "$_stats_file" 2>/dev/null
 	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
 	_total=$((_total + 1))
+	_was_status=$_status
 	if [ "$_status" != "down" ]; then
 		_status="down"
 		_streak_start=$_now
@@ -1001,6 +1068,9 @@ process_down_iface() {
 		"$_lastgood_ms" "$MISS_THRESHOLD" > "$_stats_file"
 	append_history "$_ifn" x
 	record_window_sample "$_ifn" 0
+	# Zero it explicitly: leaving the last rate in place showed traffic still
+	# flowing over a link that is down.
+	printf '0 0 %s 0 0 -\n' "$_now" > "$RINGDIR/${_ifn}.rate"
 	# Refresh the explanation on the transition and then only every
 	# REASON_INTERVAL, so a long outage does not cost a ubus fork per tick.
 	_reason_file="$RINGDIR/${_ifn}.reason"
@@ -1009,6 +1079,13 @@ process_down_iface() {
 	case "$_r_at" in ''|*[!0-9]*) _r_at=0 ;; esac
 	if [ -z "$_r_rest" ] || [ $((_now - _r_at)) -ge "$REASON_INTERVAL" ]; then
 		printf '%d %s\n' "$_now" "$(wan_down_reason "$_ifn")" > "$_reason_file"
+	fi
+	# Logged after the reason is known, so the one line in syslog carries the
+	# cause rather than just the fact.
+	if [ "$_was_status" = "up" ]; then
+		_lg_code=""; _lg_text=""
+		read -r _ _lg_code _lg_text < "$_reason_file" 2>/dev/null
+		log_transition "$_ifn" down "$_lg_text"
 	fi
 }
 
