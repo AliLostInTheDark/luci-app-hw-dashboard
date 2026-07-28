@@ -2175,7 +2175,13 @@ return view.extend({
             vti:       'VTI', vti6: 'VTI over IPv6',
             xfrm:      'XFRM', unet: 'unet'
         };
-        var protoLabel = function(p) { return PROTO_I18N[p] || p || ''; };
+        // hasOwnProperty, not a bare lookup: a protocol named "constructor" or
+        // "toString" would otherwise resolve to something off Object.prototype
+        // and render a function body into the card.
+        var protoLabel = function(p) {
+            if (p && Object.prototype.hasOwnProperty.call(PROTO_I18N, p)) return PROTO_I18N[p];
+            return p || '';
+        };
         var wanIpTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('wan_ips') !== -1) return Promise.resolve();

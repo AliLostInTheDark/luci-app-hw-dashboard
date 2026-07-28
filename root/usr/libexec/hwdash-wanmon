@@ -202,11 +202,22 @@ PERSIST_TRACKED="$PERSIST_DIR/tracked"
 	cat "$PERSIST_TRACKED" > "$RINGDIR/.tracked" 2>/dev/null
 
 discover_ifaces() {
+	_dump=$(ubus call network.interface dump 2>/dev/null)
+	# Bail BEFORE touching any state. Clearing first and then returning
+	# published an empty ACTIVE_IFACES while TRACKED_IFACES kept its contents,
+	# and the main loop reads exactly that pair as "every tracked WAN is now
+	# down": one transient ubus hiccup flipped every link to OFFLINE, reset its
+	# uptime streak, punched a gap in every sparkline, counted a failure
+	# against the 24h window and raised a WAN-down alert per interface.
+	#
+	# Keeping the previous view means probing carries on against the last
+	# known-good list until discovery next succeeds -- on the hotplug trigger,
+	# or at DISCOVER_INTERVAL, since the caller advances LAST_DISCOVER whether
+	# or not this returned early. Stale for a while beats wrong immediately.
+	[ -z "$_dump" ] && return
 	IFACE_LIST=""
 	_active=""
 	ACTIVE_IFACES=""
-	_dump=$(ubus call network.interface dump 2>/dev/null)
-	[ -z "$_dump" ] && return
 
 	_names=$(printf '%s' "$_dump" | jsonfilter -e '@.interface[*].interface' 2>/dev/null)
 	_idx=0
@@ -306,6 +317,33 @@ discover_ifaces() {
 		_case=" $TRACKED_IFACES "
 		case "$_case" in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
 	done
+	# An alias of a tracked WAN is a WAN, whether or not it currently holds a
+	# route of its own.
+	#
+	# Everything above can only ever learn about an interface that is working
+	# at the time it looks, because a default route is what identifies a WAN.
+	# So a v6 sibling that has lost its default route is not merely marked
+	# down -- it is never seen at all, and on a cold start it does not come
+	# back until the ISP does. Found live: wan6 on a 13-WAN router, uci
+	# section present and enabled, holding a global address, no route, and
+	# absent from the dashboard entirely rather than reported as down.
+	#
+	# uci device='@wan' is an exact statement that this interface rides that
+	# interface's link, so it needs no guessing about what looks WAN-ish. One
+	# sed per discovery, i.e. per five minutes.
+	_alias_pairs=$(printf '%s\n' "$_uci_net" | \
+		sed -n "s/^network\.\([^.]*\)\.device='@\(.*\)'\$/\1 \2/p" 2>/dev/null)
+	while read -r _a_child _a_parent; do
+		[ -z "$_a_child" ] && continue
+		[ -z "$_a_parent" ] && continue
+		# Only inherit from a parent we already decided is a WAN.
+		case " $TRACKED_IFACES " in *" $_a_parent "*) ;; *) continue ;; esac
+		case " $TRACKED_IFACES " in *" $_a_child "*) continue ;; esac
+		case "$_uci_net" in *"network.$_a_child.disabled='1'"*) continue ;; esac
+		TRACKED_IFACES="$TRACKED_IFACES $_a_child"
+	done <<EOF
+$_alias_pairs
+EOF
 	# Sorted, so every reader presents the same interfaces in the same order.
 	# Unsorted this file is in first-discovery order, which is whatever netifd
 	# happened to bring up first on this boot -- the NAT Type card inherited it
@@ -316,6 +354,11 @@ discover_ifaces() {
 	if ! cmp -s "$RINGDIR/.tracked" "$PERSIST_TRACKED" 2>/dev/null; then
 		mkdir -p "$PERSIST_DIR" 2>/dev/null
 		cat "$RINGDIR/.tracked" > "$PERSIST_TRACKED" 2>/dev/null
+		# Flush it. The overlay buffers writes, so an unsynced update can be
+		# lost to an unclean shutdown -- and a power cut is exactly the reboot
+		# after which you most want to know which WANs failed to come back.
+		# This runs only on a membership change, so it is not a per-cycle cost.
+		sync 2>/dev/null
 	fi
 }
 
