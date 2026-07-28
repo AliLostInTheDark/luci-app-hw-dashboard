@@ -4784,12 +4784,18 @@ return view.extend({
                     var histLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; text-align: center; display: block;' }, 'TREND');
                     var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; flex: 1 1 108px; min-width: 108px;' }, [histGraphEl, histLbl]);
 
+                    // Why it is down, on its own full-width line under the row.
+                    // The status column has room for "OFFLINE" and a duration
+                    // and nothing else, and the cause is a sentence -- so it
+                    // goes below rather than being truncated into a column.
+                    var reasonEl = E('div', { style: 'display: none; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); font-size: 0.78em; line-height: 1.4; word-break: break-word;' });
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
                             E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
                             E('div', { style: 'display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 360px; flex: 1 1 280px;' }, [statusBlock, latBlock, uptimeBlock, downtimeBlock]),
                             histBlock
-                        ])
+                        ]),
+                        reasonEl
                     ]);
 
                     return {
@@ -4804,7 +4810,8 @@ return view.extend({
                         lat: latVal,
                         uptime: uptimeVal,
                         downtime: downtimeVal,
-                        histGraph: histGraphEl
+                        histGraph: histGraphEl,
+                        reason: reasonEl
                     };
                 }, function(entry, r) {
                     var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
@@ -4812,6 +4819,14 @@ return view.extend({
                     entry.statusVal.style.color = statusColor;
                     entry.statusVal.textContent = r.status === 'up' ? 'ACTIVE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
                     entry.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
+                    // The collector works the cause out anyway, for the Alerts
+                    // card. Repeating it here costs nothing and saves reading
+                    // "OFFLINE" on one card and going to another to find out
+                    // whether that means a cable, a lease or the ISP.
+                    var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
+                    if (entry.reason.textContent !== rsn) setText(entry.reason, rsn);
+                    entry.reason.style.display = rsn ? '' : 'none';
+                    entry.reason.style.color = rsn ? statusColor : '';
 
                     var ib = ispBadge(r.isp);
                     setText(entry.ispName, ib.name);
