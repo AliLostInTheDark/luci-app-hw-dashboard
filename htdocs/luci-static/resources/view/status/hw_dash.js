@@ -1511,6 +1511,24 @@ return view.extend({
             _pageDark = dark;
             return _pageDark;
         };
+        // The cache above assumed a theme change reloads the page. It does when
+        // you pick a different theme, but not when the OS switches to dark at
+        // sunset: the bootstrap theme listens on the media query and flips
+        // data-darkmode on <html> in place. Everything the theme styles follows
+        // along, while anything holding this cached answer keeps painting the
+        // light palette on a now-dark page -- which for the WAN card means
+        // every address at about 1.4:1. Drop the cache on both signals; the
+        // cards repaint on their next poll a second or two later.
+        var _forgetPageDark = function() { _pageDark = null; };
+        if (window.matchMedia) {
+            var _dmq = window.matchMedia('(prefers-color-scheme: dark)');
+            if (_dmq.addEventListener) _dmq.addEventListener('change', _forgetPageDark);
+            else if (_dmq.addListener) _dmq.addListener(_forgetPageDark);
+        }
+        if (window.MutationObserver) {
+            new MutationObserver(_forgetPageDark).observe(document.documentElement,
+                { attributes: true, attributeFilter: ['data-darkmode'] });
+        }
         // Whether a logo needs a light backing tile is a property of the
         // artwork, not of the ISP, so measure it instead of keeping a
         // hand-maintained list -- that way a logo swapped in later, or one
@@ -2193,13 +2211,23 @@ return view.extend({
                     // fact is readable before the text is.
                     var CHIP = 'font-size: 0.68em; font-weight: 700; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap;';
                     var ifn = E('span', { style: 'font-weight: 700; font-size: 1.1em; font-family: monospace; letter-spacing: 0.6px;' });
-                    var parent = E('span', { style: 'font-size: 0.74em; font-weight: 700; font-family: monospace; letter-spacing: 0.4px;' });
+                    // Devices get chips of their own, and a tunnel protocol
+                    // gets two: the device it was configured on and the device
+                    // it built on top of that one, joined by an arrow so the
+                    // derivation is the thing you read. Previously the tunnel
+                    // device trailed the row as unstyled grey text, which made
+                    // PPPoE rows look like they were missing what the alias
+                    // rows showed.
+                    var DEVCHIP = CHIP + ' font-family: monospace;';
+                    var devPar = E('span', { style: DEVCHIP });
+                    var devArrow = E('span', { style: 'font-size: 0.8em; opacity: 0.6;' }, '→');
+                    var devL3 = E('span', { style: DEVCHIP });
+                    var devs = E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [devPar, devArrow, devL3]);
                     var proto = E('span', { style: CHIP });
                     var alias = E('span', { style: CHIP + ' text-transform: uppercase;' });
-                    var dev = E('span', { style: 'font-size: 0.72em; opacity: 0.5; font-family: monospace;' });
                     var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
                     var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
-                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, parent, proto, assign, alias, badge, dev]);
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
@@ -2208,8 +2236,8 @@ return view.extend({
                     var note = E('div', { style: 'font-size: 0.76em; opacity: 0.75; line-height: 1.4; word-break: break-word; margin-top: 3px;' });
                     return {
                         el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note]),
-                        ifn: ifn, parent: parent, proto: proto, alias: alias, dev: dev,
-                        badge: badge, assign: assign,
+                        ifn: ifn, devPar: devPar, devArrow: devArrow, devL3: devL3,
+                        proto: proto, alias: alias, badge: badge, assign: assign,
                         kv4: kv4, kvPub: kvPub, kv6: kv6, kvPfx: kvPfx, note: note
                     };
                 }, function(e, w) {
@@ -2217,16 +2245,31 @@ return view.extend({
                     var col = sevColor(cls.sev);
                     setText(e.ifn, w.iface.toUpperCase());
                     e.ifn.style.color = col;
-                    // The device the link is actually configured on, beside the
-                    // name of the interface that claims it. Two interfaces on
-                    // one device is the normal shape of a v4/v6 pair, and
-                    // without this the card gave no way to see which rows share
-                    // a wire -- so an outage that will take two rows down looks
-                    // no different from one that will take a single row down.
-                    var par = w.parent || '';
-                    setText(e.parent, par.toUpperCase());
-                    e.parent.style.color = sevColor('dev');
-                    e.parent.style.display = par ? '' : 'none';
+                    // The device the link is configured on, beside the name of
+                    // the interface that claims it. Two interfaces on one
+                    // device is the normal shape of a v4/v6 pair, and without
+                    // this the card gave no way to see which rows share a wire
+                    // -- so an outage that will take two rows down looked no
+                    // different from one that will take a single row down.
+                    //
+                    // PPPoE and the other tunnelling protocols build a second
+                    // device on top of the first (pppoe-wan over wan), and both
+                    // are worth naming: the lower one is the port to go and
+                    // look at, the upper one is what carries the address and
+                    // what every other tool on the router will call this link.
+                    var dcol = sevColor('dev');
+                    var par = w.parent || '', l3 = w.device || '';
+                    var chainL3 = !!(l3 && l3 !== par);
+                    var devChip = function(el, txt, show) {
+                        setText(el, (txt || '').toUpperCase());
+                        el.style.color = dcol;
+                        el.style.background = dcol + '22';
+                        el.style.border = '1px solid ' + dcol + '55';
+                        el.style.display = show ? '' : 'none';
+                    };
+                    devChip(e.devPar, par, !!par);
+                    devChip(e.devL3, l3, chainL3);
+                    e.devArrow.style.display = (par && chainL3) ? '' : 'none';
                     // Named the way LuCI's own Interfaces page names it, so
                     // "pppoe" reads as PPPoE and 464xlat as 464XLAT (CLAT)
                     // rather than as whatever string netifd happens to use
@@ -2248,8 +2291,6 @@ return view.extend({
                     e.alias.style.background = acol + '22';
                     e.alias.style.border = '1px solid ' + acol + '55';
                     e.alias.style.display = w.alias_of ? '' : 'none';
-                    // Only when it says something the parent line does not.
-                    setText(e.dev, (w.device && w.device !== w.parent) ? w.device : '');
                     setText(e.badge, cls.label);
                     e.badge.style.background = col + '22';
                     e.badge.style.color = col;
