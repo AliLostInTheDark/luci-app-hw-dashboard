@@ -969,8 +969,45 @@ return view.extend({
         var pingGraphWrapper = E('div', { style: 'width: 100%;' });
         var pingTableWrapper = E('div', { style: 'width: 100%;' });
         var pingGraphNode = E('div', { id: 'hw-ping', style: 'width: 100%;' }, [pingGraphWrapper, pingTableWrapper]);
+        // The graph is a view of this card's own data, not a card of its own --
+        // it has always lived inside this element. Exposing it as a second
+        // entry in Visible Cards implied the two were peers and produced one
+        // combination that could not work: hiding "Ping Latency" makes pingTick
+        // return early, so a "Ping Graph" left ticked simply froze. The control
+        // belongs on the card it affects.
+        // Same shape for both graph toggles: a compact control on the card
+        // whose view it changes, storing under the key its old Visible Cards
+        // checkbox used so an existing config needs no migration.
+        var makeGraphToggle = function(key) {
+            return E('button', {
+                type: 'button',
+                class: 'hw-tgt-x',
+                style: 'width: auto; padding: 1px 8px; font-size: 0.68em; font-weight: 700; letter-spacing: 0.4px; color: inherit; opacity: 0.6;',
+                click: function() {
+                    var i = self.hiddenCards.indexOf(key);
+                    if (i === -1) self.hiddenCards.push(key); else self.hiddenCards.splice(i, 1);
+                    applyCardVisibility();
+                    saveConfig();
+                }
+            });
+        };
+        var thermGraphToggle = makeGraphToggle('therm_graph');
+        var pingGraphToggle = E('button', {
+            type: 'button',
+            class: 'hw-tgt-x',
+            style: 'width: auto; padding: 1px 8px; font-size: 0.68em; font-weight: 700; letter-spacing: 0.4px; color: inherit; opacity: 0.6;',
+            click: function() {
+                var i = self.hiddenCards.indexOf('ping_graph');
+                if (i === -1) self.hiddenCards.push('ping_graph'); else self.hiddenCards.splice(i, 1);
+                applyCardVisibility();
+                saveConfig();
+            }
+        });
+        var pingHead = E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;' }, [
+            E('h3', { style: 'margin-bottom: 0;' }, 'Ping Latency'), pingGraphToggle
+        ]);
         var pingCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
-            E('h3', {}, 'Ping Latency'),
+            E('div', { style: 'width: 100%; margin-bottom: 20px;' }, [pingHead]),
             pingGraphNode,
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
@@ -1277,14 +1314,12 @@ return view.extend({
             ports: { nodes: [ethCard], label: 'Ports Topology', show: null },
             pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
-            ping_graph: { nodes: [pingGraphWrapper], label: 'Ping Graph', show: 'block' },
             wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             wifi_clients: { nodes: [wifiStaCard], label: 'Wi-Fi Clients', show: null },
             alerts: { nodes: [alertsCard], label: 'Alerts', show: null },
             wan_ips: { nodes: [wanIpCard], label: 'NAT Type', show: null },
-            thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' },
-            therm_graph: { nodes: [thermGraphNode], label: 'Thermal Graph', show: 'block' }
+            thermal: { nodes: [thermWrapper], label: 'Thermal Sensors', show: 'contents' }
         };
         var applyCardVisibility = function() {
             for (var key in cardRegistry) {
@@ -1295,6 +1330,18 @@ return view.extend({
                     else if (c.show) n.style.display = c.show;
                 });
             }
+            // In-card view toggles. These keep their old hiddenCards keys so a
+            // saved config carries over untouched -- only the control moved,
+            // from the Visible Cards list onto the card it belongs to.
+            var graphOff = self.hiddenCards.indexOf('ping_graph') !== -1;
+            pingGraphWrapper.style.display = graphOff ? 'none' : 'block';
+            // textContent, not setText: applyCardVisibility runs once at load
+            // from a point above setText's definition, and a var-hoisted
+            // function expression is still undefined there.
+            pingGraphToggle.textContent = graphOff ? 'SHOW GRAPH' : 'HIDE GRAPH';
+            var tOff = self.hiddenCards.indexOf('therm_graph') !== -1;
+            thermGraphNode.style.display = tOff ? 'none' : 'block';
+            thermGraphToggle.textContent = tOff ? 'SHOW GRAPH' : 'HIDE GRAPH';
         };
         // LuCI's own CBI markup rather than a hand-rolled panel. cbi-map,
         // cbi-section and cbi-value are what every other settings page on the
@@ -3894,7 +3941,12 @@ return view.extend({
                             if (list.lastChild) list.lastChild.style.borderBottom = 'none';
                             rowEl.appendChild(E('div', { class: colCls }, [list]));
                         });
-                        var cardKids = [E('h3', {}, 'Thermal Sensors')];
+                        var cardKids = [E('div', { style: 'width: 100%; margin-bottom: 20px;' }, [
+                            E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;' }, [
+                                E('h3', { style: 'margin-bottom: 0;' }, 'Thermal Sensors'),
+                                tGraph ? thermGraphToggle : E('span')
+                            ])
+                        ])];
                         if (tGraph) {
                             thermGraphNode.innerHTML = '';
                             thermGraphNode.appendChild(tGraph);
