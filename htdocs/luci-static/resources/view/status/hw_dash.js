@@ -102,7 +102,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; }  }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; }  }  .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; }  }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  #hw-wanip .hw-kv-k { opacity: 0.9; font-weight: 700; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; }  }  .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -2100,15 +2100,54 @@ return view.extend({
             return pageIsDark() ? s.dark : s.light;
         };
         var WAN_CLASS = {
-            public:    { label: 'Public IPv4',       sev: 'good', note: 'Reachable from the internet; port forwarding works.' },
-            cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding will not work.' },
-            natted:    { label: 'Behind upstream NAT', sev: 'warn', note: 'The address on this link is not the address the internet sees.' },
-            private:   { label: 'Private address',   sev: 'warn', note: 'RFC1918 address, so something upstream is doing the NAT.' },
-            v6only:    { label: 'IPv6-only',         sev: 'info', note: 'No IPv4 on this interface.' },
-            linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No address was obtained -- DHCP or the link itself has failed.' },
+            public:    { label: 'Public IPv4',       sev: 'good', note: 'Directly reachable from the internet. Inbound connections and port forwarding operate normally.' },
+            cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding are not available on this link.' },
+            natted:    { label: 'Behind upstream NAT', sev: 'warn', note: 'The interface address differs from the observed egress address, so an upstream device is translating this link.' },
+            private:   { label: 'Private address',   sev: 'warn', note: 'Private address (RFC 1918). Address translation is performed by an upstream device.' },
+            // No note: the badge already says IPv6-only, and "No IPv4 on this
+            // interface" only restated it in longer form.
+            v6only:    { label: 'IPv6-only',         sev: 'info', note: '' },
+            linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No routable address was obtained. Address configuration or the link itself has failed.' },
             none:      { label: 'No address',        sev: 'bad',  note: '' },
             unknown:   { label: 'Unknown',           sev: 'mute', note: '' }
         };
+        // The protocol names LuCI itself shows, taken from the getI18n() of the
+        // protocol handlers it ships (luci-static/resources/protocol/*.js), so
+        // this card and the Interfaces page never disagree about what to call
+        // the same link. LuCI falls back to the raw protocol name for a handler
+        // it has no class for, and so does this.
+        var PROTO_I18N = {
+            '464xlat': '464XLAT (CLAT)',
+            '6in4':    'IPv6-in-IPv4 (RFC4213)',
+            '6rd':     'IPv6-over-IPv4 (6rd)',
+            '6to4':    'IPv6-over-IPv4 (6to4)',
+            dhcp:      'DHCP client',
+            dhcpv6:    'DHCPv6 client',
+            dslite:    'Dual-Stack Lite (RFC6333)',
+            ipip6:     'IPv4 over IPv6 (RFC2473-IPIPv6)',
+            l2tp:      'L2TP',
+            map:       'MAP / LW4over6',
+            none:      'Unmanaged',
+            ppp:       'PPP',
+            pppoa:     'PPPoATM',
+            pppoe:     'PPPoE',
+            pptp:      'PPtP',
+            'static':  'Static address',
+            // Not shipped as protocol/*.js on these boards, but netifd will
+            // report them wherever the package is installed.
+            wwan:      'WWAN',
+            qmi:       'QMI Cellular',
+            ncm:       'NCM',
+            mbim:      'MBIM',
+            modemmanager: 'ModemManager',
+            wireguard: 'WireGuard VPN',
+            relay:     'Relay bridge',
+            gre:       'GRE', gretap: 'GRETAP', grev6: 'GRE over IPv6', grev6tap: 'GRETAP over IPv6',
+            vxlan:     'VXLAN', vxlan6: 'VXLAN over IPv6',
+            vti:       'VTI', vti6: 'VTI over IPv6',
+            xfrm:      'XFRM', unet: 'unet'
+        };
+        var protoLabel = function(p) { return PROTO_I18N[p] || p || ''; };
         var wanIpTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('wan_ips') !== -1) return Promise.resolve();
@@ -2139,51 +2178,54 @@ return view.extend({
                 if (!box) return;
                 if (!self._wanIpCache) self._wanIpCache = {};
                 syncRows(box, self._wanIpCache, wans, function(w) { return w.iface; }, function() {
-                    var ifn = E('span', { style: 'font-weight: 700; font-size: 1.05em; font-family: monospace; letter-spacing: 0.5px;' });
-                    var proto = E('span', { style: 'font-size: 0.72em; opacity: 0.55; font-family: monospace;' });
+                    // Chips carry weight, not hue. Colour is reserved for the
+                    // addresses, so the identity of a link (its name, how it is
+                    // configured) never competes with the verdict about it.
+                    var CHIP = 'font-size: 0.68em; font-weight: 700; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; background: rgba(128,128,128,0.18);';
+                    var ifn = E('span', { style: 'font-weight: 700; font-size: 1.1em; font-family: monospace; letter-spacing: 0.6px;' });
+                    var proto = E('span', { style: CHIP });
+                    var dev = E('span', { style: 'font-size: 0.72em; opacity: 0.5; font-family: monospace;' });
                     var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
-                    var assign = E('span', { style: 'font-size: 0.66em; font-weight: 600; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 10px; background: rgba(128,128,128,0.16); white-space: nowrap;' });
-                    var head = E('div', { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' }, [ifn, proto, badge, assign]);
+                    var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, proto, assign, badge, dev]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
                     var kv4 = kvRow('IPv4'), kvPub = kvRow('Seen as');
                     var kv6 = kvRow('IPv6'), kvPfx = kvRow('Delegated');
-                    var note = E('div', { style: 'font-size: 0.74em; opacity: 0.8; word-break: break-word; margin-top: 3px;' });
+                    var note = E('div', { style: 'font-size: 0.76em; opacity: 0.75; line-height: 1.4; word-break: break-word; margin-top: 3px;' });
                     return {
                         el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note]),
-                        ifn: ifn, proto: proto, badge: badge, assign: assign,
+                        ifn: ifn, proto: proto, dev: dev, badge: badge, assign: assign,
                         kv4: kv4, kvPub: kvPub, kv6: kv6, kvPfx: kvPfx, note: note
                     };
                 }, function(e, w) {
                     var cls = WAN_CLASS[w.class] || WAN_CLASS.unknown;
                     var col = sevColor(cls.sev);
                     setText(e.ifn, w.iface.toUpperCase());
-                    // The verdict, carried by the row itself rather than only by
-                    // the badge. Scanning the left edge answers the question the
-                    // card exists for -- a column of green means every link is
-                    // reachable from outside, and one amber edge picks out the
-                    // one that is not, without reading a single address.
-                    e.ifn.style.color = col;
-                    e.el.style.borderLeftWidth = '3px';
-                    e.el.style.borderLeftColor = col;
-                    e.el.style.background = col + '14';
-                    setText(e.proto, w.proto + (w.device ? ' • ' + w.device : ''));
+                    // Named the way LuCI's own Interfaces page names it, so
+                    // "pppoe" reads as PPPoE and 464xlat as 464XLAT (CLAT)
+                    // rather than as whatever string netifd happens to use
+                    // internally.
+                    setText(e.proto, protoLabel(w.proto));
+                    e.proto.style.display = w.proto ? '' : 'none';
+                    setText(e.dev, w.device || '');
                     setText(e.badge, cls.label);
                     e.badge.style.background = col + '22';
                     e.badge.style.color = col;
                     e.badge.style.border = '1px solid ' + col + '66';
-                    // Say "public" only when the address actually is one. The
-                    // wording is more useful than a bare "static"/"dynamic" --
-                    // what people want to know is whether they can be reached
-                    // and whether the address will move -- but on a link behind
-                    // carrier NAT calling it a public IP would simply be wrong,
-                    // so publicness stays conditional on the classification.
-                    var isPub = (w.class === 'public');
-                    var alabel = '';
-                    if (w.assign === 'static') alabel = isPub ? 'Static public IP' : 'Static IP';
-                    else if (w.assign === 'dynamic') alabel = isPub ? 'Dynamic public IP' : 'Dynamic IP';
+                    // Whether the address moves, next to the protocol that
+                    // decides it. It no longer needs to say "public" too -- the
+                    // badge beside it already states reachability, and saying it
+                    // twice was the only reason this label had four variants.
+                    //
+                    // Dropped entirely when the protocol name already contains
+                    // the word: proto static renders as "Static address", and a
+                    // STATIC chip beside it is the same fact twice.
+                    var alabel = (w.assign === 'static' || w.assign === 'dynamic') ? w.assign : '';
+                    if (alabel && protoLabel(w.proto).toLowerCase().indexOf(alabel) !== -1) alabel = '';
                     setText(e.assign, alabel);
+                    e.assign.style.display = alabel ? '' : 'none';
                     // Each address is coloured by what it means, not uniformly:
                     // the whole point of the card is that two addresses on the
                     // same row can disagree, and a wall of identical monospace
@@ -2224,7 +2266,6 @@ return view.extend({
                     var n = cls.note;
                     if (w.class === 'public' && !w.pub4) n = 'Checking the egress address… this can still turn out to be NATed.';
                     setText(e.note, n);
-                    e.note.style.color = col;
                     e.note.style.display = n ? '' : 'none';
                 });
             }).catch(function() { self.wanIpBusy = false; });
