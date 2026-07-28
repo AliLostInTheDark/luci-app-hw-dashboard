@@ -4695,31 +4695,34 @@ return view.extend({
                         ]);
                         return { el: lbl, cb: cb, iface: r.iface };
                     }, function(entry, r) {
-                        var isDead = r.status === 'down' && (r.uptime_pct === 0 || r.uptime_pct === '0.00' || r.uptime_pct === 0.0);
-                        var isExplicitlyShown = self.hiddenWanIfaces.indexOf('!' + r.iface) !== -1;
-                        var isExplicitlyHidden = self.hiddenWanIfaces.indexOf(r.iface) !== -1;
-                        entry.cb.checked = isExplicitlyShown || (!isExplicitlyHidden && !isDead);
+                        entry.cb.checked = self.hiddenWanIfaces.indexOf(r.iface) === -1;
                         entry.cb.onchange = function(ev) {
                             var idxHide = self.hiddenWanIfaces.indexOf(r.iface);
                             var idxShow = self.hiddenWanIfaces.indexOf('!' + r.iface);
                             if (idxHide !== -1) self.hiddenWanIfaces.splice(idxHide, 1);
+                            // Legacy "!iface" force-show entries were only
+                            // meaningful alongside the auto-hide below; drop
+                            // them as they are encountered rather than leaving
+                            // dead weight in the saved config.
                             if (idxShow !== -1) self.hiddenWanIfaces.splice(idxShow, 1);
-                            if (ev.target.checked) {
-                                if (isDead) self.hiddenWanIfaces.push('!' + r.iface);
-                            } else {
-                                self.hiddenWanIfaces.push(r.iface);
-                            }
+                            if (!ev.target.checked) self.hiddenWanIfaces.push(r.iface);
                             markDirty();
                         };
                     });
                 }
+                // Only what the user has explicitly unticked is hidden.
+                //
+                // There used to be an auto-hide for anything down at 0% over
+                // 24h, to keep leftover interfaces off the card. Two things
+                // have since made it wrong. Pruning now removes interfaces
+                // deleted or disabled in uci, which is the clutter it was
+                // invented for; and everything still on the tracked list got
+                // there by holding a default route at some point, so it is a
+                // real WAN by construction. What was left was a rule that hid
+                // a genuine WAN precisely when it had been down longest --
+                // the worst news the card has, quietly suppressed.
                 var wq = wqAll.filter(function(r) {
-                    var isDead = r.status === 'down' && (r.uptime_pct === 0 || r.uptime_pct === '0.00' || r.uptime_pct === 0.0);
-                    var isExplicitlyShown = self.hiddenWanIfaces.indexOf('!' + r.iface) !== -1;
-                    var isExplicitlyHidden = self.hiddenWanIfaces.indexOf(r.iface) !== -1;
-                    if (isExplicitlyHidden) return false;
-                    if (isDead && !isExplicitlyShown) return false;
-                    return true;
+                    return self.hiddenWanIfaces.indexOf(r.iface) === -1;
                 });
                 if (!self._wanQCache) self._wanQCache = {};
 

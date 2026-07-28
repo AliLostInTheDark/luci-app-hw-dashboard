@@ -1,8 +1,14 @@
 #!/bin/sh
 # Background WAN-quality collector for luci-app-hw-dashboard.
 # Runs continuously in RAM (/tmp, tmpfs) to track per-WAN latency/
-# uptime statistics since the collector last (re)started -- nothing
-# it writes ever touches flash.
+# uptime statistics since the collector last (re)started -- none of
+# that measurement data ever touches flash.
+#
+# One exception, and only one: the list of which interfaces are WANs
+# (PERSIST_TRACKED below). It is written when that set changes and at
+# no other time, because discovery cannot rediscover a link that is
+# down, so without it a WAN that is offline across a reboot vanishes
+# from the dashboard instead of reporting the outage.
 #
 # On an mwan3-managed router with more than one live WAN, a plain
 # ping/curl bound to a non-default WAN's device or source IP silently
@@ -176,6 +182,25 @@ LAST_DISCOVER=0
 
 mkdir -p "$RINGDIR"
 
+# Which WANs exist survives a cold start; how they have been performing does
+# not. Discovery can only find an interface that currently holds a default
+# route, so on a fresh /tmp a WAN that is down at that moment is invisible --
+# it never enters the tracked list and the card silently loses the one link
+# that actually needs looking at. That is a cold start on every reboot, and on
+# every package upgrade too, since postinst clears /tmp/hwdash*.
+#
+# So the membership list, and only the membership list, is kept out of tmpfs.
+# It is rewritten solely when the set of interfaces changes -- adding or
+# removing a WAN, which is a human editing the config -- never on a discovery
+# cycle and never on a tick, so the flash cost is nil in normal running. Every
+# seeded name is still put through the uci check in discover_ifaces below, so
+# an interface deleted while the router was off is dropped on the first pass
+# rather than resurrected.
+PERSIST_DIR=/etc/hwdash
+PERSIST_TRACKED="$PERSIST_DIR/tracked"
+[ ! -f "$RINGDIR/.tracked" ] && [ -f "$PERSIST_TRACKED" ] && \
+	cat "$PERSIST_TRACKED" > "$RINGDIR/.tracked" 2>/dev/null
+
 discover_ifaces() {
 	IFACE_LIST=""
 	_active=""
@@ -286,6 +311,12 @@ discover_ifaces() {
 	# happened to bring up first on this boot -- the NAT Type card inherited it
 	# directly and put wanb above wan on a router where wanb won the race.
 	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' | sort > "$RINGDIR/.tracked"
+	# Mirror to flash only when the set actually changed. cmp first, so a
+	# router whose WANs are stable writes nothing here for its whole uptime.
+	if ! cmp -s "$RINGDIR/.tracked" "$PERSIST_TRACKED" 2>/dev/null; then
+		mkdir -p "$PERSIST_DIR" 2>/dev/null
+		cat "$RINGDIR/.tracked" > "$PERSIST_TRACKED" 2>/dev/null
+	fi
 }
 
 # Run one command with a hard wall-clock cap of its own.
