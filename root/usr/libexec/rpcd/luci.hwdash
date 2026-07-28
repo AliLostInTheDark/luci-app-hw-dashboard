@@ -396,16 +396,35 @@ case "$1" in
 				# connections.
 				_wi_ifaces=""
 				[ -f "$WI_DIR/.tracked" ] && _wi_ifaces=$(tr '\n' ' ' < "$WI_DIR/.tracked" 2>/dev/null)
+				# One uci snapshot for the whole call, not a lookup per
+				# interface. It is needed because netifd resolves an alias away
+				# before status reports it: wan6 configured as device '@wan'
+				# comes back with device 'pppoe-wan', identical to a plain
+				# interface sitting on that device, so the "@" only survives in
+				# uci and nowhere else.
+				_wi_uci=$(uci -q show network 2>/dev/null)
 				for _wif in $_wi_ifaces; do
 					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
 					[ -z "$_wst" ] && continue
 					# Only interfaces that actually carry a default route are
 					# WANs; without this every bridge and VLAN shows up.
-					_wup=""; _wproto=""; _wdev=""; _wv4=""; _wm4=""; _wv6=""
+					_wup=""; _wproto=""; _wdev=""; _wpar=""; _wv4=""; _wm4=""; _wv6=""
 					eval "$(printf '%s' "$_wst" | jsonfilter \
 						-e '_wup=@.up' -e '_wproto=@.proto' -e '_wdev=@.l3_device' \
+						-e '_wpar=@.device' \
 						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' \
 						-e '_wv6=@["ipv6-address"][0].address' 2>/dev/null)" 2>/dev/null
+					# Alias detection. uci device='@wan' means this interface is
+					# a second protocol riding the same link rather than a link
+					# of its own -- which is why a v6 sibling shows the same
+					# egress and the same outage as its parent.
+					_walias=""
+					case "$_wi_uci" in
+						*"network.$_wif.device='@"*)
+							_walias=${_wi_uci#*network.$_wif.device=\'@}
+							_walias=${_walias%%\'*}
+							;;
+					esac
 					[ -z "$_wv4" ] && [ -z "$_wv6" ] && continue
 					# A delegated prefix means a routed /56 or /64, worth showing.
 					_wpfx=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][0].address' 2>/dev/null)
@@ -448,7 +467,9 @@ case "$1" in
 
 					json_esc "$_wproto"; _wprotoj=$JSV
 					[ $WI_FIRST -eq 0 ] && WI_ITEMS="$WI_ITEMS,"
-					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\"}"
+					json_esc "$_wpar"; _wparj=$JSV
+					json_esc "$_walias"; _waliasj=$JSV
+					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\"}"
 					WI_FIRST=0
 				done
 				echo "{\"wans\":[$WI_ITEMS]}"
