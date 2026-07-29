@@ -2436,11 +2436,7 @@ EOF
 							( _ethtool_refresh ) >/dev/null 2>&1 &
 						fi
 					else
-						ETHTOOL_JSON="{}"
-						if ! _cache_read /tmp/hwdash_ethtool.cache.lock; then
-							_cache_write /tmp/hwdash_ethtool.cache.lock 60 refreshing
-							( _ethtool_refresh ) >/dev/null 2>&1 &
-						fi
+						_ethtool_refresh
 					fi
 				fi
 				[ -z "$ETHTOOL_JSON" ] && ETHTOOL_JSON="{}"
@@ -3330,7 +3326,13 @@ EOF_DMESG
 				# postinst clears /etc/hwdash/ on upgrade so stale data never persists.
 				SYS_STATIC_CACHE="$HWDASH_PERSIST_DIR/sys_static_v2.frag"
 				SYS_STATIC_FRAG=""
-				[ -f "$SYS_STATIC_CACHE" ] && SYS_STATIC_FRAG=$(cat "$SYS_STATIC_CACHE" 2>/dev/null)
+				if [ -f "$SYS_STATIC_CACHE" ]; then
+					SYS_STATIC_FRAG=$(cat "$SYS_STATIC_CACHE" 2>/dev/null)
+					if command -v lscpu >/dev/null 2>&1 && case "$SYS_STATIC_FRAG" in *'"lscpu":0'*|*'"lscpu": 0'*) true ;; *) false ;; esac; then
+						SYS_STATIC_FRAG=""
+						rm -f "$SYS_STATIC_CACHE" 2>/dev/null
+					fi
+				fi
 				if [ -z "$SYS_STATIC_FRAG" ]; then
 					SYS_KVER=$(uname -r 2>/dev/null || echo "")
 					SYS_ARCH=$(uname -m 2>/dev/null || echo "")

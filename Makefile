@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-hw-dashboard
 LUCI_TITLE:=Hardware Dashboard
-LUCI_DEPENDS:=+luci-base +ethtool-full +curl
+LUCI_DEPENDS:=+luci-base +curl
 LUCI_PKGARCH:=all
 PKG_VERSION:=1.2.5
 PKG_RELEASE:=1
