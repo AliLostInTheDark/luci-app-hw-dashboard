@@ -294,7 +294,7 @@ case "$1" in
 				IFS= read -r _IN 2>/dev/null
 				_CFG=""
 				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					_CFG=$(printf '%s' "$_IN" | head -c 16384 | jsonfilter -e '@.config' 2>/dev/null)
+					_CFG=$(printf '%s' "$_IN" | head -c 16384 | jsonfilter -e '@.params[0]' -e '@.config' 2>/dev/null)
 				fi
 				if [ -n "$_CFG" ]; then
 					uci -q set hwdash.main=settings

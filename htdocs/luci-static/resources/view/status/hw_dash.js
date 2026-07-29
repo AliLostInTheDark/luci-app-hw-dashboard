@@ -2340,7 +2340,7 @@ return view.extend({
                         el.style.display = show ? '' : 'none';
                     };
                     if (w.alias_of) {
-                        devChip(e.devPar, 'ALIAS OF ' + w.alias_of.toUpperCase(), true, acol);
+                        devChip(e.devPar, 'ALIAS OF ' + w.alias_of.toUpperCase(), true, dcol);
                         devChip(e.devL3, l3, !!l3, dcol);
                         e.devArrow.style.display = l3 ? '' : 'none';
                     } else {
