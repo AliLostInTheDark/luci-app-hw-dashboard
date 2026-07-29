@@ -2185,21 +2185,21 @@ return view.extend({
             return pageIsDark() ? s.dark : s.light;
         };
         var WAN_CLASS = {
-            public:    { label: 'Public IPv4',       sev: 'good', note: 'Directly reachable from the internet. Inbound connections and port forwarding operate normally.' },
-            cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding are not available on this link.' },
-            natted:    { label: 'Translated Public Address', sev: 'warn', note: 'The interface address differs from the observed egress address, so an upstream device is translating this link.' },
-            private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private Address (RFC 1918). Address translation is performed by an upstream device.' },
-            loopback:  { label: 'Localhost (Loopback)', sev: 'mute', note: 'Loopback Address (RFC 1122). Routes traffic back to the router itself.' },
-            thisnet:   { label: 'Current Network',   sev: 'mute', note: 'This host on this network (RFC 1122). Often used for broadcasts or DHCP discovery.' },
-            protocol:  { label: 'Protocol Assignment', sev: 'warn', note: 'IETF Protocol Assignments (RFC 6890). Often used for DS-Lite tunnels.' },
-            benchmark: { label: 'ISP Private Routing', sev: 'warn', note: 'Benchmarking (RFC 2544). Officially for testing, but often used by ISPs for private internal routing.' },
-            testnet:   { label: 'TEST-NET (Doc Only)', sev: 'mute', note: 'TEST-NET (RFC 5737). Reserved exclusively for documentation and example code.' },
-            multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address (RFC 1112). Used for IPTV streams or routing protocols.' },
-            reserved:  { label: 'Reserved Address',  sev: 'bad',  note: 'Reserved Address (RFC 1112). Not intended for public routing.' },
-            v6only:    { label: 'Public IPv6',       sev: 'good', note: 'Globally routable IPv6 address (RFC 4291). Directly reachable from the internet.' },
-            linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No routable address was obtained. Address configuration or the link itself has failed.' },
-            none:      { label: 'No address',        sev: 'bad',  note: '' },
-            unknown:   { label: 'Unknown',           sev: 'mute', note: '' }
+            public:    { label: 'Public IPv4',       sev: 'good', note: 'Publicly routable IPv4 address space. Direct ingress reachability is available; inbound connections and port forwarding operate without hindrance.' },
+            cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-Grade Network Address Translation (RFC 6598). Ingress traffic is restricted by the service provider; port forwarding and unsolicited inbound connections are unsupported.' },
+            natted:    { label: 'Translated Public Address', sev: 'warn', note: 'The assigned interface address deviates from the observed Internet egress address, indicating active translation by an upstream routing device.' },
+            private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private Address Space (RFC 1918). Non-routable on the public Internet; Network Address Translation (NAT) is actively performed by an upstream gateway.' },
+            loopback:  { label: 'Localhost (Loopback)', sev: 'mute', note: 'Loopback Address Space (RFC 1122). A virtual interface utilized for routing traffic strictly back to the local host system.' },
+            thisnet:   { label: 'Current Network',   sev: 'mute', note: '"This Network" Address Space (RFC 1122). Exclusively utilized for local broadcast communications or during initial dynamic address assignment (DHCP discovery).' },
+            protocol:  { label: 'Protocol Assignment', sev: 'warn', note: 'IETF Protocol Assignments (RFC 6890). Designated for specialized networking protocols, frequently deployed for Dual-Stack Lite (DS-Lite) IPv4-in-IPv6 tunneling.' },
+            benchmark: { label: 'ISP Private Routing', sev: 'warn', note: 'Benchmarking Address Space (RFC 2544). Officially reserved for network performance testing, yet frequently repurposed by service providers for internal private routing.' },
+            testnet:   { label: 'TEST-NET (Doc Only)', sev: 'mute', note: 'TEST-NET Documentation Address Space (RFC 5737). Strictly reserved for utilization within technical documentation and example configurations.' },
+            multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address Space (RFC 1112). Reserved for one-to-many communication flows, predominantly utilized by routing protocols and IPTV distributions.' },
+            reserved:  { label: 'Reserved Address',  sev: 'bad',  note: 'Reserved Address Space (RFC 1112). Explicitly restricted from deployment within active public routing tables.' },
+            v6only:    { label: 'Public IPv6',       sev: 'good', note: 'Globally Routable IPv6 Address Space (RFC 4291). Provides direct, end-to-end Internet reachability without intermediary address translation.' },
+            linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'Link-Local Address Space (RFC 3927). Valid exclusively for communication within the local network segment; signifies the absence of a globally routable prefix.' },
+            none:      { label: 'No address',        sev: 'bad',  note: 'No IP address is currently assigned to this logical interface.' },
+            unknown:   { label: 'Unknown',           sev: 'mute', note: 'The classification of this network address cannot be definitively determined.' }
         };
         // The protocol names LuCI itself shows, taken from the getI18n() of the
         // protocol handlers it ships (luci-static/resources/protocol/*.js), so
