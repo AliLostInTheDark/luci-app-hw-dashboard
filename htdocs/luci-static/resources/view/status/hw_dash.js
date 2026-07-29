@@ -2191,7 +2191,7 @@ return view.extend({
             private:   { label: 'Private address',   sev: 'warn', note: 'Private address (RFC 1918). Address translation is performed by an upstream device.' },
             // No note: the badge already says IPv6-only, and "No IPv4 on this
             // interface" only restated it in longer form.
-            v6only:    { label: 'IPv6-only',         sev: 'info', note: '' },
+            v6only:    { label: 'Public IPv6',       sev: 'good', note: '' },
             linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No routable address was obtained. Address configuration or the link itself has failed.' },
             none:      { label: 'No address',        sev: 'bad',  note: '' },
             unknown:   { label: 'Unknown',           sev: 'mute', note: '' }
@@ -2320,40 +2320,41 @@ return view.extend({
                     // are worth naming: the lower one is the port to go and
                     // look at, the upper one is what carries the address and
                     // what every other tool on the router will call this link.
+                    var fmtChipText = function(txt) {
+                        if (!txt) return '';
+                        var s = String(txt).toUpperCase();
+                        return s.replace(/PPPOE/g, 'PPPoE')
+                                .replace(/PPPOA/g, 'PPPoA')
+                                .replace(/PPPOTM/g, 'PPPoATM');
+                    };
                     var dcol = sevColor('dev');
+                    var acol = sevColor('alias');
                     var par = w.parent || '', l3 = w.device || '';
                     var chainL3 = !!(l3 && l3 !== par);
-                    var devChip = function(el, txt, show) {
-                        setText(el, (txt || '').toUpperCase());
-                        el.style.color = dcol;
-                        el.style.background = dcol + '22';
-                        el.style.border = '1px solid ' + dcol + '55';
+                    var devChip = function(el, txt, show, color) {
+                        var c = color || dcol;
+                        setText(el, fmtChipText(txt));
+                        el.style.color = c;
+                        el.style.background = c + '22';
+                        el.style.border = '1px solid ' + c + '55';
                         el.style.display = show ? '' : 'none';
                     };
-                    devChip(e.devPar, par, !!par);
-                    devChip(e.devL3, l3, chainL3);
-                    e.devArrow.style.display = (par && chainL3) ? '' : 'none';
-                    // Named the way LuCI's own Interfaces page names it, so
-                    // "pppoe" reads as PPPoE and 464xlat as 464XLAT (CLAT)
-                    // rather than as whatever string netifd happens to use
-                    // internally.
+                    if (w.alias_of) {
+                        devChip(e.devPar, 'ALIAS OF ' + w.alias_of.toUpperCase(), true, acol);
+                        devChip(e.devL3, l3, !!l3, dcol);
+                        e.devArrow.style.display = l3 ? '' : 'none';
+                    } else {
+                        devChip(e.devPar, par, !!par, dcol);
+                        devChip(e.devL3, l3, chainL3, dcol);
+                        e.devArrow.style.display = (par && chainL3) ? '' : 'none';
+                    }
                     var pcol = sevColor('proto');
                     setText(e.proto, protoLabel(w.proto));
                     e.proto.style.color = pcol;
                     e.proto.style.background = pcol + '22';
                     e.proto.style.border = '1px solid ' + pcol + '55';
                     e.proto.style.display = w.proto ? '' : 'none';
-                    // An alias is a second protocol riding the parent's link
-                    // rather than a link of its own, which is why it shares the
-                    // parent's egress address and goes down with it. Worth
-                    // saying outright -- it looks like an independent WAN here
-                    // and in every other list on the router.
-                    var acol = sevColor('alias');
-                    setText(e.alias, w.alias_of ? 'alias of ' + w.alias_of : '');
-                    e.alias.style.color = acol;
-                    e.alias.style.background = acol + '22';
-                    e.alias.style.border = '1px solid ' + acol + '55';
-                    e.alias.style.display = w.alias_of ? '' : 'none';
+                    e.alias.style.display = 'none';
                     setText(e.badge, cls.label);
                     e.badge.style.background = col + '22';
                     e.badge.style.color = col;
