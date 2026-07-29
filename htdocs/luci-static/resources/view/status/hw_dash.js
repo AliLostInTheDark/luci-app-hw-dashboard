@@ -2187,8 +2187,15 @@ return view.extend({
         var WAN_CLASS = {
             public:    { label: 'Public IPv4',       sev: 'good', note: 'Directly reachable from the internet. Inbound connections and port forwarding operate normally.' },
             cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding are not available on this link.' },
-            natted:    { label: 'Behind upstream NAT', sev: 'warn', note: 'The interface address differs from the observed egress address, so an upstream device is translating this link.' },
-            private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private address (RFC 1918). Address translation is performed by an upstream device.' },
+            natted:    { label: 'Translated Public Address', sev: 'warn', note: 'The interface address differs from the observed egress address, so an upstream device is translating this link.' },
+            private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private Address (RFC 1918). Address translation is performed by an upstream device.' },
+            loopback:  { label: 'Localhost (Loopback)', sev: 'mute', note: 'Loopback Address (RFC 1122). Routes traffic back to the router itself.' },
+            thisnet:   { label: 'Current Network',   sev: 'mute', note: 'This host on this network (RFC 1122). Often used for broadcasts or DHCP discovery.' },
+            protocol:  { label: 'Protocol Assignment', sev: 'warn', note: 'IETF Protocol Assignments (RFC 6890). Often used for DS-Lite tunnels.' },
+            benchmark: { label: 'ISP Private Routing', sev: 'warn', note: 'Benchmarking (RFC 2544). Officially for testing, but often used by ISPs for private internal routing.' },
+            testnet:   { label: 'TEST-NET (Doc Only)', sev: 'mute', note: 'TEST-NET (RFC 5737). Reserved exclusively for documentation and example code.' },
+            multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address (RFC 1112). Used for IPTV streams or routing protocols.' },
+            reserved:  { label: 'Reserved Address',  sev: 'bad',  note: 'Reserved Address (RFC 1112). Not intended for public routing.' },
             // No note: the badge already says IPv6-only, and "No IPv4 on this
             // interface" only restated it in longer form.
             v6only:    { label: 'Public IPv6',       sev: 'good', note: '' },

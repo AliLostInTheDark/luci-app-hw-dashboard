@@ -437,14 +437,16 @@ case "$1" in
 					_wclass="unknown"
 					case "$_wv4" in
 						'') _wclass="none" ;;
-						10.*) _wclass="private" ;;
-						192.168.*) _wclass="private" ;;
+						0.*) _wclass="thisnet" ;;
+						10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) _wclass="private" ;;
+						127.*) _wclass="loopback" ;;
 						169.254.*) _wclass="linklocal" ;;
-						127.*) _wclass="private" ;;
-						172.1[6-9].*|172.2[0-9].*|172.3[01].*) _wclass="private" ;;
-						# RFC 6598 shared address space: 100.64.0.0/10, i.e.
-						# 100.64.x - 100.127.x. Only the carrier hands these out.
+						192.0.0.*) _wclass="protocol" ;;
+						192.0.2.*|198.51.100.*|203.0.113.*) _wclass="testnet" ;;
+						198.1[89].*) _wclass="benchmark" ;;
 						100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) _wclass="cgnat" ;;
+						22[4-9].*|23[0-9].*) _wclass="multicast" ;;
+						24[0-9].*|25[0-5].*) _wclass="reserved" ;;
 						*) _wclass="public" ;;
 					esac
 					# A public-looking interface address that still differs from
