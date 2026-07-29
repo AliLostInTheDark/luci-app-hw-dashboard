@@ -2367,13 +2367,7 @@ return view.extend({
                     // Whether the address moves, next to the protocol that
                     // decides it. It no longer needs to say "public" too -- the
                     // badge beside it already states reachability, and saying it
-                    // twice was the only reason this label had four variants.
-                    //
-                    // Dropped entirely when the protocol name already contains
-                    // the word: proto static renders as "Static address", and a
-                    // STATIC chip beside it is the same fact twice.
                     var alabel = (w.assign === 'static' || w.assign === 'dynamic') ? w.assign : '';
-                    if (alabel && protoLabel(w.proto).toLowerCase().indexOf(alabel) !== -1) alabel = '';
                     var ascol = sevColor('assign');
                     setText(e.assign, alabel);
                     e.assign.style.color = ascol;
