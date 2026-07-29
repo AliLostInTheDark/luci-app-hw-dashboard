@@ -2754,16 +2754,35 @@ EOF
 						txpower="Unknown"; hwmode="Unknown"; hardware="Unknown"; channel="Unknown"; curr_width="0"; freq=""; phyname_info=""; bitrate="Unknown"
 						while read -r _l; do
 							case "$_l" in
-								*"Tx-Power:"*) txpower=${_l#*Tx-Power: }; txpower=${txpower%%  *} ;;
-								*"HW Mode(s):"*) hwmode=${_l#*HW Mode(s): } ;;
-								*"Hardware:"*) hardware=${_l#*Hardware: } ;;
-								*"Channel:"*)
-									channel=${_l#*Channel: }; channel=${channel%% *}
-									freq=${_l#*\(}; freq=${freq%% *}
+								*"Mode:"*"Channel:"*)
+									_ch_part=${_l#*Channel: }
+									channel=${_ch_part%% *}
+									if case "$_ch_part" in *\(*\)*) true ;; *) false ;; esac; then
+										freq=${_ch_part#*(}
+										freq=${freq%% GHz*}
+										freq=${freq%% *}
+									fi
 									;;
-								*"Width:"*) curr_width=${_l#*Width: }; curr_width=${curr_width%% *} ;;
-								*"PHY name:"*|*"Phy name:"*) phyname_info=${_l##*name: } ;;
-								*"Bit Rate:"*) bitrate=${_l#*Bit Rate: }; bitrate=${bitrate%%  *} ;;
+								*"Tx-Power:"*)
+									_tp_part=${_l#*Tx-Power: }
+									txpower=${_tp_part%%  *}
+									;;
+								*"HW Mode(s):"*)
+									hwmode=${_l#*HW Mode(s): }
+									;;
+								*"Hardware:"*)
+									hardware=${_l#*Hardware: }
+									;;
+								*"Width:"*)
+									curr_width=${_l#*Width: }; curr_width=${curr_width%% *}
+									;;
+								*"PHY name:"*|*"Phy name:"*)
+									phyname_info=${_l##*name: }
+									;;
+								*"Bit Rate:"*)
+									_br_part=${_l#*Bit Rate: }
+									bitrate=${_br_part%%  *}
+									;;
 							esac
 						done <<EOF
 $(iwinfo "$iface" info 2>/dev/null)
@@ -2862,12 +2881,6 @@ EOF
 				WIFI_RADIOS="$WIFI_RADIOS]"
 				_cache_write "$WIFI_CACHE" 30 "$WIFI_RADIOS"
 				}
-				# Stale-while-revalidate: an expired cache is served instantly
-				# and refreshed by a detached child (stdout closed so rpcd is
-				# never kept waiting) — the cold-cache fork burst no longer
-				# lands on the poll that a freshly opened dashboard is waiting
-				# on. The lock is itself a TTL cache so a crashed refresh can
-				# never wedge it. Only the very first call ever builds inline.
 				if _cache_read "$WIFI_CACHE"; then
 					WIFI_RADIOS=$C_VAL
 				elif [ -n "$C_VAL" ]; then
@@ -2877,15 +2890,7 @@ EOF
 						( _wifi_refresh ) >/dev/null 2>&1 &
 					fi
 				else
-					# first-ever call (fresh boot/install): serve empty NOW and
-					# build in the background — the card appears a few seconds
-					# later instead of the whole dashboard stalling on the fork
-					# burst.
-					WIFI_RADIOS="[]"
-					if ! _cache_read "$WIFI_CACHE.lock"; then
-						_cache_write "$WIFI_CACHE.lock" 60 refreshing
-						( _wifi_refresh ) >/dev/null 2>&1 &
-					fi
+					_wifi_refresh
 				fi
 				[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
 
