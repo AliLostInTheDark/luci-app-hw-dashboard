@@ -4234,12 +4234,12 @@ return view.extend({
                             var mimoVal = (w.wcd_mimo && w.wcd_mimo !== 'unknown') ? w.wcd_mimo : (hwMaxSp > 0 ? hwMaxSp + 'x' + hwMaxSp : null);
                             if (mimoVal) cardRows.push(makeWfRow('MIMO / Antennas', mimoVal));
 
-                            var maxTheoretical = (w.wcd_maxmbps && w.wcd_maxmbps !== 'unknown') ? w.wcd_maxmbps + ' Mbps' : (chipMaxBr ? chipMaxBr + ' Mbps' : null);
+                            var maxTheoretical = (w.wcd_maxmbps && w.wcd_maxmbps !== 'unknown') ? w.wcd_maxmbps + ' Mbps' : chipMaxBr;
                             if (maxTheoretical) cardRows.push(makeWfRow('Theoretical Max', maxTheoretical));
 
                             if (w.hwmode && w.hwmode !== 'Unknown') cardRows.push(makeWfRow('HW Mode(s)', w.hwmode));
 
-                            if (chipMaxBr && chipMaxBr + ' Mbps' !== maxTheoretical) cardRows.push(makeWfRow('Chip HW Max', chipMaxBr + ' Mbps (' + hwMaxSp + 'x' + hwMaxSp + ' @ ' + hwMaxCw + ')'));
+                            if (chipMaxBr && chipMaxBr !== maxTheoretical) cardRows.push(makeWfRow('Chip HW Max', chipMaxBr + ' (' + hwMaxSp + 'x' + hwMaxSp + ' @ ' + hwMaxCw + ')'));
 
                             if (cfgMaxBr) cardRows.push(makeWfRow('Config Max', cfgMaxBr + ' Mbps (' + cfgMaxLabel + ')', 'color: #00bcd4;'));
 
