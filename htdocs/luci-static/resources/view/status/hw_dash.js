@@ -2188,7 +2188,7 @@ return view.extend({
             public:    { label: 'Public IPv4',       sev: 'good', note: 'Directly reachable from the internet. Inbound connections and port forwarding operate normally.' },
             cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-grade NAT (RFC 6598). Inbound connections and port forwarding are not available on this link.' },
             natted:    { label: 'Behind upstream NAT', sev: 'warn', note: 'The interface address differs from the observed egress address, so an upstream device is translating this link.' },
-            private:   { label: 'Private address',   sev: 'warn', note: 'Private address (RFC 1918). Address translation is performed by an upstream device.' },
+            private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private address (RFC 1918). Address translation is performed by an upstream device.' },
             // No note: the badge already says IPv6-only, and "No IPv4 on this
             // interface" only restated it in longer form.
             v6only:    { label: 'Public IPv6',       sev: 'good', note: '' },
