@@ -2196,9 +2196,7 @@ return view.extend({
             testnet:   { label: 'TEST-NET (Doc Only)', sev: 'mute', note: 'TEST-NET (RFC 5737). Reserved exclusively for documentation and example code.' },
             multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address (RFC 1112). Used for IPTV streams or routing protocols.' },
             reserved:  { label: 'Reserved Address',  sev: 'bad',  note: 'Reserved Address (RFC 1112). Not intended for public routing.' },
-            // No note: the badge already says IPv6-only, and "No IPv4 on this
-            // interface" only restated it in longer form.
-            v6only:    { label: 'Public IPv6',       sev: 'good', note: '' },
+            v6only:    { label: 'Public IPv6',       sev: 'good', note: 'Globally routable IPv6 address (RFC 4291). Directly reachable from the internet.' },
             linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'No routable address was obtained. Address configuration or the link itself has failed.' },
             none:      { label: 'No address',        sev: 'bad',  note: '' },
             unknown:   { label: 'Unknown',           sev: 'mute', note: '' }
