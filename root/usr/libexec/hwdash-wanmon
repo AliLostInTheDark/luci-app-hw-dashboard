@@ -224,7 +224,7 @@ discover_ifaces() {
 	for _ifn in $_names; do
 		_i=$_idx
 		_idx=$((_idx + 1))
-		[ "$_ifn" = "loopback" ] && continue
+		case "$_ifn" in loopback|lan|lan6) continue ;; esac
 
 		_up=""; _dev=""; _ip4=""; _ip6=""
 		eval $(printf '%s' "$_dump" | jsonfilter \
@@ -289,9 +289,7 @@ discover_ifaces() {
 	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
 	TRACKED_IFACES=""
 	for _ifn in $_old_tracked; do
-		_keep=1
-		# Only trust the snapshot if uci actually produced one -- a failed
-		# call must never look like "every interface was deleted".
+		case "$_ifn" in loopback|lan|lan6) _keep=0 ;; esac
 		if [ -n "$_uci_net" ]; then
 			case "$_uci_net" in
 				*"network.$_ifn=interface"*) ;;

@@ -404,6 +404,7 @@ case "$1" in
 				# uci and nowhere else.
 				_wi_uci=$(uci -q show network 2>/dev/null)
 				for _wif in $_wi_ifaces; do
+					case "$_wif" in loopback|lan|lan6) continue ;; esac
 					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
 					[ -z "$_wst" ] && continue
 					# Only interfaces that actually carry a default route are
