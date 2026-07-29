@@ -2745,22 +2745,29 @@ EOF
 					REG_COUNTRY=$(echo "$_reg" | awk '{print $2}' | tr -d ':')
 					REG_DFS=$(echo "$_reg" | grep -oE 'DFS-[A-Z]+' | head -1 | sed 's/DFS-//')
 				fi
+				_wcd_json=""
+				if command -v wifi-chipset-detect >/dev/null; then
+					_wcd_json=$(wifi-chipset-detect 2>/dev/null)
+				fi
 				if command -v iwinfo >/dev/null; then
 					for iface in $(iwinfo | awk '/^[a-zA-Z0-9_-]+/ {print $1}'); do
-						info=$(iwinfo "$iface" info 2>/dev/null)
 						txpower="Unknown"; hwmode="Unknown"; hardware="Unknown"; channel="Unknown"; curr_width="0"; freq=""; phyname_info=""; bitrate="Unknown"
-						eval $(printf '%s\n' "$info" | awk '
-							/Tx-Power:/ { match($0, /Tx-Power: *([^ \t]+ [^ \t]+)/, a); if (a[1]!="") print "txpower=\"" a[1] "\"" }
-							/HW Mode\(s\):/ { match($0, /HW Mode\(s\): *([^\r\n]+)/, a); if (a[1]!="") print "hwmode=\"" a[1] "\"" }
-							/Hardware:/ { match($0, /Hardware: *([^\r\n]+)/, a); if (a[1]!="") print "hardware=\"" a[1] "\"" }
-							/Channel:/ {
-								match($0, /Channel: *([0-9]+|unknown)/, a); if (a[1]!="") print "channel=\"" a[1] "\""
-								match($0, /Channel:[^(]*\(([0-9.]+)/, b); if (b[1]!="") print "freq=\"" b[1] "\""
-							}
-							/Width:/ { match($0, /Width: *([0-9]+)/, a); if (a[1]!="") print "curr_width=\"" a[1] "\"" }
-							/Phy name:/ { match($0, /Phy name: *([^ \t\r\n]+)/, a); if (a[1]!="") print "phyname_info=\"" a[1] "\"" }
-							/Bit Rate:/ { match($0, /Bit Rate: *([^ \t]+ [^ \t]+)/, a); if (a[1]!="") print "bitrate=\"" a[1] "\"" }
-						')
+						while read -r _l; do
+							case "$_l" in
+								*"Tx-Power:"*) txpower=${_l#*Tx-Power: }; txpower=${txpower%%  *} ;;
+								*"HW Mode(s):"*) hwmode=${_l#*HW Mode(s): } ;;
+								*"Hardware:"*) hardware=${_l#*Hardware: } ;;
+								*"Channel:"*)
+									channel=${_l#*Channel: }; channel=${channel%% *}
+									freq=${_l#*\(}; freq=${freq%% *}
+									;;
+								*"Width:"*) curr_width=${_l#*Width: }; curr_width=${curr_width%% *} ;;
+								*"PHY name:"*|*"Phy name:"*) phyname_info=${_l##*name: } ;;
+								*"Bit Rate:"*) bitrate=${_l#*Bit Rate: }; bitrate=${bitrate%%  *} ;;
+							esac
+						done <<EOF
+$(iwinfo "$iface" info 2>/dev/null)
+EOF
 						{ [ -z "$channel" ] || [ "$channel" = "unknown" ]; } && channel="Unknown"
 						{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
@@ -2833,8 +2840,22 @@ EOF
 						[ -z "$cc" ] && cc="$REG_COUNTRY"
 						[ -z "$cc" ] && cc="00"
 
+						wcd_chipset=""; wcd_gen=""; wcd_mimo=""; wcd_ant=""; wcd_maxmbps=""
+						if [ -n "$_wcd_json" ] && [ "$phyname" != "Unknown" ]; then
+							wcd_chipset=$(printf '%s\n' "$_wcd_json" | jsonfilter -e "@.*.phy.${phyname}.Chipset" 2>/dev/null)
+							wcd_gen=$(printf '%s\n' "$_wcd_json" | jsonfilter -e "@.*.phy.${phyname}['Wi-FiGeneration']" 2>/dev/null)
+							wcd_mimo=$(printf '%s\n' "$_wcd_json" | jsonfilter -e "@.*.phy.${phyname}.MIMO" 2>/dev/null)
+							wcd_ant=$(printf '%s\n' "$_wcd_json" | jsonfilter -e "@.*.phy.${phyname}.Antennas" 2>/dev/null)
+							wcd_maxmbps=$(printf '%s\n' "$_wcd_json" | jsonfilter -e "@.*.phy.${phyname}.TheoreticalMaxMbps" 2>/dev/null)
+						fi
+						json_esc "$wcd_chipset"; _wc_chip=$JSV
+						json_esc "$wcd_gen"; _wc_gen=$JSV
+						json_esc "$wcd_mimo"; _wc_mimo=$JSV
+						json_esc "$wcd_ant"; _wc_ant=$JSV
+						json_esc "$wcd_maxmbps"; _wc_max=$JSV
+
 						if [ $FIRST_WIFI -eq 0 ]; then WIFI_RADIOS="$WIFI_RADIOS,"; fi
-						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$(json_str "$hardware")\",\"channel\":\"$channel\",\"curr_width\":\"$curr_width\",\"cfg_nss\":\"$cfg_nss\",\"hw_nss\":$hw_nss,\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"country\":\"$cc\",\"dfs_region\":\"$REG_DFS\",\"phycap\":$phycap}"
+						WIFI_RADIOS="$WIFI_RADIOS{\"iface\":\"$iface\",\"phy\":\"$phyname\",\"band\":\"$band\",\"txpower\":\"$txpower\",\"hwmode\":\"$hwmode\",\"hardware\":\"$(json_str "$hardware")\",\"channel\":\"$channel\",\"curr_width\":\"$curr_width\",\"cfg_nss\":\"$cfg_nss\",\"hw_nss\":$hw_nss,\"channels\":\"$enabled_ch\",\"bitrate\":\"$bitrate\",\"country\":\"$cc\",\"dfs_region\":\"$REG_DFS\",\"phycap\":$phycap,\"wcd_chipset\":\"$_wc_chip\",\"wcd_gen\":\"$_wc_gen\",\"wcd_mimo\":\"$_wc_mimo\",\"wcd_ant\":\"$_wc_ant\",\"wcd_maxmbps\":\"$_wc_max\"}"
 						FIRST_WIFI=0
 					done
 				fi
@@ -2901,9 +2922,9 @@ EOF
 								_inblk=0; _ns=0; _ac=0; _bs=0; _rx=0; _tx=0
 								while read -r _t1 _t2 _t3 _t4 _t5; do
 									case "$_t1 $_t2" in
-										"frequency:")
-											case "$_t3" in *\[in\ use\]*) _inblk=1 ;; *) _inblk=0 ;; esac ;;
-										"noise:") [ $_inblk -eq 1 ] && _ns=$_t3 ;;
+										"frequency:"*)
+											case "$_t1 $_t2 $_t3 $_t4 $_t5" in *\[in\ use\]*) _inblk=1 ;; *) _inblk=0 ;; esac ;;
+										"noise:"*) [ $_inblk -eq 1 ] && _ns=$_t2 ;;
 										"channel active") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _ac=$_t4 ;;
 										"channel busy") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _bs=$_t4 ;;
 										"channel receive") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _rx=$_t4 ;;

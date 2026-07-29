@@ -4221,6 +4221,9 @@ return view.extend({
                                     chStr ? E('span', { style: 'color:#00bcd4; font-size: 0.9em;' }, 'Ch: ' + chStr) : E('span', {}, '')
                                 ]),
                                 cleanHw && cleanHw !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, cleanHw) : '',
+                                w.wcd_chipset && w.wcd_chipset !== 'unknown' ? E('div', { class: 'hw-wifi-detail', style: 'font-weight: bold; color: var(--text-color, #e0e0e0);' }, 'Chipset: ' + w.wcd_chipset + (w.wcd_gen && w.wcd_gen !== 'unknown' ? ' (' + w.wcd_gen + ')' : '')) : '',
+                                w.wcd_mimo && w.wcd_mimo !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'MIMO / Antennas: ' + w.wcd_mimo + (w.wcd_ant && w.wcd_ant !== w.wcd_mimo && w.wcd_ant !== 'unknown' ? ' / ' + w.wcd_ant : '')) : '',
+                                w.wcd_maxmbps && w.wcd_maxmbps !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Theoretical Max: ' + w.wcd_maxmbps + ' Mbps') : '',
                                 w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
                                 chipMaxBr ? E('div', { class: 'hw-wifi-detail' }, 'Chip HW Max: ' + chipMaxBr + ' (' + hwMaxSp + 'x' + hwMaxSp + ' MIMO @ ' + hwMaxCw + ')') : '',
                                 cfgMaxBr ? E('div', { class: 'hw-wifi-detail', style: 'color: #00bcd4;' }, 'Config Max: ' + cfgMaxBr + ' (' + cfgMaxLabel + ')') : '',
