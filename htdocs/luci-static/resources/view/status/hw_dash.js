@@ -4215,27 +4215,66 @@ return view.extend({
                             }
                             wifiRendered++;
                             var bandKey = bandGroups[w.band] ? w.band : 'Other';
-                            bandGroups[bandKey].push(E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 8px;' }, [
-                                E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 8px;' }, [
-                                    E('span', { style: 'font-weight: bold;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
-                                    chStr ? E('span', { style: 'color:#00bcd4; font-size: 0.9em;' }, 'Ch: ' + chStr) : E('span', {}, '')
+                            var cardRows = [];
+                            var genTag = (w.wcd_gen && w.wcd_gen !== 'unknown') ? w.wcd_gen : null;
+                            if (cleanHw && cleanHw !== 'Unknown') {
+                                cardRows.push(E('div', { style: 'font-weight: 600; font-size: 0.95em; color: var(--text-color, #fff); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;' }, [
+                                    E('span', {}, cleanHw),
+                                    genTag ? E('span', { style: 'background: rgba(0, 188, 212, 0.15); color: #00bcd4; border: 1px solid rgba(0, 188, 212, 0.4); padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: normal;' }, genTag) : ''
+                                ]));
+                            }
+
+                            function makeWfRow(label, valNode, extraStyle) {
+                                return E('div', { style: 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.1); font-size: 0.88em;' + (extraStyle || '') }, [
+                                    E('span', { style: 'opacity: 0.7;' }, label),
+                                    E('span', { style: 'font-weight: 500; text-align: right;' }, valNode)
+                                ]);
+                            }
+
+                            var mimoVal = (w.wcd_mimo && w.wcd_mimo !== 'unknown') ? w.wcd_mimo : (hwMaxSp > 0 ? hwMaxSp + 'x' + hwMaxSp : null);
+                            if (mimoVal) cardRows.push(makeWfRow('MIMO / Antennas', mimoVal));
+
+                            var maxTheoretical = (w.wcd_maxmbps && w.wcd_maxmbps !== 'unknown') ? w.wcd_maxmbps + ' Mbps' : (chipMaxBr ? chipMaxBr + ' Mbps' : null);
+                            if (maxTheoretical) cardRows.push(makeWfRow('Theoretical Max', maxTheoretical));
+
+                            if (w.hwmode && w.hwmode !== 'Unknown') cardRows.push(makeWfRow('HW Mode(s)', w.hwmode));
+
+                            if (chipMaxBr && chipMaxBr + ' Mbps' !== maxTheoretical) cardRows.push(makeWfRow('Chip HW Max', chipMaxBr + ' Mbps (' + hwMaxSp + 'x' + hwMaxSp + ' @ ' + hwMaxCw + ')'));
+
+                            if (cfgMaxBr) cardRows.push(makeWfRow('Config Max', cfgMaxBr + ' Mbps (' + cfgMaxLabel + ')', 'color: #00bcd4;'));
+
+                            if (chStr) cardRows.push(makeWfRow('Current Channel', chStr));
+
+                            if (surveyStr) cardRows.push(makeWfRow('Channel Load', E('span', { style: 'color:' + getDynColor(busyPct) + ';' }, surveyStr)));
+
+                            if (noiseVal < 0) cardRows.push(makeWfRow('Noise Floor', noiseVal + ' dBm'));
+
+                            if (hwMaxCw) cardRows.push(makeWfRow('Max Channel Width', hwMaxCw));
+
+                            if (w.txpower && w.txpower !== 'Unknown') cardRows.push(makeWfRow('Max TX Power', w.txpower));
+
+                            if (regStr) cardRows.push(makeWfRow('Regulatory Domain', regStr));
+
+                            if (suppChs && suppChs.length > 0) {
+                                cardRows.push(E('div', { style: 'padding-top: 8px; font-size: 0.85em;' }, [
+                                    E('div', { style: 'opacity: 0.7; margin-bottom: 3px;' }, 'Supported Channels:'),
+                                    E('div', { style: 'line-height: 1.4; opacity: 0.9;' }, groupChannels(w.band, suppChs))
+                                ]));
+                            }
+
+                            if (bCap && bCap.disabled && bCap.disabled.length > 0) {
+                                cardRows.push(E('div', { style: 'color: #ff5252; font-size: 0.85em; margin-top: 4px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')));
+                            }
+                            if (bCap && bCap.exceptions && bCap.exceptions.length > 0) {
+                                cardRows.push(E('div', { style: 'color: #ffb74d; font-size: 0.85em; margin-top: 4px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')));
+                            }
+
+                            bandGroups[bandKey].push(E('div', { style: 'padding: 14px; background: rgba(128,128,128,0.05); border-radius: 8px; margin-bottom: 12px;' }, [
+                                E('div', { style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 10px;' }, [
+                                    E('span', { style: 'font-weight: bold; font-size: 1.05em;' }, w.iface.toUpperCase() + ' (' + w.band + ')'),
+                                    chStr ? E('span', { style: 'color:#00bcd4; font-weight: 600; font-size: 0.95em;' }, 'Ch: ' + chStr) : E('span', {}, '')
                                 ]),
-                                cleanHw && cleanHw !== 'Unknown' ? E('div', { class: 'hw-wifi-ssid', style: 'font-size: 0.9em; margin-bottom: 4px;' }, cleanHw) : '',
-                                w.wcd_chipset && w.wcd_chipset !== 'unknown' ? E('div', { class: 'hw-wifi-detail', style: 'font-weight: bold; color: var(--text-color, #e0e0e0);' }, 'Chipset: ' + w.wcd_chipset + (w.wcd_gen && w.wcd_gen !== 'unknown' ? ' (' + w.wcd_gen + ')' : '')) : '',
-                                w.wcd_mimo && w.wcd_mimo !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'MIMO / Antennas: ' + w.wcd_mimo + (w.wcd_ant && w.wcd_ant !== w.wcd_mimo && w.wcd_ant !== 'unknown' ? ' / ' + w.wcd_ant : '')) : '',
-                                w.wcd_maxmbps && w.wcd_maxmbps !== 'unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Theoretical Max: ' + w.wcd_maxmbps + ' Mbps') : '',
-                                w.hwmode && w.hwmode !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'HW Mode(s): ' + w.hwmode) : '',
-                                chipMaxBr ? E('div', { class: 'hw-wifi-detail' }, 'Chip HW Max: ' + chipMaxBr + ' (' + hwMaxSp + 'x' + hwMaxSp + ' MIMO @ ' + hwMaxCw + ')') : '',
-                                cfgMaxBr ? E('div', { class: 'hw-wifi-detail', style: 'color: #00bcd4;' }, 'Config Max: ' + cfgMaxBr + ' (' + cfgMaxLabel + ')') : '',
-                                chStr ? E('div', { class: 'hw-wifi-detail' }, 'Current Channel: ' + chStr) : '',
-                                surveyStr ? E('div', { class: 'hw-wifi-detail' }, ['Channel Load: ', E('span', { style: 'color:' + getDynColor(busyPct) + ';' }, surveyStr)]) : '',
-                                noiseVal < 0 ? E('div', { class: 'hw-wifi-detail' }, 'Noise Floor: ' + noiseVal + ' dBm') : '',
-                                hwMaxCw ? E('div', { class: 'hw-wifi-detail' }, 'Max Channel Width: ' + hwMaxCw) : '',
-                                w.txpower && w.txpower !== 'Unknown' ? E('div', { class: 'hw-wifi-detail' }, 'Max TX Power: ' + w.txpower) : '',
-                                regStr ? E('div', { class: 'hw-wifi-detail' }, 'Regulatory Domain: ' + regStr) : '',
-                                suppChs && suppChs.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'margin-top:4px;' }, 'Supported Channels: ' + groupChannels(w.band, suppChs)) : '',
-                                bCap && bCap.disabled && bCap.disabled.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ff5252; font-size: 0.85em; padding-left: 8px;' }, 'Disabled (Regdomain): ' + bCap.disabled.join(', ')) : '',
-                                bCap && bCap.exceptions && bCap.exceptions.length > 0 ? E('div', { class: 'hw-wifi-detail', style: 'color: #ffb74d; font-size: 0.85em; padding-left: 8px;' }, 'Radar Detection (DFS): ' + bCap.exceptions.join(', ')) : ''
+                                E('div', { class: 'hw-wifi-card-body' }, cardRows)
                             ]));
                             wifiSigParts.push(w.iface + '|' + chStr + '|' + surveyStr + '|' + noiseVal + '|' + regStr + '|' + cfgMaxBr + '|' + chipMaxBr);
                         });
