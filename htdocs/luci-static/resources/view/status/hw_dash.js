@@ -1073,10 +1073,20 @@ return view.extend({
             } catch (e) { return dflt; }
         };
         var savedCfg = self.savedConfig || {};
+        var cleanWanList = function(arr) {
+            if (!Array.isArray(arr)) return [];
+            return arr.map(function(x) { return String(x).replace(/^!/, ''); });
+        };
+        var isIfaceHidden = function(iface, aliasOf) {
+            if (!self.hiddenWanIfaces || !self.hiddenWanIfaces.length) return false;
+            if (iface && self.hiddenWanIfaces.indexOf(iface) !== -1) return true;
+            if (aliasOf && self.hiddenWanIfaces.indexOf(aliasOf) !== -1) return true;
+            return false;
+        };
         self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
         self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
         self.disabledPings = Array.isArray(savedCfg.disabledPings) ? savedCfg.disabledPings : [];
-        self.hiddenWanIfaces = Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []);
+        self.hiddenWanIfaces = cleanWanList(Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []));
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
         var saveConfig = function() {
@@ -1942,7 +1952,7 @@ return view.extend({
                 self.hiddenCards = Array.isArray(cfg.hidden) ? cfg.hidden : [];
                 self.pingTargets = Array.isArray(cfg.targets) ? cfg.targets : [];
                 self.disabledPings = Array.isArray(cfg.disabledPings) ? cfg.disabledPings : [];
-                self.hiddenWanIfaces = Array.isArray(cfg.wanHidden) ? cfg.wanHidden : [];
+                self.hiddenWanIfaces = cleanWanList(Array.isArray(cfg.wanHidden) ? cfg.wanHidden : []);
                 if (typeof cfg.wanTarget4 === 'string' && cfg.wanTarget4) self.wanTarget4 = cfg.wanTarget4;
                 if (typeof cfg.wanTarget6 === 'string' && cfg.wanTarget6) self.wanTarget6 = cfg.wanTarget6;
                 applyCardVisibility();
@@ -2103,7 +2113,7 @@ return view.extend({
             });
 
             (wq || []).forEach(function(w) {
-                if (self.hiddenWanIfaces && self.hiddenWanIfaces.indexOf(w.iface) !== -1) return;
+                if (isIfaceHidden(w.iface, w.alias_of)) return;
                 var up = parseFloat(w.uptime_pct);
                 if (w.status === 'down') {
                     // The cause, when the collector could work one out. How
@@ -2247,7 +2257,7 @@ return view.extend({
                     if (typeof renderTargetList === 'function') renderTargetList();
                 }
                 if (self.hiddenWanIfaces)
-                    wans = wans.filter(function(w) { return self.hiddenWanIfaces.indexOf(w.iface) === -1; });
+                    wans = wans.filter(function(w) { return !isIfaceHidden(w.iface, w.alias_of); });
                 // The backend walks the collector's tracked list, which is in
                 // the order interfaces were first discovered -- so a router that
                 // brought wanb up before wan showed the cards that way round,
@@ -4780,7 +4790,7 @@ return view.extend({
                 // a genuine WAN precisely when it had been down longest --
                 // the worst news the card has, quietly suppressed.
                 var wq = wqAll.filter(function(r) {
-                    return self.hiddenWanIfaces.indexOf(r.iface) === -1;
+                    return !isIfaceHidden(r.iface, r.alias_of);
                 });
                 if (!self._wanQCache) self._wanQCache = {};
                 // First row (the list is already sorted) owns its device's

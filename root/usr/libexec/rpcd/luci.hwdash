@@ -1093,6 +1093,7 @@ EOF
 					_wm_tracked="$_wm_dir/.tracked"
 					_wm_tr=""
 					[ -f "$_wm_tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_tracked" 2>/dev/null)
+					_wm_uci=$(uci -q show network 2>/dev/null)
 					_wm_items=""
 					_wm_first=1
 					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
@@ -1106,8 +1107,16 @@ EOF
 						case " $_wm_tr " in *" $_wm_ifn "*) ;; *) continue ;; esac
 						_wm_isp=""
 						[ -f "$_wm_dir/$_wm_ifn.isp" ] && read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
+						_wm_alias=""
+						case "$_wm_uci" in
+							*"network.$_wm_ifn.device='@"*)
+								_wm_alias=${_wm_uci#*network.$_wm_ifn.device=\'@}
+								_wm_alias=${_wm_alias%%\'*}
+								;;
+						esac
 						json_esc "$_wm_isp"; _wm_ispj=$JSV
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
+						json_esc "$_wm_alias"; _wm_aliasj=$JSV
 
 						# The collector rewrites this file in place (truncate,
 						# then write) every two seconds while we poll every
@@ -1218,7 +1227,7 @@ EOF
 						json_esc "$_wm_rdev"; _wm_rdevj=$JSV
 
 						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
-						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\",\"history\":$_wm_hist_json}"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"alias_of\":\"$_wm_aliasj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\",\"history\":$_wm_hist_json}"
 						_wm_first=0
 					done
 					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"
