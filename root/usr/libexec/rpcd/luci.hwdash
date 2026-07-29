@@ -2898,18 +2898,21 @@ EOF
 								_sv_vals=${_sv_rest%% *}
 								;;
 							*)
-								_sv_vals=$(iw dev "$_ifn" survey dump 2>/dev/null | awk '
-	/frequency:/ { inblk = ($0 ~ /\[in use\]/) ? 1 : 0 }
-	inblk && /noise:/ { noise=$(NF-1) }
-	inblk && /channel active time:/ { act=$(NF-1) }
-	inblk && /channel busy time:/ { busy=$(NF-1) }
-	inblk && /channel receive time:/ { rxt=$(NF-1) }
-	inblk && /channel transmit time:/ { txt=$(NF-1) }
-	END { printf "%d:%d:%d:%d:%d\n", noise, act, busy, rxt, txt }')
-								case "$_sv_vals" in
-									*:*:*:*:*) ;;
-									*) _sv_vals="0:0:0:0:0" ;;
-								esac
+								_inblk=0; _ns=0; _ac=0; _bs=0; _rx=0; _tx=0
+								while read -r _t1 _t2 _t3 _t4 _t5; do
+									case "$_t1 $_t2" in
+										"frequency:")
+											case "$_t3" in *\[in\ use\]*) _inblk=1 ;; *) _inblk=0 ;; esac ;;
+										"noise:") [ $_inblk -eq 1 ] && _ns=$_t3 ;;
+										"channel active") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _ac=$_t4 ;;
+										"channel busy") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _bs=$_t4 ;;
+										"channel receive") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _rx=$_t4 ;;
+										"channel transmit") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _tx=$_t4 ;;
+									esac
+								done <<EOF
+$(iw dev "$_ifn" survey dump 2>/dev/null)
+EOF
+								_sv_vals="${_ns:-0}:${_ac:-0}:${_bs:-0}:${_rx:-0}:${_tx:-0}"
 								_sv_seen="$_sv_seen $_sphy=$_sv_vals"
 								;;
 						esac
@@ -2947,11 +2950,12 @@ EOF
 				case "$_SI_EXP" in ''|*[!0-9]*) _SI_EXP=0 ;; esac
 				[ "$_SI_EXP" -le "${HWDASH_NOW:-0}" ] && MTD_PARTS=""
 				if [ -z "$MTD_PARTS" ]; then
-				# Legacy UBI compat
-				UBI_MAX_EC=0
-				UBI_BAD_PEB=0
-				[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
-				[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
+					_storage_inv_refresh() {
+					# Legacy UBI compat
+					UBI_MAX_EC=0
+					UBI_BAD_PEB=0
+					[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
+					[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
 				# Full UBI device enumeration
 				UBI_DEVS="["
@@ -3080,8 +3084,14 @@ EOF
 					printf "MTD_PARTS='%s'\n" "$MTD_PARTS"
 					printf "ECC_BASE_DATE=%s\n" "${ECC_BASE_DATE:-0}"
 				} > "$STORAGE_INV_CACHE.$$" 2>/dev/null && mv "$STORAGE_INV_CACHE.$$" "$STORAGE_INV_CACHE" 2>/dev/null
+					}
+					if ! _cache_read "$STORAGE_INV_CACHE.lock"; then
+						_cache_write "$STORAGE_INV_CACHE.lock" 30 refreshing
+						( _storage_inv_refresh ) >/dev/null 2>&1 &
+					fi
+					UBI_DEVS="[]"
+					MTD_PARTS="[]"
 				fi
-
 				# eMMC / SD health
 				EMMC_INFO="null"
 				for mmc in /sys/class/block/mmcblk[0-9]*; do
