@@ -446,7 +446,7 @@ case "$1" in
 						_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
 						_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
 					fi
-					# 1. If empty and this interface is an alias child (device='@parent'), check parent
+					# 1. If empty and this interface is an alias child (device='@parent'), check parent status
 					if [ -z "$_p_addrs" ] && [ -n "$_walias" ]; then
 						_ast=$(ubus call "network.interface.$_walias" status 2>/dev/null)
 						if [ -n "$_ast" ]; then
@@ -455,26 +455,6 @@ case "$1" in
 							if [ -z "$_p_addrs" ]; then
 								_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
 								_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
-							fi
-						fi
-					fi
-					# 2. If empty and this interface is a parent, check any child alias riding @this_interface
-					if [ -z "$_p_addrs" ]; then
-						_child_alias=""
-						case "$_wi_uci" in
-							*"device='@$_wif'"*)
-								_child_alias=$(printf '%s\n' "$_wi_uci" | sed -n "s/^network\.\([^.]*\)\.device='@$_wif'\$/\1/p" | head -1)
-								;;
-						esac
-						if [ -n "$_child_alias" ]; then
-							_cst=$(ubus call "network.interface.$_child_alias" status 2>/dev/null)
-							if [ -n "$_cst" ]; then
-								_p_addrs=$(printf '%s' "$_cst" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
-								_p_masks=$(printf '%s' "$_cst" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
-								if [ -z "$_p_addrs" ]; then
-									_p_addrs=$(printf '%s' "$_cst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
-									_p_masks=$(printf '%s' "$_cst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
-								fi
 							fi
 						fi
 					fi
