@@ -1925,11 +1925,11 @@ return view.extend({
         // Reset are the ones that really needed to be page-wide: previously
         // there was no way to undo a settings change short of reversing each
         // control by hand.
-        var pageMsg = E('span', { style: 'margin-right: 12px; font-size: 0.85em;' });
+        var pageMsg = E('span', { style: 'font-size: 0.85em; font-weight: 600; line-height: 1;' });
         var setPageMsg = function(t, c) { pageMsg.textContent = t || ''; pageMsg.style.color = c || ''; };
-        var pageSaveBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-save' }, 'Save');
-        var pageRevertBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-neutral' }, 'Revert');
-        var pageResetBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-reset' }, 'Reset');
+        var pageSaveBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-save', style: 'margin-left: 8px;' }, 'Save');
+        var pageRevertBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-neutral', style: 'margin-left: 8px;' }, 'Revert');
+        var pageResetBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-reset', style: 'margin-left: 8px;' }, 'Reset');
         var pageBusy = function(b) { [pageSaveBtn, pageRevertBtn, pageResetBtn].forEach(function(x) { x.disabled = b; }); };
 
         pageSaveBtn.addEventListener('click', function() {
@@ -2000,8 +2000,10 @@ return view.extend({
         // cbi-page-actions is where LuCI puts Save/Revert on every config page,
         // so the theme gives it the same right-aligned, sticky-footer treatment
         // it gives the rest of the router's settings.
-        settingsPanel.appendChild(E('div', { class: 'cbi-page-actions' },
-            [pageMsg, pageSaveBtn, pageRevertBtn, pageResetBtn]));
+        var leftBox = E('div', { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' }, [pageMsg, pageRevertBtn]);
+        var rightBox = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [pageSaveBtn, pageResetBtn]);
+        settingsPanel.appendChild(E('div', { class: 'cbi-page-actions', style: 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(128,128,128,0.15);' },
+            [leftBox, rightBox]));
 
         var settingsBtn = E('button', {
             class: 'cbi-button',

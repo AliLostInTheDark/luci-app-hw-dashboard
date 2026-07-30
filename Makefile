@@ -10,6 +10,10 @@ PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
+define Package/luci-app-hw-dashboard/conffiles
+/etc/config/hwdash
+endef
+
 # call BuildPackage - OpenWrt buildroot signature
 
 define Package/luci-app-hw-dashboard/postinst
