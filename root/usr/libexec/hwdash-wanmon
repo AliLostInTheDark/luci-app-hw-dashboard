@@ -608,50 +608,42 @@ do_curl() {
 # nothing and cost cross-subshell state to invalidate.
 get_public_ip4() {
 	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4
+	_pub=""
 	if [ -z "$ASN_DNS" ]; then
-		do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org "$_ifn"
+		_pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org "$_ifn")
+		[ -z "$_pub" ] && _pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://icanhazip.com "$_ifn")
+		printf '%s' "$_pub" | tr -d ' \r\n'
 		return
 	fi
 	_ipify=$(lookup_host api.ipify.org 4 "$_ifn")
-	# No answer means no ISP name this cycle. Falling back to an unpinned
-	# request would hand the query to the local resolver, which is the one
-	# thing this must not do.
-	[ -z "$_ipify" ] && return
-	do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org "$_ifn" \
-		--resolve "api.ipify.org:443:$_ipify"
+	if [ -n "$_ipify" ]; then
+		_pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://api.ipify.org "$_ifn" \
+			--resolve "api.ipify.org:443:$_ipify")
+	fi
+	if [ -z "$_pub" ]; then
+		_ican=$(lookup_host icanhazip.com 4 "$_ifn")
+		if [ -n "$_ican" ]; then
+			_pub=$(do_curl "$_dev" "$_srcip" "$_mark" https://icanhazip.com "$_ifn" \
+				--resolve "icanhazip.com:443:$_ican")
+		fi
+	fi
+	printf '%s' "$_pub" | tr -d ' \r\n'
 }
 
-# ISP is resolved once per address and then retained -- re-resolved
-# only when the interface's own local address changes (a real
-# reconnect/restart), not on any time-based expiry. A stale/failed
-# lookup retries at most once per ISP_RETRY_INTERVAL rather than every
-# tick.
-#
-# IPv6 siblings (wan6 alongside wan) don't get an independent ASN
-# lookup at all -- Cymru's origin lookup is IPv4-only, and a v6
-# sibling is the same physical link as its v4 base, so it's the same
-# ISP by definition. Just mirror whatever the sibling has already
-# resolved, cheaply (a file compare, no network calls), and leave it
-# blank if the sibling hasn't resolved yet either.
 resolve_isp() {
 	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4; _family=$5
 	_isp_file="$RINGDIR/${_ifn}.isp"
 	if [ "$_family" = "6" ]; then
-		# Cheap path first: a v6 sibling (wan6 alongside wan) is the same
-		# physical link as its v4 base, so it is the same ISP by definition.
-		# A file compare costs nothing next to two DNS lookups.
 		case "$_ifn" in
 			*6)
-				_sib_isp="$RINGDIR/${_ifn%6}.isp"
-				if [ -f "$_sib_isp" ] && ! cmp -s "$_sib_isp" "$_isp_file" 2>/dev/null; then
+				_base=${_ifn%6}
+				_sib_isp="$RINGDIR/${_base}.isp"
+				if [ -f "$_sib_isp" ]; then
 					cp "$_sib_isp" "$_isp_file" 2>/dev/null
+					return
 				fi
 				;;
 		esac
-		# Sibling mirroring only works for a v6 interface named after a v4 one
-		# that has itself resolved. A v6-only WAN, or one named independently,
-		# would otherwise never show an ISP at all -- so fall through to a real
-		# lookup in Cymru's origin6 zone, subject to the same retry throttle.
 		[ -f "$_isp_file" ] && return
 		is_public_ip6 "$_srcip" || return
 		_try_file="$RINGDIR/${_ifn}.isp.try"
@@ -680,10 +672,6 @@ resolve_isp() {
 	_ip_file="$RINGDIR/${_ifn}.ispip"
 	_last_ip=""
 	[ -f "$_ip_file" ] && read -r _last_ip < "$_ip_file" 2>/dev/null
-	# Re-resolve when the interface address changed, and also when the egress
-	# address has never been recorded -- otherwise a router upgrading from a
-	# version that did not keep it would sit on an already-resolved ISP and
-	# never backfill the file. One extra lookup per interface, once.
 	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ] && [ -f "$RINGDIR/${_ifn}.pubip" ]; then
 		return
 	fi
@@ -696,17 +684,13 @@ resolve_isp() {
 	fi
 	printf '%d\n' "$_now" > "$_try_file"
 	_nsf="$RINGDIR/.probe.${_ifn}.ns"
-	# Always ask what our public IP is -- never assume the interface address
-	# is it, even when it looks globally routable. Measured on an Airtel line:
-	# PPPoE hands out 100.192.35.115, which Cymru attributes to AS21928
-	# (T-Mobile US, 100.128.0.0/9) because the carrier uses that space
-	# internally and NATs behind it. The real egress is 106.222.224.181 =
-	# AS24560 Bharti Airtel. Reading the ISP off the interface address would
-	# have labelled an Indian Airtel link "T-Mobile USA" -- worse than blank.
-	# (The v6 path above is different and does read the interface address:
-	# there is no carrier NAT in the way, and the address is the announced
-	# one -- verified against this same router's /48.)
 	_pub=$(get_public_ip4 "$_dev" "$_srcip" "$_mark" "$_ifn")
+	if [ -z "$_pub" ]; then
+		case "$_srcip" in
+			10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|127.*|169.254.*|'') ;;
+			*) _pub="$_srcip" ;;
+		esac
+	fi
 	case "$_pub" in *[!0-9.]*|'') return ;; esac
 	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
 	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
