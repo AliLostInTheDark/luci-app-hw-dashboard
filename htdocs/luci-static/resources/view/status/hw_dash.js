@@ -1090,9 +1090,12 @@ return view.extend({
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
         var saveConfig = function() {
-            // Returns the promise so the page-level Save can wait on it and
-            // report a real result; existing callers ignore it and keep the
-            // previous fire-and-forget behaviour.
+            if (typeof wanTgt4Input !== 'undefined' && wanTgt4Input && typeof wanTgt4Input.value === 'string') {
+                self.wanTarget4 = wanTgt4Input.value.trim() || '1.1.1.1';
+            }
+            if (typeof wanTgt6Input !== 'undefined' && wanTgt6Input && typeof wanTgt6Input.value === 'string') {
+                self.wanTarget6 = wanTgt6Input.value.trim() || '2606:4700:4700::1111';
+            }
             return callHwSetConfig({
                 hidden: self.hiddenCards,
                 targets: self.pingTargets,
@@ -1634,7 +1637,9 @@ return view.extend({
             self.wanTarget6 = v6;
             markDirty();
         };
+        wanTgt4Input.addEventListener('input', saveWanTargets);
         wanTgt4Input.addEventListener('change', saveWanTargets);
+        wanTgt6Input.addEventListener('input', saveWanTargets);
         wanTgt6Input.addEventListener('change', saveWanTargets);
         settingsPanel.appendChild(cbiSection('WAN Uptime Status Probing Targets',
             'What the background collector pings to decide whether each WAN is up.', [
@@ -1953,8 +1958,14 @@ return view.extend({
                 self.pingTargets = Array.isArray(cfg.targets) ? cfg.targets : [];
                 self.disabledPings = Array.isArray(cfg.disabledPings) ? cfg.disabledPings : [];
                 self.hiddenWanIfaces = cleanWanList(Array.isArray(cfg.wanHidden) ? cfg.wanHidden : []);
-                if (typeof cfg.wanTarget4 === 'string' && cfg.wanTarget4) self.wanTarget4 = cfg.wanTarget4;
-                if (typeof cfg.wanTarget6 === 'string' && cfg.wanTarget6) self.wanTarget6 = cfg.wanTarget6;
+                if (typeof cfg.wanTarget4 === 'string' && cfg.wanTarget4) {
+                    self.wanTarget4 = cfg.wanTarget4;
+                    if (wanTgt4Input) wanTgt4Input.value = cfg.wanTarget4;
+                }
+                if (typeof cfg.wanTarget6 === 'string' && cfg.wanTarget6) {
+                    self.wanTarget6 = cfg.wanTarget6;
+                    if (wanTgt6Input) wanTgt6Input.value = cfg.wanTarget6;
+                }
                 applyCardVisibility();
                 if (typeof renderTargetList === 'function') renderTargetList();
                 if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
@@ -1972,6 +1983,8 @@ return view.extend({
             self.hiddenWanIfaces = [];
             self.wanTarget4 = '1.1.1.1';
             self.wanTarget6 = '2606:4700:4700::1111';
+            if (wanTgt4Input) wanTgt4Input.value = self.wanTarget4;
+            if (wanTgt6Input) wanTgt6Input.value = self.wanTarget6;
             self.pingHist = {};
             applyCardVisibility();
             if (typeof renderTargetList === 'function') renderTargetList();

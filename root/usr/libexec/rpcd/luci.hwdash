@@ -413,8 +413,17 @@ case "$1" in
 					eval "$(printf '%s' "$_wst" | jsonfilter \
 						-e '_wup=@.up' -e '_wproto=@.proto' -e '_wdev=@.l3_device' \
 						-e '_wpar=@.device' \
-						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' \
-						-e '_wv6=@["ipv6-address"][0].address' 2>/dev/null)" 2>/dev/null
+						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' 2>/dev/null)" 2>/dev/null
+
+					_wv6_all=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null)
+					for _a6 in $_wv6_all; do
+						case "$_a6" in
+							fe80:*|FE80:*|fc*|FC*|fd*|FD*|127.*|::1) ;;
+							*:*) _wv6="$_a6"; break ;;
+						esac
+					done
+					[ -z "$_wv6" ] && _wv6=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+
 					# Alias detection. uci device='@wan' means this interface is
 					# a second protocol riding the same link rather than a link
 					# of its own -- which is why a v6 sibling shows the same
@@ -427,9 +436,45 @@ case "$1" in
 							;;
 					esac
 					[ -z "$_wv4" ] && [ -z "$_wv6" ] && continue
-					# A delegated prefix means a routed /56 or /64, worth showing.
-					_wpfx=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][0].address' 2>/dev/null)
-					_wpfxlen=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][0].mask' 2>/dev/null)
+
+					# Delegated IPv6 Prefix detection (PR #24469 multi-prefix support & robust fallbacks)
+					_wpfx=""
+					_wpfxlen=""
+					_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
+					_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
+					if [ -z "$_p_addrs" ]; then
+						_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
+						_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
+					fi
+					if [ -z "$_p_addrs" ] && [ -n "$_walias" ]; then
+						_ast=$(ubus call "network.interface.$_walias" status 2>/dev/null)
+						if [ -n "$_ast" ]; then
+							_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
+							_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
+							if [ -z "$_p_addrs" ]; then
+								_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
+								_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
+							fi
+						fi
+					fi
+					if [ -z "$_p_addrs" ]; then
+						for _o_if in wan wan6 wan_6 wanb wanc; do
+							[ "$_o_if" = "$_wif" ] && continue
+							_ost=$(ubus call "network.interface.$_o_if" status 2>/dev/null)
+							[ -z "$_ost" ] && continue
+							_p_addrs=$(printf '%s' "$_ost" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
+							_p_masks=$(printf '%s' "$_ost" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
+							[ -z "$_p_addrs" ] && _p_addrs=$(printf '%s' "$_ost" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
+							[ -z "$_p_masks" ] && _p_masks=$(printf '%s' "$_ost" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
+							[ -n "$_p_addrs" ] && break
+						done
+					fi
+					if [ -n "$_p_addrs" ]; then
+						set -- $_p_addrs
+						_wpfx=$1
+						set -- $_p_masks
+						_wpfxlen=$1
+					fi
 
 					_wpub=""
 					[ -f "$WI_DIR/$_wif.pubip" ] && read -r _wpub < "$WI_DIR/$_wif.pubip" 2>/dev/null

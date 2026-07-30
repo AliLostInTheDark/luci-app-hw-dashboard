@@ -230,8 +230,14 @@ discover_ifaces() {
 		eval $(printf '%s' "$_dump" | jsonfilter \
 			-e "_up=@.interface[$_i].up" \
 			-e "_dev=@.interface[$_i].l3_device" \
-			-e "_ip4=@.interface[$_i][\"ipv4-address\"][0].address" \
-			-e "_ip6=@.interface[$_i][\"ipv6-address\"][0].address" 2>/dev/null)
+			-e "_ip4=@.interface[$_i][\"ipv4-address\"][0].address" 2>/dev/null)
+		_ip6_all=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i][\"ipv6-address\"][*].address" 2>/dev/null)
+		for _a6 in $_ip6_all; do
+			if is_public_ip6 "$_a6"; then
+				_ip6="$_a6"
+				break
+			fi
+		done
 
 		[ "$_up" = "1" ] || [ "$_up" = "true" ] || continue
 		[ -z "$_dev" ] && continue
@@ -247,7 +253,6 @@ discover_ifaces() {
 		_srcip=""
 		[ "$_family" = "4" ] && _srcip="$_ip4"
 		[ "$_family" = "6" ] && _srcip="$_ip6"
-		[ -z "$_srcip" ] && continue
 
 		_mark=""
 		if [ -f "$WRAP" ]; then
@@ -416,26 +421,18 @@ run_probe() {
 BIND_IF=""
 bind_arg() {
 	if [ "$1" = "6" ]; then
-		BIND_IF=$3; [ -z "$BIND_IF" ] && BIND_IF=$2
+		if is_public_ip6 "$3"; then
+			BIND_IF=$3
+		elif [ -n "$2" ]; then
+			BIND_IF=$2
+		else
+			BIND_IF=""
+		fi
 	else
 		BIND_IF=$2; [ -z "$BIND_IF" ] && BIND_IF=$3
 	fi
 }
 
-# -W 1 (per-reply timeout) is load-bearing, not belt-and-braces. BusyBox ping
-# does not honour -w as a real deadline: against a silently blackholed target
-# `ping -c 2 -w 2` runs for ~11s on these builds, not 2. That alone is enough
-# to blow past the whole loop's LOOP_DEADLINE, at which point every
-# interface's subshell -- including the healthy ones that had already
-# finished probing -- gets kill -9'd before it can write its sample. One dead
-# probe target would take the entire card down to a sample every 20s. With
-# -W 1 the same probe returns in 2s.
-#
-# -A matters just as much. Without it, -c 2 waits out the full 1s interval
-# between the two packets, so every probe subshell lives ~1s: measured 1038ms
-# per probe, against 77ms with -A. On a 13-WAN router that is thirteen extra
-# processes alive for half of every two-second tick, for no benefit -- -A
-# sends the second packet as soon as the first reply lands.
 do_ping() {
 	_dev=$1; _srcip=$2; _mark=$3; _family=$4; _anchor=$5; _ifn=$6
 	_famtag="ipv4"; [ "$_family" = "6" ] && _famtag="ipv6"
@@ -446,8 +443,13 @@ do_ping() {
 			ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 	else
 		bind_arg "$_family" "$_dev" "$_srcip"
-		run_probe "$_pf" \
-			ping -"$_family" -I "$BIND_IF" -c 2 -A -w 2 -W 1 "$_anchor"
+		if [ -n "$BIND_IF" ]; then
+			run_probe "$_pf" \
+				ping -"$_family" -I "$BIND_IF" -c 2 -A -w 2 -W 1 "$_anchor"
+		else
+			run_probe "$_pf" \
+				ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
+		fi
 	fi
 	tr '\n' ' ' < "$_pf" 2>/dev/null
 }
