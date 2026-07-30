@@ -841,7 +841,11 @@ sample_rate() {
 process_iface() {
 	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7
 	_stats_file="$RINGDIR/${_ifn}.stats"
-	_out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn" "$_tgt" "$_btgt")
+	if [ -z "$_srcip" ]; then
+		_out=""
+	else
+		_out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn" "$_tgt" "$_btgt")
+	fi
 	_ms=""
 	case "$_out" in
 		*time=*)
