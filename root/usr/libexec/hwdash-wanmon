@@ -558,7 +558,18 @@ ping_with_backup() {
 	case "$_out" in
 		*time=*) printf '%s' "$_out"; return ;;
 	esac
-	do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_backup" "$_ifn"
+	_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_backup" "$_ifn")
+	case "$_out" in
+		*time=*) printf '%s' "$_out"; return ;;
+	esac
+	if [ "$_family" = "6" ]; then
+		_fb="2001:4860:4860::8888"
+		[ "$_anchor" = "$_fb" ] || [ "$_backup" = "$_fb" ] && _fb="2606:4700:4700::1111"
+	else
+		_fb="8.8.8.8"
+		[ "$_anchor" = "$_fb" ] || [ "$_backup" = "$_fb" ] && _fb="1.1.1.1"
+	fi
+	do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_fb" "$_ifn"
 }
 
 # Trailing arguments after $5 are passed through to curl (used to pin a
