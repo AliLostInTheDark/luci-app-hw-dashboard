@@ -1143,7 +1143,15 @@ EOF
 						# than a stale row left behind by a vanished interface.
 						case " $_wm_tr " in *" $_wm_ifn "*) ;; *) continue ;; esac
 						_wm_isp=""
-						[ -f "$_wm_dir/$_wm_ifn.isp" ] && read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
+						if [ -f "$_wm_dir/$_wm_ifn.isp" ]; then
+							read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
+						fi
+						if [ -z "$_wm_isp" ]; then
+							case "$_wm_ifn" in
+								*6) [ -f "$_wm_dir/${_wm_ifn%6}.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn%6}.isp" 2>/dev/null ;;
+								*)  [ -f "$_wm_dir/${_wm_ifn}6.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn}6.isp" 2>/dev/null ;;
+							esac
+						fi
 						_wm_alias=""
 						case "$_wm_uci" in
 							*"network.$_wm_ifn.device='@"*)

@@ -666,6 +666,8 @@ resolve_isp() {
 		_org=${_org# }
 		[ -z "$_org" ] && return
 		printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
+		_base=${_ifn%6}
+		[ -n "$_base" ] && [ ! -f "$RINGDIR/${_base}.isp" ] && cp "$_isp_file" "$RINGDIR/${_base}.isp" 2>/dev/null
 		rm -f "$_try_file"
 		return
 	fi
@@ -706,6 +708,7 @@ resolve_isp() {
 	_org=${_org# }
 	[ -z "$_org" ] && return
 	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
+	[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
 	printf '%s' "$_srcip" > "$_ip_file"
 	# Keep the egress address too, not just the interface one. The pair is
 	# what identifies the connection type: equal means the link terminates
