@@ -672,6 +672,10 @@ resolve_isp() {
 	_ip_file="$RINGDIR/${_ifn}.ispip"
 	_last_ip=""
 	[ -f "$_ip_file" ] && read -r _last_ip < "$_ip_file" 2>/dev/null
+	_sib_v6="$RINGDIR/${_ifn}6.isp"
+	if [ ! -f "$_isp_file" ] && [ -f "$_sib_v6" ]; then
+		cp "$_sib_v6" "$_isp_file" 2>/dev/null
+	fi
 	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ] && [ -f "$RINGDIR/${_ifn}.pubip" ]; then
 		return
 	fi
