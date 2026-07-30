@@ -2933,7 +2933,12 @@ EOF
 				_cache_write "$WIFI_CACHE" 30 "$WIFI_RADIOS"
 				}
 				if _cache_read "$WIFI_CACHE"; then
-					WIFI_RADIOS=$C_VAL
+					if command -v wifi-chipset-detect >/dev/null 2>&1 && case "$C_VAL" in *'"wcd_chipset":""'*|*'"wcd_chipset": ""'*) true ;; *) false ;; esac; then
+						rm -f "$WIFI_CACHE" "$WIFI_CACHE.lock" 2>/dev/null
+						_wifi_refresh
+					else
+						WIFI_RADIOS=$C_VAL
+					fi
 				elif [ -n "$C_VAL" ]; then
 					WIFI_RADIOS=$C_VAL
 					if ! _cache_read "$WIFI_CACHE.lock"; then
