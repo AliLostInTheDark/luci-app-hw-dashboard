@@ -420,16 +420,12 @@ run_probe() {
 # is missing.
 BIND_IF=""
 bind_arg() {
-	if [ "$1" = "6" ]; then
-		if is_public_ip6 "$3"; then
-			BIND_IF=$3
-		elif [ -n "$2" ]; then
-			BIND_IF=$2
-		else
-			BIND_IF=""
-		fi
+	if [ -n "$2" ]; then
+		BIND_IF=$2
+	elif [ "$1" = "6" ] && is_public_ip6 "$3"; then
+		BIND_IF=$3
 	else
-		BIND_IF=$2; [ -z "$BIND_IF" ] && BIND_IF=$3
+		BIND_IF=$3
 	fi
 }
 
