@@ -517,12 +517,12 @@ case "$1" in
 					fi
 				fi
 				[ -n "$_nat_dev" ] || _nat_dev=$_nat_v4
+				_nat_force=$(printf '%s' "$_nat_in" | jsonfilter -e '@.force' -e '@.params[0].force' -e '@.params[1]' 2>/dev/null | head -n 1)
 				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
 				_nat_cache="$NAT_CACHE_DIR/nat.$_nat_if"
 				# ------------------------------------------------------------------
-				# Fast-path: if a valid cache entry exists for the current IPs,
-				# serve it immediately and kick a background re-probe so the next
-				# button click gets a fresh result without blocking the UI.
+				# Fast-path: if a valid cache entry exists for the current IPs AND
+				# force is not set, serve it immediately and kick background refresh.
 				# ------------------------------------------------------------------
 				_nat_cached_v4=""; _nat_cached_s4=""; _nat_cached_m4=""; _nat_cached_f4=""; _nat_cached_p4=""
 				_nat_cached_v6=""; _nat_cached_s6=""; _nat_cached_m6=""; _nat_cached_f6=""; _nat_cached_p6=""
@@ -537,7 +537,7 @@ case "$1" in
 						esac
 					done < "$_nat_cache"
 				fi
-				if [ "$_nat_cache_hit" = "1" ] || { [ -z "$_nat_v4" ] && [ -n "$_nat_cached_v6" ]; }; then
+				if [ "$_nat_force" != "1" ] && [ "$_nat_force" != "true" ] && { [ "$_nat_cache_hit" = "1" ] || { [ -z "$_nat_v4" ] && [ -n "$_nat_cached_v6" ]; }; }; then
 					# Return cached result immediately
 					json_esc "$_nat_if"; _nat_ifj=$JSV
 					printf '{"available":true,"iface":"%s","cached":true,"v4":' "$_nat_ifj"

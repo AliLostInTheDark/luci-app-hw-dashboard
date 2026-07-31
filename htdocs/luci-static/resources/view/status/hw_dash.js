@@ -66,7 +66,7 @@ var callHwWanIps = rpc.declare({
 var callHwNatTest = rpc.declare({
     object: 'luci.hwdash',
     method: 'nat_test',
-    params: ['iface'],
+    params: ['iface', 'force'],
     timeout: 25000,
     expect: {}
 });
@@ -2261,7 +2261,7 @@ return view.extend({
                 E('button', { class: 'btn', click: ui.hideModal }, 'Close')
             ])]);
             var wInfo = (self._wanIpCache && self._wanIpCache[iface]) ? self._wanIpCache[iface] : null;
-            callHwNatTest(iface).then(function(res) {
+            callHwNatTest(iface, 1).then(function(res) {
                 content.innerHTML = '';
                 if (!res || !res.available) {
                     content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'stuntman-client is not installed or could not be started.'));
