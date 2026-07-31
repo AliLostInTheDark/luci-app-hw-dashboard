@@ -2223,6 +2223,7 @@ return view.extend({
         };
         var natDialogRow = function(title, result, wanClass, wInfo) {
             var family = result ? (result.family === '6' ? 6 : 4) : 4;
+            var protoTag = (family === 6) ? 'UDP / IPv6' : 'UDP / IPv4';
             var verdict = result ? natVerdict(family, result.state, result.mapping, result.filtering, wanClass) :
                 { short: 'NOT AVAILABLE', level: 'unknown', note: family === 6 ? 'IPv6 is not configured or no global unicast address is assigned.' : 'IPv4 address is not configured.' };
             var col = natColor(verdict.level);
