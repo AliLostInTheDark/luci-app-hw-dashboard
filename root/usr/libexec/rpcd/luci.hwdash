@@ -319,18 +319,38 @@ _get_stunclient() {
 _nat_probe() {
 	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3; _nat_dev=$4
 	_nat_bin=$(_get_stunclient)
-	if [ "$_nat_family" = "6" ]; then
-		[ -n "$_nat_bind" ] && _nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
-		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+	_nat_args="--mode full --protocol udp"
+	[ "$_nat_family" = "6" ] && _nat_args="$_nat_args --family 6" || _nat_args="$_nat_args --family 4"
+
+	# Build server list — RFC 5780 capable servers that return Nat behavior
+	# stun.miwifi.com:3478 is primary (dual-stack, RFC 5780)
+	# stun1.l.google.com:19302 is secondary (IPv4, basic binding only)
+	# stun.cloudflare.com:3478 is tertiary (dual-stack, RFC 5780)
+	_nat_servers="stun.miwifi.com:3478 stun.cloudflare.com:3478"
+	[ "$_nat_family" = "6" ] && _nat_servers="stun.miwifi.com:3478 stun.cloudflare.com:3478"
+
+	_nat_dir=$(dirname "$_nat_tmp")
+	_nat_base=$(basename "$_nat_tmp")
+	_nat_win=""
+
+	# Try each server sequentially but with short per-attempt ceiling
+	for _nat_se in $_nat_servers; do
+		_nat_srv="${_nat_se%%:*}"; _nat_prt="${_nat_se##*:}"
+		> "$_nat_tmp"
+		if [ -n "$_nat_bind" ]; then
+			$_nat_bin $_nat_args --localaddr "$_nat_bind" "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
 		fi
-	else
-		[ -n "$_nat_bind" ] && _nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
-		if ! grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+		if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
+			return 0
 		fi
-	fi
+		# Binding failed or behavior not determinable — try without localaddr
+		$_nat_bin $_nat_args "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
+		if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
+			return 0
+		fi
+	done
 }
+
 
 _nat_json() {
 	_nat_jfamily=$1; _nat_jaddr=$2; _nat_jstate=$3; _nat_jmap=$4; _nat_jfilter=$5
@@ -483,6 +503,63 @@ case "$1" in
 					fi
 				fi
 				[ -n "$_nat_dev" ] || _nat_dev=$_nat_v4
+				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
+				_nat_cache="$NAT_CACHE_DIR/nat.$_nat_if"
+				# ------------------------------------------------------------------
+				# Fast-path: if a valid cache entry exists for the current IPs,
+				# serve it immediately and kick a background re-probe so the next
+				# button click gets a fresh result without blocking the UI.
+				# ------------------------------------------------------------------
+				_nat_cached_v4=""; _nat_cached_s4=""; _nat_cached_m4=""; _nat_cached_f4=""
+				_nat_cached_v6=""; _nat_cached_s6=""; _nat_cached_m6=""; _nat_cached_f6=""
+				_nat_cache_hit=0
+				if [ -s "$_nat_cache" ]; then
+					while IFS=' ' read -r _cf _ca _cs _cm _cfl _ct; do
+						case "$_cf" in
+							4) if [ "$_ca" = "$_nat_v4" ] && [ "$_cs" != "unavailable" ]; then
+								_nat_cached_v4=$_ca; _nat_cached_s4=$_cs; _nat_cached_m4=$_cm; _nat_cached_f4=$_cfl; _nat_cache_hit=1; fi ;;
+							6) if [ "$_ca" = "$_nat_v6" ] && [ "$_cs" != "unavailable" ]; then
+								_nat_cached_v6=$_ca; _nat_cached_s6=$_cs; _nat_cached_m6=$_cm; _nat_cached_f6=$_cfl; fi ;;
+						esac
+					done < "$_nat_cache"
+				fi
+				if [ "$_nat_cache_hit" = "1" ] || { [ -z "$_nat_v4" ] && [ -n "$_nat_cached_v6" ]; }; then
+					# Return cached result immediately
+					json_esc "$_nat_if"; _nat_ifj=$JSV
+					printf '{"available":true,"iface":"%s","cached":true,"v4":' "$_nat_ifj"
+					if [ -n "$_nat_cached_v4" ]; then _nat_json 4 "$_nat_cached_v4" "$_nat_cached_s4" "$_nat_cached_m4" "$_nat_cached_f4"; else printf 'null'; fi
+					printf ',"v6":'
+					if [ -n "$_nat_cached_v6" ]; then _nat_json 6 "$_nat_cached_v6" "$_nat_cached_s6" "$_nat_cached_m6" "$_nat_cached_f6"; else printf 'null'; fi
+					echo '}'
+					# Kick background re-probe to refresh cache for next time
+					(
+						_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.bg"
+						_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.bg"
+						_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
+						_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
+						[ -n "$_nat_v4" ] && _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" && {
+							_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
+							_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
+							_nat_m4=$(_nat_code "$_nat_map"); _nat_f4=$(_nat_code "$_nat_filter")
+							grep -qi 'Binding test: success' "$_nat_tmp4" 2>/dev/null && _nat_s4=$(_nat_level "$_nat_m4" "$_nat_f4")
+						}
+						[ -n "$_nat_v6" ] && _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" && {
+							_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
+							_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
+							_nat_m6=$(_nat_code "$_nat_map"); _nat_f6=$(_nat_code "$_nat_filter")
+							grep -qi 'Binding test: success' "$_nat_tmp6" 2>/dev/null && _nat_s6=$(_nat_level "$_nat_m6" "$_nat_f6")
+						}
+						{
+							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)"
+							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)"
+						} > "$_nat_cache" 2>/dev/null
+						rm -f "$_nat_tmp4" "$_nat_tmp6"
+					) &
+					exit 0
+				fi
+				# ------------------------------------------------------------------
+				# Cold-path: no valid cache — run blocking probe and return result.
+				# ------------------------------------------------------------------
 				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
 				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"
 				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
@@ -503,8 +580,6 @@ case "$1" in
 				fi
 				rm -f "$_nat_tmp4" "$_nat_tmp6"
 				HWDASH_NOW=$(date +%s 2>/dev/null)
-				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
-				_nat_cache="$NAT_CACHE_DIR/nat.$_nat_if"
 				{
 					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW"
 					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW"

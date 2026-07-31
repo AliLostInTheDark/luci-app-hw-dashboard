@@ -2279,10 +2279,13 @@ return view.extend({
                     if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
                     if (res.v6) content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
                 }
+                if (res.cached) {
+                    content.appendChild(E('div', { style: 'font-size:0.75em; opacity:0.55; margin-top:4px;' }, '↻ Showing cached result · Background re-probe in progress'));
+                }
                 wanIpTick();
-            }).catch(function() {
+            }).catch(function(err) {
                 content.innerHTML = '';
-                content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test failed before a result was returned.'));
+                content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT probe timed out or was interrupted. The test may still be running in the background — try again in a moment.'));
             });
         };
         var wanIpTick = function() {
