@@ -5084,8 +5084,10 @@ return view.extend({
         var hwTick = 0;
         poll.add(function() {
             hwTick++;
-            if (hwTick % 2 === 1) wanQTick();
-            if (hwTick % 2 === 0) pingTick();
+            if (hwTick % 2 === 0) {
+                wanQTick();
+                pingTick();
+            }
             if (hwTick % 3 === 0) infoTick();
             // Offset by 1 so the station dump never lands on the same tick as
             // info, which is the expensive one.
