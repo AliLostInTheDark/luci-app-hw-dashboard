@@ -219,6 +219,12 @@ discover_ifaces() {
 	_active=""
 	ACTIVE_IFACES=""
 
+	_rules4=""
+	_rules6=""
+	if [ -f "$WRAP" ]; then
+		_rules4=$(ip -f inet rule 2>/dev/null)
+		_rules6=$(ip -f inet6 rule 2>/dev/null)
+	fi
 	_names=$(printf '%s' "$_dump" | jsonfilter -e '@.interface[*].interface' 2>/dev/null)
 	_idx=0
 	for _ifn in $_names; do
@@ -256,8 +262,11 @@ discover_ifaces() {
 
 		_mark=""
 		if [ -f "$WRAP" ]; then
-			_table=$(ip -"$_family" rule 2>/dev/null | sed -n "/iif $_dev /s/.*lookup //p" | head -1)
-			[ -n "$_table" ] && _mark=$(ip -"$_family" rule 2>/dev/null | sed -n "/fwmark .*lookup $_table$/s/.*fwmark \(0x[0-9a-fA-F]*\).*/\1/p" | head -1)
+			_rules=""
+			[ "$_family" = "4" ] && _rules="$_rules4"
+			[ "$_family" = "6" ] && _rules="$_rules6"
+			_table=$(printf '%s\n' "$_rules" | sed -n "/iif $_dev /s/.*lookup //p" | head -1)
+			[ -n "$_table" ] && _mark=$(printf '%s\n' "$_rules" | sed -n "/fwmark .*lookup $_table$/s/.*fwmark \(0x[0-9a-fA-F]*\).*/\1/p" | head -1)
 		fi
 		[ -z "$_mark" ] && _mark="-"
 		# Probe targets are stable for as long as this entry is, so resolve
@@ -1172,10 +1181,7 @@ while :; do
 		_force_discover=1
 	fi
 	if [ "$_force_discover" = "1" ] || [ -z "$IFACE_LIST" ] || [ $((_now - LAST_DISCOVER)) -ge "$DISCOVER_INTERVAL" ]; then
-		if [ ! -f "$RINGDIR/.discovering" ]; then
-			touch "$RINGDIR/.discovering"
-			( discover_ifaces; rm -f "$RINGDIR/.discovering" ) &
-		fi
+		discover_ifaces
 		LAST_DISCOVER=$_now
 	fi
 	_pids=""
