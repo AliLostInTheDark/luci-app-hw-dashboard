@@ -294,6 +294,7 @@ discover_ifaces() {
 	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
 	TRACKED_IFACES=""
 	for _ifn in $_old_tracked; do
+		_keep=1
 		case "$_ifn" in loopback|lan|lan6) _keep=0 ;; esac
 		if [ -n "$_uci_net" ]; then
 			case "$_uci_net" in
