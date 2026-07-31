@@ -349,13 +349,15 @@ _nat_probe() {
 }
 
 _nat_json() {
-	_nat_jfamily=$1; _nat_jaddr=$2; _nat_jstate=$3; _nat_jmap=$4; _nat_jfilter=$5
+	_nat_jfamily=$1; _nat_jaddr=$2; _nat_jstate=$3; _nat_jmap=$4; _nat_jfilter=$5; _nat_jpub=$6
+	[ -n "$_nat_jpub" ] || _nat_jpub="—"
 	json_esc "$_nat_jaddr"; _nat_jaddr=$JSV
+	json_esc "$_nat_jpub"; _nat_jpub=$JSV
 	json_esc "$_nat_jstate"; _nat_jstate=$JSV
 	json_esc "$_nat_jmap"; _nat_jmap=$JSV
 	json_esc "$_nat_jfilter"; _nat_jfilter=$JSV
-	printf '{"family":"%s","address":"%s","state":"%s","mapping":"%s","filtering":"%s"}' \
-		"$_nat_jfamily" "$_nat_jaddr" "$_nat_jstate" "$_nat_jmap" "$_nat_jfilter"
+	printf '{"family":"%s","address":"%s","pub":"%s","state":"%s","mapping":"%s","filtering":"%s"}' \
+		"$_nat_jfamily" "$_nat_jaddr" "$_nat_jpub" "$_nat_jstate" "$_nat_jmap" "$_nat_jfilter"
 }
 
 
@@ -363,6 +365,7 @@ _nat_parse_out() {
 	_p_file=$1; _p_fam=$2
 	_p_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
 	_p_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
+	_p_mapped=$(sed -n 's/^[Mm]apped address:[[:space:]]*\([^:]*\):.*/\1/p' "$_p_file" 2>/dev/null | head -1)
 	_p_m=$(_nat_code "$_p_map"); _p_f=$(_nat_code "$_p_filter")
 	_p_s="unavailable"
 	if [ "$_p_fam" = "6" ]; then
@@ -370,7 +373,7 @@ _nat_parse_out() {
 	else
 		grep -qi 'Binding test: success' "$_p_file" 2>/dev/null && _p_s=$(_nat_level "$_p_m" "$_p_f")
 	fi
-	echo "$_p_s $_p_m $_p_f"
+	echo "$_p_s $_p_m $_p_f ${_p_mapped:-—}"
 }
 
 
@@ -521,16 +524,16 @@ case "$1" in
 				# serve it immediately and kick a background re-probe so the next
 				# button click gets a fresh result without blocking the UI.
 				# ------------------------------------------------------------------
-				_nat_cached_v4=""; _nat_cached_s4=""; _nat_cached_m4=""; _nat_cached_f4=""
-				_nat_cached_v6=""; _nat_cached_s6=""; _nat_cached_m6=""; _nat_cached_f6=""
+				_nat_cached_v4=""; _nat_cached_s4=""; _nat_cached_m4=""; _nat_cached_f4=""; _nat_cached_p4=""
+				_nat_cached_v6=""; _nat_cached_s6=""; _nat_cached_m6=""; _nat_cached_f6=""; _nat_cached_p6=""
 				_nat_cache_hit=0
 				if [ -s "$_nat_cache" ]; then
-					while IFS=' ' read -r _cf _ca _cs _cm _cfl _ct; do
+					while IFS=' ' read -r _cf _ca _cs _cm _cfl _ct _cp; do
 						case "$_cf" in
 							4) if [ "$_ca" = "$_nat_v4" ] && [ "$_cs" != "unavailable" ]; then
-								_nat_cached_v4=$_ca; _nat_cached_s4=$_cs; _nat_cached_m4=$_cm; _nat_cached_f4=$_cfl; _nat_cache_hit=1; fi ;;
+								_nat_cached_v4=$_ca; _nat_cached_s4=$_cs; _nat_cached_m4=$_cm; _nat_cached_f4=$_cfl; _nat_cached_p4=$_cp; _nat_cache_hit=1; fi ;;
 							6) if [ "$_ca" = "$_nat_v6" ] && [ "$_cs" != "unavailable" ]; then
-								_nat_cached_v6=$_ca; _nat_cached_s6=$_cs; _nat_cached_m6=$_cm; _nat_cached_f6=$_cfl; fi ;;
+								_nat_cached_v6=$_ca; _nat_cached_s6=$_cs; _nat_cached_m6=$_cm; _nat_cached_f6=$_cfl; _nat_cached_p6=$_cp; fi ;;
 						esac
 					done < "$_nat_cache"
 				fi
@@ -538,34 +541,34 @@ case "$1" in
 					# Return cached result immediately
 					json_esc "$_nat_if"; _nat_ifj=$JSV
 					printf '{"available":true,"iface":"%s","cached":true,"v4":' "$_nat_ifj"
-					if [ -n "$_nat_cached_v4" ]; then _nat_json 4 "$_nat_cached_v4" "$_nat_cached_s4" "$_nat_cached_m4" "$_nat_cached_f4"; else printf 'null'; fi
+					if [ -n "$_nat_cached_v4" ]; then _nat_json 4 "$_nat_cached_v4" "$_nat_cached_s4" "$_nat_cached_m4" "$_nat_cached_f4" "$_nat_cached_p4"; else printf 'null'; fi
 					printf ',"v6":'
-					if [ -n "$_nat_cached_v6" ]; then _nat_json 6 "$_nat_cached_v6" "$_nat_cached_s6" "$_nat_cached_m6" "$_nat_cached_f6"; else printf 'null'; fi
+					if [ -n "$_nat_cached_v6" ]; then _nat_json 6 "$_nat_cached_v6" "$_nat_cached_s6" "$_nat_cached_m6" "$_nat_cached_f6" "$_nat_cached_p6"; else printf 'null'; fi
 					echo '}'
 					# Kick background re-probe to refresh cache for next time
 					(
 						_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.bg"
 						_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.bg"
-						_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
-						_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
+						_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"; _nat_p4="—"
+						_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"; _nat_p6="—"
 						# Run v4 and v6 probes in parallel background processes
 						[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
 						[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
 						[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
 						[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
 						if [ -n "$_nat_v4" ]; then
-							read -r _nat_s4 _nat_m4 _nat_f4 <<EOF
+							read -r _nat_s4 _nat_m4 _nat_f4 _nat_p4 <<EOF
 $(_nat_parse_out "$_nat_tmp4" 4)
 EOF
 						fi
 						if [ -n "$_nat_v6" ]; then
-							read -r _nat_s6 _nat_m6 _nat_f6 <<EOF
+							read -r _nat_s6 _nat_m6 _nat_f6 _nat_p6 <<EOF
 $(_nat_parse_out "$_nat_tmp6" 6)
 EOF
 						fi
 						{
-							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)"
-							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)"
+							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)" "$_nat_p4"
+							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)" "$_nat_p6"
 						} > "$_nat_cache" 2>/dev/null
 						rm -f "$_nat_tmp4" "$_nat_tmp6"
 					) &
@@ -576,34 +579,34 @@ EOF
 				# ------------------------------------------------------------------
 				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
 				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"
-				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
-				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
+				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"; _nat_p4="—"
+				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"; _nat_p6="—"
 				_p4=""; _p6=""
 				[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
 				[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
 				[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
 				[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
 				if [ -n "$_nat_v4" ]; then
-					read -r _nat_s4 _nat_m4 _nat_f4 <<EOF
+					read -r _nat_s4 _nat_m4 _nat_f4 _nat_p4 <<EOF
 $(_nat_parse_out "$_nat_tmp4" 4)
 EOF
 				fi
 				if [ -n "$_nat_v6" ]; then
-					read -r _nat_s6 _nat_m6 _nat_f6 <<EOF
+					read -r _nat_s6 _nat_m6 _nat_f6 _nat_p6 <<EOF
 $(_nat_parse_out "$_nat_tmp6" 6)
 EOF
 				fi
 				rm -f "$_nat_tmp4" "$_nat_tmp6"
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				{
-					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW"
-					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW"
+					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW" "$_nat_p4"
+					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW" "$_nat_p6"
 				} > "$_nat_cache" 2>/dev/null
 				json_esc "$_nat_if"; _nat_ifj=$JSV
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
-				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4"; else printf 'null'; fi
+				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$_nat_p4"; else printf 'null'; fi
 				printf ',"v6":'
-				if [ -n "$_nat_v6" ]; then _nat_json 6 "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6"; else printf 'null'; fi
+				if [ -n "$_nat_v6" ]; then _nat_json 6 "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$_nat_p6"; else printf 'null'; fi
 				echo '}'
 				;;
 			wan_ips)

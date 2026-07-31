@@ -2231,7 +2231,7 @@ return view.extend({
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
             var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanIpCache) ? self._wanIpCache[wInfo.alias_of || wInfo.parent] : null;
             var localIp = result ? result.address : (wInfo ? (family === 6 ? (wInfo.ip6 || (parentInfo ? parentInfo.ip6 : '—')) : (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—'))) : '—');
-            var pubIp = (family === 4) ? ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—') : (family === 6 ? localIp : '—');
+            var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((family === 4) ? ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—') : (family === 6 ? localIp : '—'));
             var serverUsed = family === 6 ? 'stun.l.google.com:19302 (Dual-Stack IPv6)' : 'stun.l.google.com:19302 / stun.miwifi.com:3478';
 
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
@@ -2271,11 +2271,13 @@ return view.extend({
                     content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
-                if (wInfo && wInfo.ip4 && !wInfo.ip6 && res.v4) {
-                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
-                } else if (wInfo && wInfo.ip6 && !wInfo.ip4) {
-                    var v6Res = res.v6 || { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: wInfo.ip6 };
+                var isV6Only = (wInfo && wInfo.ip6 && !wInfo.ip4) || (iface.indexOf('6') !== -1 && iface !== '6rd' && iface !== '6in4');
+                var isV4Only = (wInfo && wInfo.ip4 && !wInfo.ip6) || (iface.indexOf('6') === -1);
+                if (isV6Only) {
+                    var v6Res = res.v6 || { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: (wInfo ? wInfo.ip6 : '—') };
                     content.appendChild(natDialogRow('IPv6 NAT Behavior', v6Res, wanClass, wInfo));
+                } else if (isV4Only) {
+                    if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
                 } else {
                     if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
                     if (res.v6) content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
