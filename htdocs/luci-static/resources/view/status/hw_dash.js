@@ -67,6 +67,7 @@ var callHwNatTest = rpc.declare({
     object: 'luci.hwdash',
     method: 'nat_test',
     params: ['iface'],
+    timeout: 25000,
     expect: {}
 });
 var parseCpu = function(line) {

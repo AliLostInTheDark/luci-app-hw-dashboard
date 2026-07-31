@@ -318,24 +318,16 @@ _get_stunclient() {
 
 _nat_probe() {
 	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3; _nat_dev=$4
-	[ -n "$_nat_bind" ] || _nat_bind=$_nat_dev
-	[ -n "$_nat_bind" ] || return
 	_nat_bin=$(_get_stunclient)
 	if [ "$_nat_family" = "6" ]; then
-		_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
+		[ -n "$_nat_bind" ] && _nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
 		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
-		fi
-		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null && [ -n "$_nat_dev" ]; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_dev" stun.l.google.com 19302 2>/dev/null
+			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
 		fi
 	else
-		_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
-		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
-		fi
-		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null && [ -n "$_nat_dev" ]; then
-			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_dev" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+		[ -n "$_nat_bind" ] && _nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+		if ! grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
+			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
 		fi
 	fi
 }
