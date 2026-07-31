@@ -320,8 +320,17 @@ _nat_probe() {
 	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3
 	[ -n "$_nat_bind" ] || return
 	_nat_bin=$(_get_stunclient)
-	_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family "$_nat_family" \
-		--protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT"
+	if [ "$_nat_family" = "6" ]; then
+		_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
+		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
+			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 6 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+		fi
+	else
+		_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT" 2>/dev/null
+		if ! grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
+			_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family 4 --protocol udp --localaddr "$_nat_bind" stun.l.google.com 19302 2>/dev/null
+		fi
+	fi
 }
 
 _nat_json() {

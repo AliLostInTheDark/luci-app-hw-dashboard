@@ -2220,29 +2220,45 @@ return view.extend({
         var natColor = function(level) {
             return sevColor(level === 'open' ? 'good' : level === 'moderate' ? 'warn' : level === 'strict' || level === 'unavailable' ? 'bad' : 'mute');
         };
-        var natDialogRow = function(title, result, wanClass) {
-            var verdict = result ? natVerdict(result.family === '6' ? 6 : 4, result.state, result.mapping, result.filtering, wanClass) :
-                { short: 'NOT AVAILABLE', level: 'unknown', note: 'This address family is not configured on this WAN.' };
+        var natDialogRow = function(title, result, wanClass, wInfo) {
+            var family = result ? (result.family === '6' ? 6 : 4) : 4;
+            var verdict = result ? natVerdict(family, result.state, result.mapping, result.filtering, wanClass) :
+                { short: 'NOT AVAILABLE', level: 'unknown', note: family === 6 ? 'IPv6 is not configured or no global unicast address is assigned.' : 'IPv4 address is not configured.' };
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
+            var protoTag = 'UDP / IPv' + family;
+            var localIp = result ? result.address : (wInfo ? (family === 6 ? wInfo.ip6 : wInfo.ip4) : '—');
+            var pubIp = (family === 4 && wInfo && wInfo.pub4) ? wInfo.pub4 : (family === 6 ? localIp : '—');
+            var serverUsed = family === 6 ? 'stun.l.google.com:19302 (Dual-Stack IPv6)' : 'stun.l.google.com:19302 / stun.miwifi.com:3478';
+
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
                 E('div', { style: 'display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;' }, [
-                    E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
+                    E('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+                        E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
+                        E('span', { style: 'font-size:0.7em; font-weight:700; padding:1px 6px; border-radius:6px; background:' + col + '22; color:' + col + ';' }, protoTag)
+                    ]),
                     E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 8px;' }, verdict.short)
                 ]),
                 E('div', { style: 'font-size:0.8em; opacity:0.85; line-height:1.4;' }, verdict.note),
-                E('div', { style: 'font-size:0.8em; opacity:0.75; line-height:1.4;' }, 'Mapping: ' + mapping + ' · Filtering: ' + filtering)
+                E('div', { style: 'display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:4px 12px; font-size:0.78em; opacity:0.82; margin-top:3px; line-height:1.45;' }, [
+                    E('div', {}, 'Local Address: ' + (localIp || '—')),
+                    E('div', {}, 'Public Egress: ' + (pubIp || '—')),
+                    E('div', {}, 'Mapping: ' + mapping),
+                    E('div', {}, 'Filtering: ' + filtering),
+                    E('div', { style: 'grid-column:1 / -1; opacity:0.75;' }, 'Official STUN Server: ' + serverUsed)
+                ])
             ]);
         };
         var runNatTest = function(iface, wanClass) {
-            var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:10px;' }, [
-                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It measures IPv4 NAT mapping and filtering behaviors.'),
+            var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:12px;' }, [
+                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with official STUN server probes (RFC 3489 / RFC 5780 / RFC 6598). It measures IPv4 and IPv6 NAT mapping and filtering behaviors.'),
                 E('div', { style: 'font-size:0.8em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
             ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
                 E('button', { class: 'btn', click: ui.hideModal }, 'Close')
             ])]);
+            var wInfo = (self._wanIpCache && self._wanIpCache[iface]) ? self._wanIpCache[iface] : null;
             callHwNatTest(iface).then(function(res) {
                 content.innerHTML = '';
                 if (!res || !res.available) {
@@ -2254,9 +2270,12 @@ return view.extend({
                     return;
                 }
                 if (res.v4) {
-                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass));
-                } else {
-                    content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.8;' }, 'No IPv4 address is configured on this interface.'));
+                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
+                }
+                if (res.v6) {
+                    content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
+                } else if (wInfo && wInfo.ip6) {
+                    content.appendChild(natDialogRow('IPv6 NAT Behavior', { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: wInfo.ip6 }, wanClass, wInfo));
                 }
                 wanIpTick();
             }).catch(function() {
