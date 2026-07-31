@@ -4934,10 +4934,6 @@ return view.extend({
                     var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
                     var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [rateVal, rateLbl]);
 
-                    var histGraphEl = E('div', { style: 'width: 100%; height: 32px;' });
-                    var histLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; text-align: center; display: block;' }, 'TREND');
-                    var histBlock = E('div', { style: 'display: flex; flex-direction: column; gap: 3px; flex: 1 1 108px; min-width: 108px;' }, [histGraphEl, histLbl]);
-
                     // Why it is down, on its own full-width line under the row.
                     // The status column has room for "OFFLINE" and a duration
                     // and nothing else, and the cause is a sentence -- so it
@@ -4946,8 +4942,7 @@ return view.extend({
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
                             E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
-                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock]),
-                            histBlock
+                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock])
                         ]),
                         reasonEl
                     ]);
@@ -4965,7 +4960,6 @@ return view.extend({
                         uptime: uptimeVal,
                         downtime: downtimeVal,
                         rate: rateVal,
-                        histGraph: histGraphEl,
                         reason: reasonEl
                     };
                 }, function(entry, r) {
@@ -4974,18 +4968,7 @@ return view.extend({
                     entry.statusVal.style.color = statusColor;
                     entry.statusVal.textContent = r.status === 'up' ? 'ACTIVE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
                     entry.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
-                    // The collector works the cause out anyway, for the Alerts
-                    // card. Repeating it here costs nothing and saves reading
-                    // "OFFLINE" on one card and going to another to find out
-                    // whether that means a cable, a lease or the ISP.
-                    // Bytes per second from the kernel counters, shown the way
-                    // a link is normally described: down first, then up.
-                    //
-                    // A v4/v6 pair shares one device, so both rows would report
-                    // the same wire and a reader adding the column up would get
-                    // double the real traffic. The counter belongs to the
-                    // device, so it is shown once -- on whichever row comes
-                    // first -- and the sibling says who it is sharing with.
+
                     var rxb = r.rx_bps || 0, txb = r.tx_bps || 0;
                     var owner = r.rate_dev ? self._rateOwner[r.rate_dev] : null;
                     entry.rate.style.whiteSpace = 'pre';
@@ -5007,20 +4990,13 @@ return view.extend({
 
                     var ib = ispBadge(r.isp, r.iface);
                     setText(entry.ispName, ib.name);
-                    // The registry string is what the name was derived from, so
-                    // keep it reachable rather than discarded.
                     if (entry.ispName.title !== ib.full) entry.ispName.title = ib.full;
                     entry.monogramEl.style.background = ib.color;
                     entry.monogramEl.textContent = ib.label;
-                    // Only touch img.src when the selected asset actually
-                    // changes -- setting src every poll would refetch and
-                    // flicker the logo for no reason.
                     var remoteSrc = ib.domain ? 'https://logos.hunter.io/' + ib.domain : '';
                     var logoSrc = ib.logo || remoteSrc;
                     if (logoSrc && entry.logoImg.dataset.src !== logoSrc) {
                         entry.logoImg.dataset.src = logoSrc;
-                        // Only meaningful when both exist: bundled asset primary,
-                        // remote service as the standby.
                         entry.logoImg.dataset.fallback = (ib.logo && remoteSrc) ? remoteSrc : '';
                         entry.logoImg.style.display = 'none';
                         entry.monogramEl.style.display = 'inline-flex';
@@ -5053,13 +5029,6 @@ return view.extend({
                     }
                     entry.lat.style.color = latColor;
                     entry.lat.textContent = (r.status === 'up' && r.cur_ms != null) ? (r.cur_ms + ' ms') : '—';
-
-                    // Down periods render their own red band inside
-                    // drawWanHistorySpark itself (only from where the
-                    // outage actually starts) -- this color only applies
-                    // to the healthy segments, so it should never be the
-                    // down/red status color even while currently down.
-                    drawWanHistorySpark(entry.histGraph, r.history, latColor);
                 });
             }).catch(function(err) {
                 console.error(err);
