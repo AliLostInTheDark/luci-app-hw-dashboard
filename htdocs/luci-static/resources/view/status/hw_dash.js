@@ -2269,13 +2269,14 @@ return view.extend({
                     content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
-                if (res.v4) {
+                if (wInfo && wInfo.ip4 && !wInfo.ip6 && res.v4) {
                     content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
-                }
-                if (res.v6) {
-                    content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
-                } else if (wInfo && wInfo.ip6) {
-                    content.appendChild(natDialogRow('IPv6 NAT Behavior', { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: wInfo.ip6 }, wanClass, wInfo));
+                } else if (wInfo && wInfo.ip6 && !wInfo.ip4) {
+                    var v6Res = res.v6 || { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: wInfo.ip6 };
+                    content.appendChild(natDialogRow('IPv6 NAT Behavior', v6Res, wanClass, wInfo));
+                } else {
+                    if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
+                    if (res.v6) content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
                 }
                 wanIpTick();
             }).catch(function() {
