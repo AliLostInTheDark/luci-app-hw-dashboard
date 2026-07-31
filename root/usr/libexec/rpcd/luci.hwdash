@@ -1130,7 +1130,6 @@ EOF
 					_wm_tracked="$_wm_dir/.tracked"
 					_wm_tr=""
 					[ -f "$_wm_tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_tracked" 2>/dev/null)
-					_wm_uci=$(uci -q show network 2>/dev/null)
 					_wm_items=""
 					_wm_first=1
 					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
@@ -1152,13 +1151,10 @@ EOF
 								*)  [ -f "$_wm_dir/${_wm_ifn}6.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn}6.isp" 2>/dev/null ;;
 							esac
 						fi
-						_wm_alias=""
-						case "$_wm_uci" in
-							*"network.$_wm_ifn.device='@"*)
-								_wm_alias=${_wm_uci#*network.$_wm_ifn.device=\'@}
-								_wm_alias=${_wm_alias%%\'*}
-								;;
-						esac
+					_wm_alias=""
+					if [ -f "$_wm_dir/.aliases" ]; then
+						_wm_alias=$(grep "^$_wm_ifn " "$_wm_dir/.aliases" 2>/dev/null | awk '{print $2}')
+					fi
 						json_esc "$_wm_isp"; _wm_ispj=$JSV
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
 						json_esc "$_wm_alias"; _wm_aliasj=$JSV

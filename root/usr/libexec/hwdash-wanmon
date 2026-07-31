@@ -348,6 +348,7 @@ discover_ifaces() {
 	done <<EOF
 $_alias_pairs
 EOF
+	printf '%s\n' "$_alias_pairs" > "$RINGDIR/.aliases"
 	# Sorted, so every reader presents the same interfaces in the same order.
 	# Unsorted this file is in first-discovery order, which is whatever netifd
 	# happened to bring up first on this boot -- the NAT Type card inherited it
@@ -1171,7 +1172,10 @@ while :; do
 		_force_discover=1
 	fi
 	if [ "$_force_discover" = "1" ] || [ -z "$IFACE_LIST" ] || [ $((_now - LAST_DISCOVER)) -ge "$DISCOVER_INTERVAL" ]; then
-		discover_ifaces
+		if [ ! -f "$RINGDIR/.discovering" ]; then
+			touch "$RINGDIR/.discovering"
+			( discover_ifaces; rm -f "$RINGDIR/.discovering" ) &
+		fi
 		LAST_DISCOVER=$_now
 	fi
 	_pids=""
