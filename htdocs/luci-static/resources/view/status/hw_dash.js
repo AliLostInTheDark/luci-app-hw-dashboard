@@ -4909,30 +4909,38 @@ return view.extend({
                     var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; vertical-align: middle;' });
                     var statusVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; vertical-align: middle;' });
                     var statusLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; font-weight: 500; white-space: nowrap;' });
-                    var statusBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [
-                        E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; line-height: 1;' }, [statusDot, statusVal]),
+                    var statusBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; line-height: 1; flex: 1; min-height: 26px;' }, [statusDot, statusVal]),
                         statusLbl
                     ]);
 
                     var latVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; color: #00bcd4; font-family: monospace; line-height: 1; white-space: nowrap;' });
                     var latLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'LATENCY');
-                    var latBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [latVal, latLbl]);
+                    var latBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [latVal]),
+                        latLbl
+                    ]);
 
                     var uptimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
                     var uptimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'UPTIME 24H');
-                    var uptimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [uptimeVal, uptimeLbl]);
+                    var uptimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [uptimeVal]),
+                        uptimeLbl
+                    ]);
 
                     var downtimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
                     var downtimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN 24H');
-                    var downtimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [downtimeVal, downtimeLbl]);
+                    var downtimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [downtimeVal]),
+                        downtimeLbl
+                    ]);
 
-                    // What the link is actually carrying. The card had latency
-                    // and availability for each WAN but no idea whether any
-                    // traffic was moving over it, which is the first thing you
-                    // want when deciding which link a problem is on.
                     var rateVal = E('span', { style: 'font-size: 0.82em; font-weight: 700; font-family: monospace; line-height: 1.25; white-space: nowrap;' });
                     var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
-                    var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 2px; text-align: center;' }, [rateVal, rateLbl]);
+                    var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                        E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [rateVal]),
+                        rateLbl
+                    ]);
 
                     // Why it is down, on its own full-width line under the row.
                     // The status column has room for "OFFLINE" and a duration
@@ -4942,7 +4950,7 @@ return view.extend({
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
                             E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
-                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock])
+                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock])
                         ]),
                         reasonEl
                     ]);
