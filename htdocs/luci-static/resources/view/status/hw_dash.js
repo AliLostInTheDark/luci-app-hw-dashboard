@@ -4992,6 +4992,9 @@ return view.extend({
                     }
 
                     var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
+                    if (rsn) {
+                        rsn = rsn.charAt(0).toUpperCase() + rsn.slice(1);
+                    }
                     if (entry.reason.textContent !== rsn) setText(entry.reason, rsn);
                     entry.reason.style.display = rsn ? '' : 'none';
                     entry.reason.style.color = rsn ? statusColor : '';

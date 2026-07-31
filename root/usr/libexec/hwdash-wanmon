@@ -957,7 +957,7 @@ process_iface() {
 		# netifd already records genuine interface events itself.
 		case "$_status" in
 			up|down) log_transition "$_ifn" "$_new_status" \
-				"the link is up on $_dev, but ${_tgt:-the probe target} is not answering" ;;
+				"The link is active on interface $_dev, but target ${_tgt:-ICMP host} is unreachable." ;;
 		esac
 		_status="$_new_status"
 		_streak_start=$_now
@@ -974,7 +974,7 @@ process_iface() {
 	# because the answer is already in hand.
 	if [ "$_status" = "down" ]; then
 		printf '%d unreachable %s\n' "$_now" \
-			"the link is up on $_dev, but ${_tgt:-the probe target} is not answering" \
+			"The link is active on interface $_dev, but target ${_tgt:-ICMP host} is unreachable." \
 			> "$RINGDIR/${_ifn}.reason"
 	elif [ -f "$RINGDIR/${_ifn}.reason" ]; then
 		rm -f "$RINGDIR/${_ifn}.reason" 2>/dev/null
@@ -997,7 +997,7 @@ wan_down_reason() {
 	_r_ifn=$1
 	_r_st=$(ubus call "network.interface.$_r_ifn" status 2>/dev/null)
 	if [ -z "$_r_st" ]; then
-		echo "missing netifd no longer has this interface -- it was deleted or renamed"
+		echo "missing The interface is no longer managed by netifd. It may have been deleted or renamed."
 		return
 	fi
 	_r_up=""; _r_avail=""; _r_auto=""; _r_dev=""; _r_l3=""; _r_proto=""; _r_pending=""
@@ -1025,17 +1025,17 @@ wan_down_reason() {
 		_r_car=""
 		read -r _r_car < "/sys/class/net/$_r_nd/carrier" 2>/dev/null
 		if [ "$_r_car" = "0" ]; then
-			echo "nocarrier no link on $_r_nd -- cable unplugged, or the device at the other end is off"
+			echo "nocarrier Physical link down on interface $_r_nd. The Ethernet cable is unplugged or the upstream device is powered off."
 			return
 		fi
 		break
 	done
 
 	case "$_r_auto" in
-		0|false) echo "admin the interface is configured not to start automatically"; return ;;
+		0|false) echo "admin The interface is administratively disabled and configured not to start automatically."; return ;;
 	esac
 	case "$_r_avail" in
-		0|false) echo "nodevice its device (${_r_dev:-unknown}) is not present -- the port or module is missing"; return ;;
+		0|false) echo "nodevice Physical device (${_r_dev:-unknown}) is not present. The port or hardware module is missing."; return ;;
 	esac
 
 	# netifd's own error stack, when it has one, beats anything inferred.
@@ -1047,62 +1047,62 @@ wan_down_reason() {
 	if [ -n "$_r_err" ]; then
 		case "$_r_err" in
 			NO_DEVICE|NO_IFACE|NO_IFNAME|BAD_DEVICE)
-			                  echo "netifd the configured device is missing" ;;
+			                  echo "netifd The configured physical or logical device is missing." ;;
 			DEVICE_CLAIM_FAILED)
-			                  echo "netifd its device could not be claimed -- another interface is probably using it" ;;
+			                  echo "netifd Device could not be claimed. Another interface is currently utilizing it." ;;
 			NO_ADDRESS|ADDRESS_MISSING|NO_IPADDRESS)
-			                  echo "netifd no address could be obtained from the upstream" ;;
-			PREFIX_MISSING)   echo "netifd the ISP did not delegate an IPv6 prefix" ;;
+			                  echo "netifd No IP address was received from the upstream gateway or server." ;;
+			PREFIX_MISSING)   echo "netifd The service provider did not delegate an IPv6 prefix." ;;
 			PEER_AUTH_FAILED|CNID_AUTH_FAILED|AUTH_FAILED)
-			                  echo "netifd the ISP rejected the PPP username or password" ;;
+			                  echo "netifd PPP authentication failed. The service provider rejected the credentials." ;;
 			AUTH_TOPEER_FAILED)
-			                  echo "netifd the ISP failed to authenticate to us" ;;
+			                  echo "netifd Upstream service provider authentication failed." ;;
 			CONNECT_FAILED|CALL_FAILED)
-			                  echo "netifd the connection attempt to the ISP failed" ;;
+			                  echo "netifd Connection establishment attempt to the service provider failed." ;;
 			NEGOTIATION_FAILED)
-			                  echo "netifd PPP negotiation with the ISP failed" ;;
-			PEER_DEAD|HANGUP) echo "netifd the ISP dropped the PPP session" ;;
-			IDLE_TIMEOUT)     echo "netifd the PPP session was closed for being idle" ;;
-			TRAFFIC_LIMIT)    echo "netifd the PPP session hit its configured traffic limit" ;;
+			                  echo "netifd PPP session negotiation with the service provider failed." ;;
+			PEER_DEAD|HANGUP) echo "netifd The service provider terminated the active PPP session." ;;
+			IDLE_TIMEOUT)     echo "netifd The PPP session was closed due to inactivity timeout." ;;
+			TRAFFIC_LIMIT)    echo "netifd The PPP session reached its configured data traffic limit." ;;
 			INVALID_ADDRESS|INVALID_GATEWAY|INVALID_NETMASK|INVALID_BROADCAST|INVALID_PTPADDR)
-			                  echo "netifd the addressing handed out by the upstream is not usable" ;;
+			                  echo "netifd Invalid addressing received from the upstream service provider." ;;
 			OPTION_ERROR|INVALID_PROTO|INVALID_OPTIONS)
-			                  echo "netifd this interface's own configuration was rejected" ;;
+			                  echo "netifd Interface configuration parameters were rejected." ;;
 			SETUP_FAILED|CONFIGURE_FAILED|INITIALIZE_FAILED)
-			                  echo "netifd bringing the interface up failed" ;;
+			                  echo "netifd Interface initialization failed." ;;
 			NO_APN|NO_REGISTRATION|NETWORK_REGISTRATION_FAILED)
-			                  echo "netifd the mobile network did not accept this connection" ;;
+			                  echo "netifd Cellular network registration failed." ;;
 			PIN_FAILED|PIN_NOT_SPECIFIED|MM_PINCODE_REQUIRED|MM_PINCODE_WRONG|PUK_NEEDED)
-			                  echo "netifd the SIM is locked and needs its PIN" ;;
-			*)                echo "netifd reported by netifd as $_r_err" ;;
+			                  echo "netifd SIM card is locked. A valid PIN or PUK code is required." ;;
+			*)                echo "netifd Reported by netifd as $_r_err." ;;
 		esac
 		return
 	fi
 
 	case "$_r_pending" in
-		1|true) echo "pending the interface is still negotiating -- give it a moment"; return ;;
+		1|true) echo "pending Connection negotiation in progress." ; return ;;
 	esac
 
 	if [ "$_r_up" = "1" ] || [ "$_r_up" = "true" ]; then
 		if [ -z "$_r_v4" ] && [ -z "$_r_v6" ]; then
 			case "$_r_proto" in
 				dhcp|dhcpv6)
-					echo "nolease no DHCP lease -- the server did not answer, or the lease expired and could not be renewed" ;;
+					echo "nolease No DHCP lease acquired. The upstream server did not respond or the lease expired." ;;
 				pppoe|pppoa|ppp|l2tp|pptp)
-					echo "nosession the ${_r_proto} session is not established" ;;
+					echo "nosession The ${_r_proto} session is not established." ;;
 				static)
-					echo "noaddress the static address configured here is not on the interface" ;;
+					echo "noaddress The configured static IP address is not assigned to the interface." ;;
 				*)
-					echo "noaddress the link is up but no address was obtained" ;;
+					echo "noaddress The link is up, but no IP address was assigned." ;;
 			esac
 			return
 		fi
 		# Up, addressed, but discovery still skipped it -- the one remaining
 		# requirement is a default route, which is the upstream's to hand out.
-		echo "noroute up with an address, but the upstream is not providing a default route"
+		echo "noroute The interface is up with an assigned IP address, but no default route is provided by the upstream gateway."
 		return
 	fi
-	echo "stopped netifd has the interface stopped"
+	echo "stopped Interface is stopped by network manager (netifd)."
 }
 
 # Record an actual outage sample for an interface netifd has taken down.
