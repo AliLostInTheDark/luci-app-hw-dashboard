@@ -9,7 +9,7 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.hwdash": [ "set_config", "set_cpu_perf", "set_aql" ]
+				"luci.hwdash": [ "set_config", "set_cpu_perf", "set_aql", "nat_test" ]
 			}
 		}
 	}

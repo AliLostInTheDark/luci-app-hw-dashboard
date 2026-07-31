@@ -263,10 +263,77 @@ _sync_wan_targets() {
 		mv /tmp/hwdash_wanmon/.wan_targets.$$ /tmp/hwdash_wanmon/.wan_targets 2>/dev/null
 }
 
+# NAT behaviour discovery is deliberately an explicit, on-demand operation.
+# A full RFC 5780 probe can take several seconds and sends packets to alternate
+# STUN server addresses, so it must never run as part of the dashboard poll.
+# It is available only when the optional stuntman-client package is installed.
+NAT_STUN_SERVER=stun.miwifi.com
+NAT_STUN_PORT=3478
+NAT_CACHE_DIR=/tmp/hwdash
+NAT_CACHE_TTL=900
+
+_nat_code() {
+	case "$1" in
+		"Direct Mapping") printf '%s' direct ;;
+		"Endpoint Independent Mapping"|"Endpoint Independent Filtering") printf '%s' endpoint_independent ;;
+		"Address Dependent Mapping"|"Address Dependent Filtering") printf '%s' address_dependent ;;
+		"Address and Port Dependent Mapping"|"Address and Port Dependent Filtering") printf '%s' address_port_dependent ;;
+		*) printf '%s' unknown ;;
+	esac
+}
+
+_nat_level() {
+	# A mapping is the key console-style distinction. Filtering refines an
+	# endpoint-independent mapping into full-, restricted-, or port-restricted
+	# cone; address-and-port-dependent mappings are symmetric NAT.
+	case "$1" in
+		direct) printf '%s' open ;;
+		endpoint_independent)
+			case "$2" in
+				direct|endpoint_independent) printf '%s' open ;;
+				address_dependent|address_port_dependent) printf '%s' moderate ;;
+				*) printf '%s' moderate ;;
+			esac
+			;;
+		address_dependent|address_port_dependent) printf '%s' strict ;;
+		*) printf '%s' unknown ;;
+	esac
+}
+
+_nat_run() {
+	# BusyBox configurations do not consistently ship a timeout applet. Keep
+	# the optional test self-contained and put a firm cap on the client process.
+	_nat_out=$1; shift
+	"$@" > "$_nat_out" 2>&1 &
+	_nat_pid=$!
+	( sleep 12; kill -9 "$_nat_pid" 2>/dev/null ) &
+	_nat_watch=$!
+	wait "$_nat_pid" 2>/dev/null
+	kill "$_nat_watch" 2>/dev/null
+	wait "$_nat_watch" 2>/dev/null
+}
+
+_nat_probe() {
+	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3
+	[ -n "$_nat_bind" ] || return
+	_nat_run "$_nat_tmp" stunclient --mode full --family "$_nat_family" \
+		--protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT"
+}
+
+_nat_json() {
+	_nat_jfamily=$1; _nat_jaddr=$2; _nat_jstate=$3; _nat_jmap=$4; _nat_jfilter=$5
+	json_esc "$_nat_jaddr"; _nat_jaddr=$JSV
+	json_esc "$_nat_jstate"; _nat_jstate=$JSV
+	json_esc "$_nat_jmap"; _nat_jmap=$JSV
+	json_esc "$_nat_jfilter"; _nat_jfilter=$JSV
+	printf '{"family":"%s","address":"%s","state":"%s","mapping":"%s","filtering":"%s"}' \
+		"$_nat_jfamily" "$_nat_jaddr" "$_nat_jstate" "$_nat_jmap" "$_nat_jfilter"
+}
+
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { }, "wan_ips": { } }'
+		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { }, "wan_ips": { }, "nat_test": { "iface": "" } }'
 		;;
 	call)
 		case "$2" in
@@ -374,6 +441,62 @@ case "$1" in
 				_aql_cfg_read
 				echo "{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
 				;;
+			nat_test)
+				# Limit the probe to a WAN shown by this dashboard. This prevents a
+				# manual RPC call from testing LAN or unrelated tunnel interfaces.
+				_nat_in=""; IFS= read -r _nat_in 2>/dev/null
+				_nat_if=$(printf '%s' "$_nat_in" | jsonfilter -e '@.params[0].iface' 2>/dev/null)
+				case "$_nat_if" in ''|*[!A-Za-z0-9_.-]*) echo '{"available":false,"error":"invalid_interface"}'; exit 0 ;; esac
+				if ! command -v stunclient >/dev/null 2>&1; then
+					echo '{"available":false,"error":"stunclient_not_installed"}'
+					exit 0
+				fi
+				_nat_tr=""
+				[ -f /tmp/hwdash_wanmon/.tracked ] && _nat_tr=$(tr '\n' ' ' < /tmp/hwdash_wanmon/.tracked 2>/dev/null)
+				case " $_nat_tr " in *" $_nat_if "*) ;; *) echo '{"available":true,"error":"not_a_tracked_wan"}'; exit 0 ;; esac
+				_nat_status=$(ubus call "network.interface.$_nat_if" status 2>/dev/null)
+				[ -n "$_nat_status" ] || { echo '{"available":true,"error":"interface_unavailable"}'; exit 0; }
+				_nat_dev=""; _nat_v4=""; _nat_v6=""
+				eval "$(printf '%s' "$_nat_status" | jsonfilter \
+					-e '_nat_dev=@.l3_device' -e '_nat_v4=@["ipv4-address"][0].address' 2>/dev/null)" 2>/dev/null
+				_nat_v6_all=$(printf '%s' "$_nat_status" | jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null)
+				for _nat_a6 in $_nat_v6_all; do
+					case "$_nat_a6" in fe80:*|FE80:*|fc*|FC*|fd*|FD*|::1|'') ;; *:*) _nat_v6=$_nat_a6; break ;; esac
+				done
+				[ -n "$_nat_dev" ] || _nat_dev=$_nat_v4
+				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
+				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"
+				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
+				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
+				if [ -n "$_nat_v4" ]; then
+					_nat_probe 4 "${_nat_dev:-$_nat_v4}" "$_nat_tmp4"
+					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
+					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
+					_nat_m4=$(_nat_code "$_nat_map"); _nat_f4=$(_nat_code "$_nat_filter")
+					grep -qi 'Binding test: success' "$_nat_tmp4" 2>/dev/null && _nat_s4=$(_nat_level "$_nat_m4" "$_nat_f4")
+				fi
+				if [ -n "$_nat_v6" ]; then
+					_nat_probe 6 "${_nat_dev:-$_nat_v6}" "$_nat_tmp6"
+					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
+					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
+					_nat_m6=$(_nat_code "$_nat_map"); _nat_f6=$(_nat_code "$_nat_filter")
+					grep -qi 'Binding test: success' "$_nat_tmp6" 2>/dev/null && _nat_s6=$(_nat_level "$_nat_m6" "$_nat_f6")
+				fi
+				rm -f "$_nat_tmp4" "$_nat_tmp6"
+				HWDASH_NOW=$(date +%s 2>/dev/null)
+				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
+				_nat_cache="$NAT_CACHE_DIR/nat.$_nat_if"
+				{
+					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW"
+					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW"
+				} > "$_nat_cache.$$" 2>/dev/null && mv "$_nat_cache.$$" "$_nat_cache" 2>/dev/null
+				json_esc "$_nat_if"; _nat_ifj=$JSV
+				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
+				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4"; else printf 'null'; fi
+				printf ',"v6":'
+				if [ -n "$_nat_v6" ]; then _nat_json 6 "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6"; else printf 'null'; fi
+				echo '}'
+				;;
 			wan_ips)
 				# Addressing and connection type per WAN.
 				#
@@ -387,6 +510,8 @@ case "$1" in
 				# something as the carrier.
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				WI_DIR=/tmp/hwdash_wanmon
+				WI_STUN=0
+				command -v stunclient >/dev/null 2>&1 && WI_STUN=1
 				WI_ITEMS=""; WI_FIRST=1
 				# Use the collector's tracked list rather than every interface
 				# ubus knows about: it is the same set the WAN Uptime card
@@ -467,6 +592,21 @@ case "$1" in
 
 					_wpub=""
 					[ -f "$WI_DIR/$_wif.pubip" ] && read -r _wpub < "$WI_DIR/$_wif.pubip" 2>/dev/null
+					# Full NAT behaviour is optional and on-demand. Reuse a recent
+					# result only while it belongs to the current WAN address.
+					_wi_n4s=""; _wi_n4m=""; _wi_n4f=""; _wi_n4a=0
+					_wi_n6s=""; _wi_n6m=""; _wi_n6f=""; _wi_n6a=0
+					_wi_nat_cache="$NAT_CACHE_DIR/nat.$_wif"
+					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
+						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt; do
+							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
+							[ $((HWDASH_NOW - _wi_nt)) -le "$NAT_CACHE_TTL" ] || continue
+							case "$_wi_nf:$_wi_na" in
+								4:"$_wv4") _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)) ;;
+								6:"$_wv6") _wi_n6s=$_wi_ns; _wi_n6m=$_wi_nm; _wi_n6f=$_wi_nfi; _wi_n6a=$((HWDASH_NOW - _wi_nt)) ;;
+							esac
+						done < "$_wi_nat_cache"
+					fi
 
 					# Classify the IPv4 side.
 					_wclass="unknown"
@@ -515,10 +655,10 @@ case "$1" in
 					[ $WI_FIRST -eq 0 ] && WI_ITEMS="$WI_ITEMS,"
 					json_esc "$_wpar"; _wparj=$JSV
 					json_esc "$_walias"; _waliasj=$JSV
-					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\"}"
+					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\",\"nat4_state\":\"$_wi_n4s\",\"nat4_mapping\":\"$_wi_n4m\",\"nat4_filtering\":\"$_wi_n4f\",\"nat4_age\":$_wi_n4a,\"nat6_state\":\"$_wi_n6s\",\"nat6_mapping\":\"$_wi_n6m\",\"nat6_filtering\":\"$_wi_n6f\",\"nat6_age\":$_wi_n6a}"
 					WI_FIRST=0
 				done
-				echo "{\"wans\":[$WI_ITEMS]}"
+				echo "{\"stunclient\":$WI_STUN,\"wans\":[$WI_ITEMS]}"
 				;;
 			wifi_clients)
 				# Associated stations, per VAP.

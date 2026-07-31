@@ -3,6 +3,7 @@
 'require poll';
 'require rpc';
 'require fs';
+'require ui';
 var callHwInfo = rpc.declare({
     object: 'luci.hwdash',
     method: 'info',
@@ -60,6 +61,12 @@ var callHwWifiClients = rpc.declare({
 var callHwWanIps = rpc.declare({
     object: 'luci.hwdash',
     method: 'wan_ips',
+    expect: {}
+});
+var callHwNatTest = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'nat_test',
+    params: ['iface'],
     expect: {}
 });
 var parseCpu = function(line) {
@@ -2180,6 +2187,78 @@ return view.extend({
             if (p && Object.prototype.hasOwnProperty.call(PROTO_I18N, p)) return PROTO_I18N[p];
             return p || '';
         };
+        // RFC 5780 describes mapping and filtering, whereas console UIs use
+        // broad Open/Moderate/Strict labels. Keep both: the compact chip is
+        // quick to scan, and the test dialog exposes the precise behaviour.
+        var NAT_TERM = {
+            direct: 'Direct mapping',
+            endpoint_independent: 'Endpoint-independent',
+            address_dependent: 'Address-dependent',
+            address_port_dependent: 'Address and port-dependent',
+            unknown: 'Not determined'
+        };
+        var natVerdict = function(family, state, mapping, filtering, wanClass) {
+            if (family === 4 && wanClass === 'cgnat')
+                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-grade NAT prevents unsolicited inbound IPv4 connections.' };
+            if (!state) return { short: 'TEST NAT', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering.' };
+            if (state === 'unavailable') return { short: 'UNAVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding test.' };
+            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behaviour data.' };
+            if (family === 6 && state === 'open' && mapping === 'direct')
+                return { short: 'OPEN · NATIVE', level: 'open', note: 'Native IPv6 has no address translation on this WAN path.' };
+            if (state === 'open' && mapping === 'direct')
+                return { short: 'OPEN · DIRECT', level: 'open', note: 'No address translation was detected.' };
+            if (state === 'open')
+                return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping and filtering were detected.' };
+            if (state === 'moderate' && filtering === 'address_port_dependent')
+                return { short: 'MODERATE · PORT-RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with port-restricted filtering.' };
+            if (state === 'moderate')
+                return { short: 'MODERATE · RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with restricted filtering.' };
+            return { short: 'STRICT · SYMMETRIC', level: 'strict', note: 'Destination-dependent NAT mapping was detected.' };
+        };
+        var natColor = function(level) {
+            return sevColor(level === 'open' ? 'good' : level === 'moderate' ? 'warn' : level === 'strict' || level === 'unavailable' ? 'bad' : 'mute');
+        };
+        var natDialogRow = function(title, result, wanClass) {
+            var verdict = result ? natVerdict(result.family === '6' ? 6 : 4, result.state, result.mapping, result.filtering, wanClass) :
+                { short: 'NOT AVAILABLE', level: 'unknown', note: 'This address family is not configured on this WAN.' };
+            var col = natColor(verdict.level);
+            var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
+            var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
+            return E('div', { style: 'padding:10px 12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:5px;' }, [
+                E('div', { style: 'display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;' }, [
+                    E('span', { style: 'font-size:0.78em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
+                    E('span', { style: 'font-size:0.7em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 7px;' }, verdict.short)
+                ]),
+                E('div', { style: 'font-size:0.76em; opacity:0.82;' }, verdict.note),
+                E('div', { style: 'font-size:0.7em; opacity:0.68; line-height:1.55;' }, 'Mapping: ' + mapping + ' · Filtering: ' + filtering)
+            ]);
+        };
+        var runNatTest = function(iface, wanClass) {
+            var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:10px;' }, [
+                E('div', { style: 'font-size:0.82em; line-height:1.45; opacity:0.82;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It checks IPv4 and IPv6 when configured; no test runs in the background.'),
+                E('div', { style: 'font-size:0.82em; color:' + sevColor('info') + ';' }, 'Running NAT behaviour test…')
+            ]);
+            ui.showModal('NAT Behaviour · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
+                E('button', { class: 'btn', click: ui.hideModal }, 'Close')
+            ])]);
+            callHwNatTest(iface).then(function(res) {
+                content.innerHTML = '';
+                if (!res || !res.available) {
+                    content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'stuntman-client is not installed or could not be started.'));
+                    return;
+                }
+                if (res.error) {
+                    content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
+                    return;
+                }
+                content.appendChild(natDialogRow('IPv4', res.v4, wanClass));
+                content.appendChild(natDialogRow('IPv6', res.v6, wanClass));
+                wanIpTick();
+            }).catch(function() {
+                content.innerHTML = '';
+                content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'NAT test failed before a result was returned.'));
+            });
+        };
         var wanIpTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('wan_ips') !== -1) return Promise.resolve();
@@ -2188,6 +2267,7 @@ return view.extend({
             return callHwWanIps().then(function(res) {
                 self.wanIpBusy = false;
                 var wans = (res && res.wans) || [];
+                self.stunClientAvailable = !!(res && res.stunclient);
                 // A link-local address is not connectivity, so fe80:: does not
                 // count -- a router with only those has no working IPv6 WAN.
                 var v6 = wans.some(function(w) {
@@ -2231,7 +2311,10 @@ return view.extend({
                     var alias = E('span', { style: CHIP + ' text-transform: uppercase;' });
                     var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
                     var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
-                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge]);
+                    var nat4 = E('span', { style: CHIP });
+                    var nat6 = E('span', { style: CHIP });
+                    var natTest = E('button', { type: 'button', class: 'btn', style: CHIP + ' cursor:pointer; background:transparent;' }, 'TEST NAT');
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge, nat4, nat6, natTest]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
@@ -2241,7 +2324,7 @@ return view.extend({
                     return {
                         el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note]),
                         ifn: ifn, devPar: devPar, devArrow: devArrow, devL3: devL3,
-                        proto: proto, alias: alias, badge: badge, assign: assign,
+                        proto: proto, alias: alias, badge: badge, assign: assign, nat4: nat4, nat6: nat6, natTest: natTest,
                         kv4: kv4, kvPub: kvPub, kv6: kv6, kvPfx: kvPfx, note: note
                     };
                 }, function(e, w) {
@@ -2310,6 +2393,33 @@ return view.extend({
                     e.assign.style.background = ascol + '22';
                     e.assign.style.border = '1px solid ' + ascol + '55';
                     e.assign.style.display = alabel ? '' : 'none';
+                    // The optional STUN package is never a dashboard
+                    // dependency. When it is absent these chips and the action
+                    // disappear completely; when present they stay compact and
+                    // expose the detailed mapping/filtering terms in a dialog.
+                    var setNatChip = function(el, family, address, state, mapping, filtering) {
+                        if (!self.stunClientAvailable || !address) {
+                            el.style.display = 'none';
+                            return;
+                        }
+                        var verdict = natVerdict(family, state, mapping, filtering, w.class);
+                        var ncol = natColor(verdict.level);
+                        setText(el, (family === 4 ? 'IPv4 · ' : 'IPv6 · ') + verdict.short);
+                        el.title = verdict.note;
+                        el.style.color = ncol;
+                        el.style.background = ncol + '18';
+                        el.style.border = '1px solid ' + ncol + '55';
+                        el.style.display = '';
+                    };
+                    setNatChip(e.nat4, 4, w.ip4, w.nat4_state, w.nat4_mapping, w.nat4_filtering);
+                    setNatChip(e.nat6, 6, w.ip6, w.nat6_state, w.nat6_mapping, w.nat6_filtering);
+                    e.natTest.style.display = self.stunClientAvailable ? '' : 'none';
+                    if (self.stunClientAvailable) {
+                        var testCol = sevColor('info');
+                        e.natTest.style.color = testCol;
+                        e.natTest.style.border = '1px solid ' + testCol + '55';
+                        e.natTest.onclick = function() { runNatTest(w.iface, w.class); };
+                    }
                     // Each address is coloured by what it means, not uniformly:
                     // the whole point of the card is that two addresses on the
                     // same row can disagree, and a wall of identical monospace
