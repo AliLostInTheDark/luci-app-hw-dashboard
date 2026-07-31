@@ -2227,9 +2227,9 @@ return view.extend({
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
-            var protoTag = 'UDP / IPv' + family;
-            var localIp = result ? result.address : (wInfo ? (family === 6 ? wInfo.ip6 : wInfo.ip4) : '—');
-            var pubIp = (family === 4 && wInfo && wInfo.pub4) ? wInfo.pub4 : (family === 6 ? localIp : '—');
+            var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanIpCache) ? self._wanIpCache[wInfo.alias_of || wInfo.parent] : null;
+            var localIp = result ? result.address : (wInfo ? (family === 6 ? (wInfo.ip6 || (parentInfo ? parentInfo.ip6 : '—')) : (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—'))) : '—');
+            var pubIp = (family === 4) ? ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—') : (family === 6 ? localIp : '—');
             var serverUsed = family === 6 ? 'stun.l.google.com:19302 (Dual-Stack IPv6)' : 'stun.l.google.com:19302 / stun.miwifi.com:3478';
 
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
