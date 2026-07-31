@@ -494,7 +494,7 @@ case "$1" in
 				{
 					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW"
 					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW"
-				} > "$_nat_cache.$$" 2>/dev/null && mv "$_nat_cache.$$" "$_nat_cache" 2>/dev/null
+				} > "$_nat_cache" 2>/dev/null
 				json_esc "$_nat_if"; _nat_ifj=$JSV
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
 				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4"; else printf 'null'; fi
