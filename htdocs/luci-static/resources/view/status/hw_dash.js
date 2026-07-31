@@ -2416,8 +2416,31 @@ return view.extend({
                     // disappear completely; when present they stay compact and
                     // expose the detailed mapping/filtering terms in a dialog.
                     var setNatChip = function(el, family, address, state, mapping, filtering) {
-                        if (!self.stunClientAvailable || !address || family !== 4 || !state || state === 'unavailable' || state === 'unknown') {
+                        if (!address || family !== 4) {
                             el.style.display = 'none';
+                            return;
+                        }
+                        var mcol = sevColor('mute');
+                        if (!self.stunClientAvailable) {
+                            setText(el, 'NAT TYPE · UNTESTED');
+                            el.title = 'Install stuntman-client from Fantastic Feeds to enable on-demand STUN NAT type testing.';
+                            el.style.color = mcol;
+                            el.style.background = mcol + '15';
+                            el.style.border = '1px solid ' + mcol + '44';
+                            el.style.cursor = 'default';
+                            el.onclick = null;
+                            el.style.display = '';
+                            return;
+                        }
+                        if (!state || state === 'unavailable' || state === 'unknown') {
+                            setText(el, 'NAT TYPE · NOT TESTED');
+                            el.title = 'No STUN NAT test has been performed for this IPv4 interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviors.';
+                            el.style.color = mcol;
+                            el.style.background = mcol + '15';
+                            el.style.border = '1px solid ' + mcol + '44';
+                            el.style.cursor = 'default';
+                            el.onclick = null;
+                            el.style.display = '';
                             return;
                         }
                         var verdict = natVerdict(family, state, mapping, filtering, w.class);
@@ -2427,8 +2450,8 @@ return view.extend({
                         el.style.color = ncol;
                         el.style.background = ncol + '18';
                         el.style.border = '1px solid ' + ncol + '55';
-                        el.style.cursor = 'pointer';
-                        el.onclick = function() { runNatTest(w.iface, w.class); };
+                        el.style.cursor = 'default';
+                        el.onclick = null;
                         el.style.display = '';
                     };
                     setNatChip(e.nat4, 4, w.ip4, w.nat4_state, w.nat4_mapping, w.nat4_filtering);
