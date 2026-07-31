@@ -2483,7 +2483,11 @@ return view.extend({
                         el.onclick = null;
                         el.style.display = '';
                     };
-                    setNatChip(e.nat4, w.ip4 ? 4 : 6, w.ip4 || w.ip6 || (w.up ? 'active' : ''), w.nat4_state || w.nat6_state, w.nat4_mapping || w.nat6_mapping, w.nat4_filtering || w.nat6_filtering);
+                    var parentW = (w.alias_of || w.parent) ? self._wanIpCache[w.alias_of || w.parent] : null;
+                    var st4 = w.nat4_state || w.nat6_state || (parentW ? (parentW.nat4_state || parentW.nat6_state) : null);
+                    var map4 = w.nat4_mapping || w.nat6_mapping || (parentW ? (parentW.nat4_mapping || parentW.nat6_mapping) : null);
+                    var filt4 = w.nat4_filtering || w.nat6_filtering || (parentW ? (parentW.nat4_filtering || parentW.nat6_filtering) : null);
+                    setNatChip(e.nat4, w.ip4 ? 4 : 6, w.ip4 || w.ip6 || (w.up ? 'active' : ''), st4, map4, filt4);
 
                     e.natCard.style.display = 'none';
 

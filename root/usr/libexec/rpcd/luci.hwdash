@@ -710,7 +710,7 @@ EOF
 					_wi_n6s=""; _wi_n6m=""; _wi_n6f=""; _wi_n6a=0
 					_wi_nat_cache="$NAT_CACHE_DIR/nat.$_wif"
 					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
-						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt; do
+						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt _wi_np _wextra; do
 							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
 							case "$_wi_nf:$_wi_na" in
 								4:"$_wv4") [ -n "$_wv4" ] && { _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)); } ;;
