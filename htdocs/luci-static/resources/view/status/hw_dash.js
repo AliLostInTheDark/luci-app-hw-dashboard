@@ -2338,7 +2338,7 @@ return view.extend({
                     // Each chip owns a hue from the identity family, tinted from
                     // its own colour rather than a shared grey, so the kind of
                     // fact is readable before the text is.
-                    var CHIP = 'font-size: 0.68em; font-weight: 700; letter-spacing: 0.3px; padding: 2px 7px; border-radius: 8px; white-space: nowrap;';
+                    var CHIP = 'font-size: 0.76em; font-weight: 700; letter-spacing: 0.4px; padding: 3px 9px; border-radius: 10px; white-space: nowrap;';
                     var ifn = E('span', { style: 'font-weight: 700; font-size: 1.1em; font-family: monospace; letter-spacing: 0.6px;' });
                     // Devices get chips of their own, and a tunnel protocol
                     // gets two: the device it was configured on and the device
@@ -2354,11 +2354,11 @@ return view.extend({
                     var devs = E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [devPar, devArrow, devL3]);
                     var proto = E('span', { style: CHIP });
                     var alias = E('span', { style: CHIP + ' text-transform: uppercase;' });
-                    var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 7px; border-radius: 8px; white-space: nowrap;' });
+                    var badge = E('span', { style: 'font-size: 0.76em; font-weight: 700; padding: 3px 9px; border-radius: 10px; white-space: nowrap;' });
                     var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
                     var nat4 = E('span', { style: CHIP });
-                    var natTest = E('button', { type: 'button', style: CHIP + ' cursor:pointer; background:transparent; margin:0; line-height:1.2; box-shadow:none; font-family:inherit;' }, 'TEST NAT TYPE');
-                    var head = E('div', { style: 'display: flex; align-items: center; gap: 5px 6px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge, nat4, natTest]);
+                    var natTest = E('button', { type: 'button', style: 'font-size: 0.76em; font-weight: 700; letter-spacing: 0.4px; padding: 3px 10px; border-radius: 10px; white-space: nowrap; cursor:pointer; background:transparent; margin:0; line-height:1.3; box-shadow:none; font-family:inherit; transition: all 0.2s ease;' }, 'TEST NAT TYPE');
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge, nat4, natTest]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
