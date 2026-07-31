@@ -2193,29 +2193,29 @@ return view.extend({
         // broad Open/Moderate/Strict labels. Keep both: the compact chip is
         // quick to scan, and the test dialog exposes the precise behaviour.
         var NAT_TERM = {
-            direct: 'Direct mapping',
-            endpoint_independent: 'Endpoint-independent',
-            address_dependent: 'Address-dependent',
-            address_port_dependent: 'Address and port-dependent',
-            unknown: 'Not determined'
+            direct: 'Direct Mapping',
+            endpoint_independent: 'Endpoint-Independent',
+            address_dependent: 'Address-Dependent',
+            address_port_dependent: 'Address and Port-Dependent',
+            unknown: 'Not Determined'
         };
         var natVerdict = function(family, state, mapping, filtering, wanClass) {
             if (family === 4 && wanClass === 'cgnat')
-                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (CG-NAT) prevents unsolicited inbound IPv4 connections.' };
-            if (!state) return { short: 'TEST NAT TYPE', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering.' };
+                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (CG-NAT) prevents unsolicited inbound IPv4 connections (RFC 6598).' };
+            if (!state) return { short: 'NAT TYPE · NOT TESTED', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering behaviors.' };
             if (state === 'unavailable') return { short: 'UNAVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding test.' };
-            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behavior data.' };
+            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behavioral data.' };
             if (family === 6 && state === 'open' && mapping === 'direct')
                 return { short: 'OPEN · NATIVE', level: 'open', note: 'Native IPv6 provides direct end-to-end reachability without address translation.' };
             if (state === 'open' && mapping === 'direct')
                 return { short: 'OPEN · DIRECT', level: 'open', note: 'Direct IP routing is available without address translation.' };
             if (state === 'open')
-                return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping and filtering were detected.' };
+                return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping and filtering were detected (RFC 3489 / RFC 4787).' };
             if (state === 'moderate' && filtering === 'address_port_dependent')
-                return { short: 'MODERATE · PORT-RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with port-restricted filtering.' };
+                return { short: 'MODERATE · PORT RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with address and port-dependent filtering (RFC 3489 / RFC 4787).' };
             if (state === 'moderate')
-                return { short: 'MODERATE · RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with restricted filtering.' };
-            return { short: 'STRICT · SYMMETRIC', level: 'strict', note: 'Destination-dependent NAT mapping was detected.' };
+                return { short: 'MODERATE · RESTRICTED CONE', level: 'moderate', note: 'Endpoint-independent mapping with address-dependent filtering (RFC 3489 / RFC 4787).' };
+            return { short: 'STRICT · SYMMETRIC', level: 'strict', note: 'Destination-dependent NAT mapping was detected (RFC 3489 / RFC 4787 / RFC 5382).' };
         };
         var natColor = function(level) {
             return sevColor(level === 'open' ? 'good' : level === 'moderate' ? 'warn' : level === 'strict' || level === 'unavailable' ? 'bad' : 'mute');
