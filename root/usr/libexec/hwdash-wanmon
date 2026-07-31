@@ -30,7 +30,6 @@ INTERVAL=2
 # full netifd dump every few seconds while the router is idle.
 DISCOVER_INTERVAL=300
 ISP_RETRY_INTERVAL=60
-HIST_LEN=60
 # 288 five-minute buckets form a rolling 24-hour availability window.
 # Counts live only in tmpfs, avoiding flash writes and expensive log scans.
 WINDOW_BUCKET_SECS=300
@@ -38,9 +37,9 @@ WINDOW_BUCKETS=288
 PING_CAP=4
 LOOP_DEADLINE=20
 # Number of consecutive probe failures required before a link is declared
-# DOWN and history shows a red gap. A single missed ping on an otherwise-
-# healthy v6 link (ICMP6 occasionally filtered by ISP) no longer flicks the
-# sparkline red or clears the latency display.
+# DOWN. A single missed ping on an otherwise-healthy v6 link (ICMP6
+# occasionally filtered by ISP) no longer flicks the status red or clears the
+# latency display.
 MISS_THRESHOLD=3
 # How often the netifd state of a DOWN interface is re-read to explain WHY it
 # is down. That costs a ubus fork, so it is not done on every tick -- but the
@@ -773,26 +772,6 @@ resolve_isp() {
 	rm -f "$_try_file"
 }
 
-# Fixed-length ring of recent samples per interface, for the small
-# ping-stability sparkline -- "x" marks a down/timeout tick so the
-# frontend can render it as a gap instead of a false zero-ms reading.
-# Kept as one space-separated line (cheap to grow/trim with plain word
-# splitting, no awk/sed process per tick) capped at HIST_LEN entries.
-append_history() {
-	_ifn=$1; _val=$2
-	_hist_file="$RINGDIR/${_ifn}.hist"
-	_old=""
-	[ -f "$_hist_file" ] && read -r _old < "$_hist_file" 2>/dev/null
-	if [ -z "$_old" ]; then
-		_new="$_val"
-	else
-		set -- $_old
-		while [ $# -ge "$HIST_LEN" ]; do shift; done
-		_new="$* $_val"
-	fi
-	printf '%s\n' "$_new" > "$_hist_file"
-}
-
 # Add one observation to a rolling 24-hour counter. Reusing a bucket slot
 # removes its expired contribution first, so rpcd can read one tiny summary
 # file instead of aggregating a full day's worth of two-second samples.
@@ -843,7 +822,7 @@ log_transition() {
 # Throughput for one WAN, from the kernel's own byte counters.
 #
 # Costs two builtin reads and no fork, which is why it lives here rather than
-# in the RPC: wan_quality is polled every second by every open dashboard, and
+# in the RPC: wan_quality is polled every two seconds by every open dashboard, and
 # this way it stays a pure reader of what the collector already worked out.
 #
 # The counter is 64-bit on any kernel this runs on, but it still resets to
@@ -877,8 +856,8 @@ sample_rate() {
 	printf '%s %s %s %s %s %s\n' "$_rt_rx" "$_rt_tx" "$_now" "$_rt_rbps" "$_rt_tbps" "$_rt_dev" > "$_rt_file"
 }
 
-# One interface's full per-tick update: ping, roll the stats/history
-# rings, resolve ISP. Run backgrounded (one subshell per interface, see
+# One interface's full per-tick update: ping, roll the availability stats,
+# resolve ISP. Run backgrounded (one subshell per interface, see
 # the main loop below) so a single slow or timed-out link can't stall
 # every other interface's update that tick -- the same reason the
 # Ping Latency rpc call backgrounds each of its own targets instead of
@@ -893,9 +872,8 @@ sample_rate() {
 #   seeded with a plausible-looking number, because a fabricated latency is
 #   indistinguishable on the card from a measured one.
 # consecutive_misses: resets to 0 on any success; only once it reaches
-#   MISS_THRESHOLD do we declare a real outage, write "x" to history,
-#   count the tick as a failure for the availability window, and flip
-#   status to "down".
+#   MISS_THRESHOLD do we declare a real outage, count the tick as a failure
+#   for the availability window, and flip status to "down".
 process_iface() {
 	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7
 	_stats_file="$RINGDIR/${_ifn}.stats"
@@ -926,7 +904,6 @@ process_iface() {
 		_new_status="up"
 		_lastgood_ms="$_ms"
 		_consec_miss=0
-		_hist_val="$_ms"
 		_sample_up=1
 	else
 		_consec_miss=$((_consec_miss + 1))
@@ -939,13 +916,11 @@ process_iface() {
 			# to carry forward and nothing yet to call healthy.
 			_success=$((_success + 1))
 			_new_status="up"
-			_hist_val="$_lastgood_ms"
 			_sample_up=1
 		else
 			# Confirmed outage (MISS_THRESHOLD consecutive misses, or
 			# the link was already down).
 			_new_status="down"
-			_hist_val="x"
 			_sample_up=0
 		fi
 	fi
@@ -965,7 +940,6 @@ process_iface() {
 	printf '%d %d %s %d %s %d\n' \
 		"$_total" "$_success" "$_status" "$_streak_start" \
 		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
-	append_history "$_ifn" "$_hist_val"
 	record_window_sample "$_ifn" "$_sample_up"
 	sample_rate "$_ifn" "$_dev"
 	# Down here means something different than in process_down_iface: netifd
@@ -1122,11 +1096,10 @@ process_down_iface() {
 		_streak_start=$_now
 	fi
 	# Interface is genuinely down (netifd withdrew its route), so always
-	# count it as a failure and write x to history -- no debounce needed.
+	# count it as a failure -- no debounce needed.
 	printf '%d %d %s %d %s %d\n' \
 		"$_total" "$_success" "$_status" "$_streak_start" \
 		"$_lastgood_ms" "$MISS_THRESHOLD" > "$_stats_file"
-	append_history "$_ifn" x
 	record_window_sample "$_ifn" 0
 	# Zero it explicitly: leaving the last rate in place showed traffic still
 	# flowing over a link that is down.

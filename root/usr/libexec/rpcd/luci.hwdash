@@ -1127,7 +1127,7 @@ EOF
 				;;
 			wan_quality)
 				# Standalone, lightweight reader for the WAN Quality card --
-				# split out from `info` so the frontend can poll it every 1s
+				# split out from `info` so the frontend can poll it every 2s
 				# (matching the Ping Latency card's cadence) without paying
 				# for the much heavier full info payload that often. Never
 				# pings anything itself: the hwdash-wanmon background
@@ -1168,21 +1168,21 @@ EOF
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
 						json_esc "$_wm_alias"; _wm_aliasj=$JSV
 
-						# The collector rewrites this file in place (truncate,
-						# then write) every two seconds while we poll every
-						# second, so a read can legitimately land on the
-						# zero-length instant between the two, and a failed
-						# read blanks the variables it was given. That window
-						# is microseconds and never repeats back-to-back, so
-						# one retry turns a visible "unknown"/0% flicker on the
-						# card into nothing at all -- cheaper than making the
-						# collector pay for an atomic rename every tick.
+						# The collector rewrites this file in place every two
+						# seconds. A reader can land on either its zero-length or
+						# partially written state, so only accept all six fields
+						# and retry once. This avoids UI flicker without adding a
+						# filesystem rename to every collector tick.
 						_wm_try=0
 						while :; do
 							_wm_total=0; _wm_success=0; _wm_status="unknown"
 							_wm_streak_start=$_wm_uptime_now
 							_wm_lastgood_ms="x"; _wm_consec_miss=0
-							read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_lastgood_ms _wm_consec_miss < "$_wm_ring" 2>/dev/null && break
+							if read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_lastgood_ms _wm_consec_miss < "$_wm_ring" 2>/dev/null && \
+								[ -n "$_wm_total" ] && [ -n "$_wm_success" ] && [ -n "$_wm_status" ] && \
+								[ -n "$_wm_streak_start" ] && [ -n "$_wm_lastgood_ms" ] && [ -n "$_wm_consec_miss" ]; then
+								break
+							fi
 							_wm_try=$((_wm_try + 1))
 							[ "$_wm_try" -ge 2 ] && break
 						done
@@ -1219,37 +1219,6 @@ EOF
 						_wm_streak=$((_wm_uptime_now - _wm_streak_start))
 						[ "$_wm_streak" -lt 0 ] && _wm_streak=0
 
-						# Small ping-stability sparkline: recent samples ring,
-						# "x" (down/timeout) mapped to JSON null so the
-						# frontend renders a gap instead of a false zero-ms
-						# reading.
-						_wm_hist_json="[]"
-						_wm_hist_file="$_wm_dir/$_wm_ifn.hist"
-						if [ -f "$_wm_hist_file" ]; then
-							_wm_hist_line=""
-							read -r _wm_hist_line < "$_wm_hist_file" 2>/dev/null
-							if [ -n "$_wm_hist_line" ]; then
-								set -- $_wm_hist_line
-								_wm_hj=""
-								_wm_hfirst=1
-								for _wm_h in "$@"; do
-									[ $_wm_hfirst -eq 0 ] && _wm_hj="$_wm_hj,"
-									case "$_wm_h" in
-										# Anything that is not a plain integer
-										# (the "x" down-marker, or a token from
-										# a torn read) becomes null rather than
-										# being pasted into the array verbatim,
-										# which would emit invalid JSON and
-										# blank the whole card.
-										*[!0-9]*|'') _wm_hj="${_wm_hj}null" ;;
-										*) _wm_hj="${_wm_hj}${_wm_h}" ;;
-									esac
-									_wm_hfirst=0
-								done
-								_wm_hist_json="[$_wm_hj]"
-							fi
-						fi
-
 						# Why it is down, as classified by the collector (which
 						# is where the netifd state is already being read). Only
 						# meaningful while down, so it is not carried otherwise
@@ -1265,7 +1234,7 @@ EOF
 
 						# Throughput, already worked out by the collector from
 						# the kernel's byte counters -- two builtin reads here,
-						# no fork, on a method polled every second.
+						# no fork, on a method polled every two seconds.
 						_wm_rxbps=0; _wm_txbps=0; _wm_rdev=""
 						if [ -f "$_wm_dir/$_wm_ifn.rate" ]; then
 							_wm_r1=""; _wm_r2=""; _wm_r3=""
@@ -1277,7 +1246,7 @@ EOF
 						json_esc "$_wm_rdev"; _wm_rdevj=$JSV
 
 						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
-						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"alias_of\":\"$_wm_aliasj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\",\"history\":$_wm_hist_json}"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"alias_of\":\"$_wm_aliasj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\"}"
 						_wm_first=0
 					done
 					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"

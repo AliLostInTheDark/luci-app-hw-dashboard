@@ -259,100 +259,6 @@ return view.extend({
                 '<polygon points="' + area + '" fill="' + color + '22"/>' +
                 '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + poly + '"/></svg>';
         };
-        // Smooth cubic-bezier interpolation between points (mid-x control
-        // handles, the same construction luci-app-wanlive-dashboard uses for
-        // its traffic/latency charts) instead of a jagged straight polyline
-        // -- a soft "hill" shape reads as a trend at a glance.
-        var smoothPathXY = function(pts) {
-            var path = 'M ' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1);
-            for (var i = 0; i < pts.length - 1; i++) {
-                var x0 = pts[i][0], y0 = pts[i][1], x1 = pts[i + 1][0], y1 = pts[i + 1][1];
-                var mx = (x0 + x1) / 2;
-                path += ' C ' + mx.toFixed(1) + ',' + y0.toFixed(1) + ' ' + mx.toFixed(1) + ',' + y1.toFixed(1) + ' ' + x1.toFixed(1) + ',' + y1.toFixed(1);
-            }
-            return path;
-        };
-        // Small per-WAN-interface ping-stability trend graph. Same
-        // width:100%+viewBox trick as drawUsageSpark above (so it scales to
-        // mobile for free), Y-axis auto-ranged off the actual latency values.
-        // Down/timeout samples are pinned to the chart's floor instead of
-        // leaving a gap, so the ONE continuous curve eases smoothly down
-        // into an outage and back up out of it -- a hard-edged block
-        // dropped on top read as a sudden jump-cut, not a trend. A second
-        // fill, sharing the exact same curve geometry (plus the one real
-        // point on each side so it meets the healthy curve exactly rather
-        // than starting/ending mid-air), recolors just that stretch red --
-        // the color change rides on one continuous shape instead of being
-        // a visibly separate layer.
-        var drawWanHistorySpark = function(el, history, color) {
-            if (!el) return;
-            var W = 160, H = 40, P = 2;
-            if (!history || history.length < 2) { el.innerHTML = ''; return; }
-            var vals = history.filter(function(v) { return v != null; });
-            var n = history.length;
-            var x = function(i) { return P + i * (W - 2 * P) / (n - 1); };
-            color = color || '#00bcd4';
-            var gid = 'wq' + Math.random().toString(36).slice(2, 9);
-            var svg = '<defs>' +
-                '<linearGradient id="' + gid + '" x1="0%" y1="0%" x2="0%" y2="100%">' +
-                '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.8"/>' +
-                '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.06"/>' +
-                '</linearGradient>' +
-                '<linearGradient id="' + gid + 'd" x1="0%" y1="0%" x2="0%" y2="100%">' +
-                '<stop offset="0%" stop-color="#f44336" stop-opacity="0.8"/>' +
-                '<stop offset="100%" stop-color="#f44336" stop-opacity="0.06"/>' +
-                '</linearGradient>' +
-                '</defs>';
-
-            if (vals.length === 0) {
-                // A zero-height filled path paints nothing. Give a fully
-                // offline window a real, two-pixel red baseline instead.
-                el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
-                    svg + '<rect x="' + P + '" y="' + (H - P - 2) + '" width="' + (W - 2 * P) + '" height="2" rx="1" fill="#f44336" fill-opacity="0.9"/></svg>';
-                return;
-            }
-
-            var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-            if (hi - lo < 10) { var mid = (hi + lo) / 2; lo = mid - 5; hi = mid + 5; }
-            var pad = (hi - lo) * 0.15;
-            lo = Math.max(0, lo - pad); hi = hi + pad;
-            var y = function(v) { return H - P - (v - lo) * (H - 2 * P) / (hi - lo); };
-
-            var allPts = [];
-            for (var i = 0; i < n; i++) {
-                var v = history[i];
-                allPts.push([x(i), v == null ? (H - P) : y(v)]);
-            }
-            var basePath = smoothPathXY(allPts);
-            var baseFill = basePath + ' L ' + allPts[n - 1][0].toFixed(1) + ',' + (H - P) + ' L ' + allPts[0][0].toFixed(1) + ',' + (H - P) + ' Z';
-            // The fill and its fine highlight stroke are one continuous
-            // healthy curve. Outage segments below overlay that exact same
-            // geometry, so their color transition is smooth rather than a
-            // separate-looking block.
-            svg += '<path d="' + baseFill + '" fill="url(#' + gid + ')" stroke="none"/>' +
-                '<path d="' + basePath + '" fill="none" stroke="' + color + '" stroke-opacity="0.72" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>';
-
-            var j = 0;
-            while (j < n) {
-                if (history[j] == null) {
-                    var runEnd = j;
-                    while (runEnd < n && history[runEnd] == null) runEnd++;
-                    var segStart = Math.max(0, j - 1);
-                    var segEnd = Math.min(n - 1, runEnd);
-                    var seg = allPts.slice(segStart, segEnd + 1);
-                    if (seg.length >= 2) {
-                        var dPath = smoothPathXY(seg);
-                        var dFill = dPath + ' L ' + seg[seg.length - 1][0].toFixed(1) + ',' + (H - P) + ' L ' + seg[0][0].toFixed(1) + ',' + (H - P) + ' Z';
-                        svg += '<path d="' + dFill + '" fill="url(#' + gid + 'd)" stroke="none"/>' +
-                            '<path d="' + dPath + '" fill="none" stroke="#f44336" stroke-opacity="0.9" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>';
-                    }
-                    j = runEnd;
-                } else {
-                    j++;
-                }
-            }
-            el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + svg + '</svg>';
-        };
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
         var PING_WINDOW = 120;
         var PING_AGG_KEEP = 1080;
@@ -5064,10 +4970,8 @@ return view.extend({
         var hwTick = 0;
         poll.add(function() {
             hwTick++;
-            if (hwTick % 2 === 0) {
-                wanQTick();
-                pingTick();
-            }
+            if (hwTick % 2 === 1) wanQTick();
+            else pingTick();
             if (hwTick % 3 === 0) infoTick();
             // Offset by 1 so the station dump never lands on the same tick as
             // info, which is the expensive one.
