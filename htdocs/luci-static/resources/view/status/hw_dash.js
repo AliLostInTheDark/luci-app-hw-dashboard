@@ -2237,10 +2237,10 @@ return view.extend({
         };
         var runNatTest = function(iface, wanClass) {
             var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:10px;' }, [
-                E('div', { style: 'font-size:0.82em; line-height:1.45; opacity:0.82;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It checks IPv4 and IPv6 when configured; no test runs in the background.'),
-                E('div', { style: 'font-size:0.82em; color:' + sevColor('info') + ';' }, 'Running NAT behaviour test…')
+                E('div', { style: 'font-size:0.82em; line-height:1.45; opacity:0.82;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It measures IPv4 NAT mapping and filtering behaviors.'),
+                E('div', { style: 'font-size:0.82em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
-            ui.showModal('NAT Behaviour · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
+            ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
                 E('button', { class: 'btn', click: ui.hideModal }, 'Close')
             ])]);
             callHwNatTest(iface).then(function(res) {
@@ -2253,8 +2253,11 @@ return view.extend({
                     content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
-                content.appendChild(natDialogRow('IPv4', res.v4, wanClass));
-                content.appendChild(natDialogRow('IPv6', res.v6, wanClass));
+                if (res.v4) {
+                    content.appendChild(natDialogRow('IPv4 NAT Behaviour', res.v4, wanClass));
+                } else {
+                    content.appendChild(E('div', { style: 'font-size:0.85em; opacity:0.8;' }, 'No IPv4 address is configured on this interface.'));
+                }
                 wanIpTick();
             }).catch(function() {
                 content.innerHTML = '';
