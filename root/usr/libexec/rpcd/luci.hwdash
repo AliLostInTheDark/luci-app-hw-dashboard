@@ -1808,6 +1808,13 @@ EOF
 						[ -z "$TEMP" ] && continue
 
 						read_file LABEL "${tinput%_input}_label" ""
+						if [ -z "$LABEL" ] && [ -L "$h/device" ]; then
+							_dev_target=$(readlink "$h/device" 2>/dev/null)
+							_phy_name=${_dev_target##*/}
+							case "$_phy_name" in
+								phy*) LABEL="$_phy_name" ;;
+							esac
+						fi
 						
 						if [ -n "$LABEL" ]; then
 							TYPE="${TYPE_BASE} ($LABEL)"
@@ -1815,9 +1822,13 @@ EOF
 							TYPE="${TYPE_BASE}"
 						fi
 						
-						case "$SEEN_TYPES" in
-							*" $TYPE "*) continue ;;
-						esac
+						if case "$SEEN_TYPES" in *" $TYPE "*) true;; *) false;; esac; then
+							_dup_idx=2
+							while case "$SEEN_TYPES" in *" ${TYPE} #${_dup_idx} "*) true;; *) false;; esac; do
+								_dup_idx=$((_dup_idx + 1))
+							done
+							TYPE="${TYPE} #${_dup_idx}"
+						fi
 						SEEN_TYPES="${SEEN_TYPES}${TYPE} "
 						_tn=$TEMP
 						case "$_tn" in *[!0-9-]*) _tn=0 ;; esac

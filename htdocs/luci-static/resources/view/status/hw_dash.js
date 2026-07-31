@@ -4942,7 +4942,7 @@ return view.extend({
                     var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
                         E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
                             E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
-                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock])
+                            E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, latBlock, rateBlock, uptimeBlock, downtimeBlock])
                         ]),
                         reasonEl
                     ]);
