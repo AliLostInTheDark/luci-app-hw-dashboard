@@ -2398,7 +2398,7 @@ return view.extend({
                     // disappear completely; when present they stay compact and
                     // expose the detailed mapping/filtering terms in a dialog.
                     var setNatChip = function(el, family, address, state, mapping, filtering) {
-                        if (!self.stunClientAvailable || !address) {
+                        if (!self.stunClientAvailable || !address || !state || state === 'unavailable' || state === 'unknown') {
                             el.style.display = 'none';
                             return;
                         }
