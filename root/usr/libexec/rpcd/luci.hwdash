@@ -492,6 +492,15 @@ case "$1" in
 					if [ "$_wclass" = "none" ] && [ -n "$_wv6" ]; then
 						_wclass="v6only"
 					fi
+					_wmon_st="up"
+					[ -f "$WI_DIR/$_wif.stats" ] && read -r _ _ _wmon_st _ < "$WI_DIR/$_wif.stats" 2>/dev/null
+					if [ "$_wmon_st" = "down" ]; then
+						if [ -z "$_wv4" ] && [ -n "$_wv6" ]; then
+							_wclass="v6only"
+						else
+							_wclass="unreachable"
+						fi
+					fi
 
 					# Static vs dynamic is a property of how the address was
 					# obtained, which only the protocol knows.

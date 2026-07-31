@@ -2228,6 +2228,7 @@ return view.extend({
             v6only:    { label: 'Public IPv6',       sev: 'good', note: 'Globally Routable IPv6 Address Space (RFC 4291). Provides direct, end-to-end Internet reachability without intermediary address translation.' },
             linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'Link-Local Address Space (RFC 3927). Valid exclusively for communication within the local network segment; signifies the absence of a globally routable prefix.' },
             none:      { label: 'No address',        sev: 'bad',  note: 'No IP address is currently assigned to this logical interface.' },
+            unreachable: { label: 'Egress Unreachable', sev: 'bad', note: 'The interface is offline or unreachable. Internet egress address and NAT classification cannot be determined.' },
             unknown:   { label: 'Unknown',           sev: 'mute', note: 'The classification of this network address cannot be definitively determined.' }
         };
         // The protocol names LuCI itself shows, taken from the getI18n() of the
