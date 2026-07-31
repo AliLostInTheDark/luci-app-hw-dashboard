@@ -2226,19 +2226,19 @@ return view.extend({
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
-            return E('div', { style: 'padding:10px 12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:5px;' }, [
+            return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
                 E('div', { style: 'display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;' }, [
-                    E('span', { style: 'font-size:0.78em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
-                    E('span', { style: 'font-size:0.7em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 7px;' }, verdict.short)
+                    E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
+                    E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 8px;' }, verdict.short)
                 ]),
-                E('div', { style: 'font-size:0.76em; opacity:0.82;' }, verdict.note),
-                E('div', { style: 'font-size:0.7em; opacity:0.68; line-height:1.55;' }, 'Mapping: ' + mapping + ' · Filtering: ' + filtering)
+                E('div', { style: 'font-size:0.8em; opacity:0.85; line-height:1.4;' }, verdict.note),
+                E('div', { style: 'font-size:0.8em; opacity:0.75; line-height:1.4;' }, 'Mapping: ' + mapping + ' · Filtering: ' + filtering)
             ]);
         };
         var runNatTest = function(iface, wanClass) {
             var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:10px;' }, [
-                E('div', { style: 'font-size:0.82em; line-height:1.45; opacity:0.82;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It measures IPv4 NAT mapping and filtering behaviors.'),
-                E('div', { style: 'font-size:0.82em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
+                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with an on-demand UDP STUN probe. It measures IPv4 NAT mapping and filtering behaviors.'),
+                E('div', { style: 'font-size:0.8em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
             ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
                 E('button', { class: 'btn', click: ui.hideModal }, 'Close')
@@ -2246,22 +2246,22 @@ return view.extend({
             callHwNatTest(iface).then(function(res) {
                 content.innerHTML = '';
                 if (!res || !res.available) {
-                    content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'stuntman-client is not installed or could not be started.'));
+                    content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'stuntman-client is not installed or could not be started.'));
                     return;
                 }
                 if (res.error) {
-                    content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
+                    content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
                 if (res.v4) {
                     content.appendChild(natDialogRow('IPv4 NAT Behaviour', res.v4, wanClass));
                 } else {
-                    content.appendChild(E('div', { style: 'font-size:0.85em; opacity:0.8;' }, 'No IPv4 address is configured on this interface.'));
+                    content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.8;' }, 'No IPv4 address is configured on this interface.'));
                 }
                 wanIpTick();
             }).catch(function() {
                 content.innerHTML = '';
-                content.appendChild(E('div', { style: 'font-size:0.85em; color:' + sevColor('bad') + ';' }, 'NAT test failed before a result was returned.'));
+                content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test failed before a result was returned.'));
             });
         };
         var wanIpTick = function() {
@@ -2311,7 +2311,7 @@ return view.extend({
                     // Each chip owns a hue from the identity family, tinted from
                     // its own colour rather than a shared grey, so the kind of
                     // fact is readable before the text is.
-                    var CHIP = 'font-size: 0.68em; font-weight: 700; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap;';
+                    var CHIP = 'font-size: 0.7em; font-weight: 700; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap;';
                     var ifn = E('span', { style: 'font-weight: 700; font-size: 1.1em; font-family: monospace; letter-spacing: 0.6px;' });
                     // Devices get chips of their own, and a tunnel protocol
                     // gets two: the device it was configured on and the device
@@ -2327,7 +2327,7 @@ return view.extend({
                     var devs = E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [devPar, devArrow, devL3]);
                     var proto = E('span', { style: CHIP });
                     var alias = E('span', { style: CHIP + ' text-transform: uppercase;' });
-                    var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
+                    var badge = E('span', { style: 'font-size: 0.7em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
                     var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
                     var nat4 = E('span', { style: CHIP });
                     var natTest = E('button', { type: 'button', class: 'btn', style: CHIP + ' cursor:pointer; background:transparent;' }, 'TEST NAT TYPE');
