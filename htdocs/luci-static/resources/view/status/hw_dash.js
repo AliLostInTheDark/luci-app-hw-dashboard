@@ -2284,8 +2284,10 @@ return view.extend({
                 }
                 wanIpTick();
             }).catch(function(err) {
+                console.error('NAT test RPC error:', err);
                 content.innerHTML = '';
-                content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT probe timed out or was interrupted. The test may still be running in the background — try again in a moment.'));
+                var errMsg = err ? (err.message || String(err)) : 'NAT probe timed out or was interrupted.';
+                content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test error: ' + errMsg));
             });
         };
         var wanIpTick = function() {
