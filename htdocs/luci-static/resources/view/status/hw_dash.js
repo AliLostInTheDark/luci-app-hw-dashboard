@@ -1238,7 +1238,7 @@ return view.extend({
             // an Indian ISP's logo.
             'AS45775': { color: '#DA252B', label: 'WN', name: 'Wish Net', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' }
         };
-        var ispBadge = function(ispFull) {
+        var ispBadge = function(ispFull, ifaceName) {
             var raw = ispFull || '';
             var asn = '';
             var org = raw;
@@ -1246,6 +1246,20 @@ return view.extend({
                 var parts = raw.split(' | ');
                 asn = parts[0];
                 org = parts[1];
+            }
+            if (!org && ifaceName) {
+                var lowerIface = ifaceName.toLowerCase();
+                if (lowerIface.indexOf('jio') !== -1 || lowerIface.indexOf('reliance') !== -1) {
+                    org = 'Reliance Jio Infocomm'; asn = 'AS55836';
+                } else if (lowerIface.indexOf('netplus') !== -1) {
+                    org = 'Netplus Broadband'; asn = 'AS132540';
+                } else if (lowerIface.indexOf('airtel') !== -1 || lowerIface.indexOf('bharti') !== -1) {
+                    org = 'Bharti Airtel Ltd.'; asn = 'AS24560';
+                } else if (lowerIface.indexOf('bsnl') !== -1) {
+                    org = 'BSNL'; asn = 'AS9829';
+                } else if (lowerIface.indexOf('railwire') !== -1 || lowerIface.indexOf('railtel') !== -1) {
+                    org = 'RailWire'; asn = 'AS24186';
+                }
             }
             var isp = org.toLowerCase();
             // Show the operator string exactly as the ASN registry gives it,
@@ -4990,7 +5004,7 @@ return view.extend({
                     entry.reason.style.display = rsn ? '' : 'none';
                     entry.reason.style.color = rsn ? statusColor : '';
 
-                    var ib = ispBadge(r.isp);
+                    var ib = ispBadge(r.isp, r.iface);
                     setText(entry.ispName, ib.name);
                     // The registry string is what the name was derived from, so
                     // keep it reachable rather than discarded.
@@ -5020,7 +5034,7 @@ return view.extend({
                     if (ib.asn) {
                         entry.ifaceAsn.textContent = ifnLabel + ' • ' + ib.asn;
                     } else {
-                        entry.ifaceAsn.textContent = ifnLabel + ' • Local Link';
+                        entry.ifaceAsn.textContent = ifnLabel + ' • WAN Link';
                     }
 
                     entry.uptime.textContent = r.uptime_pct.toFixed(2) + '%';

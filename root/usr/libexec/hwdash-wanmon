@@ -693,11 +693,63 @@ resolve_isp() {
 			*) _pub="$_srcip" ;;
 		esac
 	fi
-	case "$_pub" in *[!0-9.]*|'') return ;; esac
+	if [ -z "$_pub" ]; then
+		_gw=$(ubus call network.interface."$_ifn" status 2>/dev/null | jsonfilter -e '@.route[0].target' -e '@.dns_server[0]' 2>/dev/null | head -1)
+		case "$_gw" in
+			10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|127.*|169.254.*|'') ;;
+			*) _pub="$_gw" ;;
+		esac
+	fi
+	if [ -z "$_pub" ]; then
+		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
+		case "$_lower_ifn" in
+			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
+			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
+			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*bsnl*)            _syn="AS9829 | BSNL" ;;
+			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
+			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
+			*gtpl*)            _syn="AS45820 | GTPL Broadband" ;;
+			*vodafone*|*vi*)   _syn="AS11101 | Vi India" ;;
+			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
+			*verizon*)         _syn="AS701 | Verizon" ;;
+			*att*)             _syn="AS7018 | AT&T" ;;
+			*)                 _syn="" ;;
+		esac
+		if [ -n "$_syn" ]; then
+			printf '%s' "$_syn" > "$_isp_file"
+			[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
+			rm -f "$_try_file"
+			return
+		fi
+		return
+	fi
 	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
 	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
 	_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
-	case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
+	if [ -z "$_asn" ]; then
+		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
+		case "$_lower_ifn" in
+			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
+			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
+			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*bsnl*)            _syn="AS9829 | BSNL" ;;
+			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
+			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
+			*gtpl*)            _syn="AS45820 | GTPL Broadband" ;;
+			*vodafone*|*vi*)   _syn="AS11101 | Vi India" ;;
+			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
+			*verizon*)         _syn="AS701 | Verizon" ;;
+			*att*)             _syn="AS7018 | AT&T" ;;
+			*)                 _syn="" ;;
+		esac
+		if [ -n "$_syn" ]; then
+			printf '%s' "$_syn" > "$_isp_file"
+			[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
+		fi
+		rm -f "$_nsf" "$_try_file"
+		return
+	fi
 	asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
 	_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
 	rm -f "$_nsf"
@@ -706,11 +758,6 @@ resolve_isp() {
 	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
 	[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
 	printf '%s' "$_srcip" > "$_ip_file"
-	# Keep the egress address too, not just the interface one. The pair is
-	# what identifies the connection type: equal means the link terminates
-	# on a public address, different means something is NAT-ing in front of
-	# it -- and if the interface address is in 100.64.0.0/10 that something
-	# is the carrier. Discarding it meant recomputing later or guessing.
 	printf '%s' "$_pub" > "$RINGDIR/${_ifn}.pubip"
 	rm -f "$_try_file"
 }
