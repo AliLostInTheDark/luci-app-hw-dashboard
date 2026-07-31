@@ -929,8 +929,10 @@ return view.extend({
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
+        var wanStunNotice = E('div', { id: 'hw-wanip-notice', style: 'display: none; width: 100%; padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; font-size: 0.78em; line-height: 1.45;' });
         var wanIpCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('h3', {}, 'NAT Type'),
+            wanStunNotice,
             E('div', { id: 'hw-wanip', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
         ]);
         var alertsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
@@ -2268,6 +2270,19 @@ return view.extend({
                 self.wanIpBusy = false;
                 var wans = (res && res.wans) || [];
                 self.stunClientAvailable = !!(res && res.stunclient);
+                var noticeEl = document.getElementById('hw-wanip-notice');
+                if (noticeEl) {
+                    if (!self.stunClientAvailable) {
+                        noticeEl.style.display = 'block';
+                        var nCol = sevColor('info');
+                        noticeEl.style.color = nCol;
+                        noticeEl.style.background = nCol + '15';
+                        noticeEl.style.border = '1px solid ' + nCol + '55';
+                        noticeEl.innerHTML = 'To test your NAT type, please install <strong>stuntman-client</strong> from Fantastic Feeds. After installing the package, perform a hard browser refresh (Ctrl+F5 or Shift+Refresh) to start the NAT type test job.';
+                    } else {
+                        noticeEl.style.display = 'none';
+                    }
+                }
                 // A link-local address is not connectivity, so fe80:: does not
                 // count -- a router with only those has no working IPv6 WAN.
                 var v6 = wans.some(function(w) {
