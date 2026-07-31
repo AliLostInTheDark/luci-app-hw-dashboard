@@ -270,7 +270,6 @@ _sync_wan_targets() {
 NAT_STUN_SERVER=stun.miwifi.com
 NAT_STUN_PORT=3478
 NAT_CACHE_DIR=/tmp/hwdash
-NAT_CACHE_TTL=900
 
 _nat_code() {
 	case "$1" in
@@ -605,10 +604,9 @@ case "$1" in
 					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
 						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt; do
 							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
-							[ $((HWDASH_NOW - _wi_nt)) -le "$NAT_CACHE_TTL" ] || continue
 							case "$_wi_nf:$_wi_na" in
-								4:"$_wv4") _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)) ;;
-								6:"$_wv6") _wi_n6s=$_wi_ns; _wi_n6m=$_wi_nm; _wi_n6f=$_wi_nfi; _wi_n6a=$((HWDASH_NOW - _wi_nt)) ;;
+								4:"$_wv4") [ -n "$_wv4" ] && { _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)); } ;;
+								6:"$_wv6") [ -n "$_wv6" ] && { _wi_n6s=$_wi_ns; _wi_n6m=$_wi_nm; _wi_n6f=$_wi_nfi; _wi_n6a=$((HWDASH_NOW - _wi_nt)); } ;;
 							esac
 						done < "$_wi_nat_cache"
 					fi
