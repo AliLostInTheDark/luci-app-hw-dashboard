@@ -319,38 +319,34 @@ _get_stunclient() {
 _nat_probe() {
 	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3; _nat_dev=$4
 	_nat_bin=$(_get_stunclient)
-	_nat_args="--mode full --protocol udp"
-	[ "$_nat_family" = "6" ] && _nat_args="$_nat_args --family 6" || _nat_args="$_nat_args --family 4"
-
-	# Build server list — RFC 5780 capable servers that return Nat behavior
-	# stun.miwifi.com:3478 is primary (dual-stack, RFC 5780)
-	# stun1.l.google.com:19302 is secondary (IPv4, basic binding only)
-	# stun.cloudflare.com:3478 is tertiary (dual-stack, RFC 5780)
-	_nat_servers="stun.miwifi.com:3478 stun.cloudflare.com:3478"
-	[ "$_nat_family" = "6" ] && _nat_servers="stun.miwifi.com:3478 stun.cloudflare.com:3478"
-
-	_nat_dir=$(dirname "$_nat_tmp")
-	_nat_base=$(basename "$_nat_tmp")
-	_nat_win=""
-
-	# Try each server sequentially but with short per-attempt ceiling
-	for _nat_se in $_nat_servers; do
-		_nat_srv="${_nat_se%%:*}"; _nat_prt="${_nat_se##*:}"
-		> "$_nat_tmp"
-		if [ -n "$_nat_bind" ]; then
-			$_nat_bin $_nat_args --localaddr "$_nat_bind" "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
-		fi
-		if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
-			return 0
-		fi
-		# Binding failed or behavior not determinable — try without localaddr
-		$_nat_bin $_nat_args "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
-		if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null; then
-			return 0
-		fi
-	done
+	if [ "$_nat_family" = "6" ]; then
+		# IPv6: Fast native reachability check via STUN binding test (--mode basic, 0.06s)
+		_nat_servers="stun.cloudflare.com:3478 stun.l.google.com:19302"
+		for _nat_se in $_nat_servers; do
+			_nat_srv="${_nat_se%%:*}"; _nat_prt="${_nat_se##*:}"
+			> "$_nat_tmp"
+			[ -n "$_nat_bind" ] && $_nat_bin --mode basic --family 6 --protocol udp --localaddr "$_nat_bind" "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
+			grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null && return 0
+			$_nat_bin --mode basic --family 6 --protocol udp "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
+			grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null && return 0
+		done
+	else
+		# IPv4: Full RFC 5780 NAT mapping and filtering discovery (--mode full)
+		_nat_servers="stun.miwifi.com:3478 stun.cloudflare.com:3478"
+		for _nat_se in $_nat_servers; do
+			_nat_srv="${_nat_se%%:*}"; _nat_prt="${_nat_se##*:}"
+			> "$_nat_tmp"
+			[ -n "$_nat_bind" ] && $_nat_bin --mode full --family 4 --protocol udp --localaddr "$_nat_bind" "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
+			if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null || grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
+				return 0
+			fi
+			$_nat_bin --mode full --family 4 --protocol udp "$_nat_srv" "$_nat_prt" > "$_nat_tmp" 2>/dev/null
+			if grep -qi 'Nat behavior:' "$_nat_tmp" 2>/dev/null || grep -qi 'Binding test: success' "$_nat_tmp" 2>/dev/null; then
+				return 0
+			fi
+		done
+	fi
 }
-
 
 _nat_json() {
 	_nat_jfamily=$1; _nat_jaddr=$2; _nat_jstate=$3; _nat_jmap=$4; _nat_jfilter=$5
@@ -360,6 +356,21 @@ _nat_json() {
 	json_esc "$_nat_jfilter"; _nat_jfilter=$JSV
 	printf '{"family":"%s","address":"%s","state":"%s","mapping":"%s","filtering":"%s"}' \
 		"$_nat_jfamily" "$_nat_jaddr" "$_nat_jstate" "$_nat_jmap" "$_nat_jfilter"
+}
+
+
+_nat_parse_out() {
+	_p_file=$1; _p_fam=$2
+	_p_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
+	_p_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
+	_p_m=$(_nat_code "$_p_map"); _p_f=$(_nat_code "$_p_filter")
+	_p_s="unavailable"
+	if [ "$_p_fam" = "6" ]; then
+		grep -qi 'Binding test: success' "$_p_file" 2>/dev/null && { _p_s="open"; _p_m="direct"; _p_f="endpoint_independent"; }
+	else
+		grep -qi 'Binding test: success' "$_p_file" 2>/dev/null && _p_s=$(_nat_level "$_p_m" "$_p_f")
+	fi
+	echo "$_p_s $_p_m $_p_f"
 }
 
 
@@ -537,18 +548,21 @@ case "$1" in
 						_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.bg"
 						_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
 						_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
-						[ -n "$_nat_v4" ] && _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" && {
-							_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
-							_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
-							_nat_m4=$(_nat_code "$_nat_map"); _nat_f4=$(_nat_code "$_nat_filter")
-							grep -qi 'Binding test: success' "$_nat_tmp4" 2>/dev/null && _nat_s4=$(_nat_level "$_nat_m4" "$_nat_f4")
-						}
-						[ -n "$_nat_v6" ] && _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" && {
-							_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
-							_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
-							_nat_m6=$(_nat_code "$_nat_map"); _nat_f6=$(_nat_code "$_nat_filter")
-							grep -qi 'Binding test: success' "$_nat_tmp6" 2>/dev/null && _nat_s6=$(_nat_level "$_nat_m6" "$_nat_f6")
-						}
+						# Run v4 and v6 probes in parallel background processes
+						[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
+						[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
+						[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
+						[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
+						if [ -n "$_nat_v4" ]; then
+							read -r _nat_s4 _nat_m4 _nat_f4 <<EOF
+$(_nat_parse_out "$_nat_tmp4" 4)
+EOF
+						fi
+						if [ -n "$_nat_v6" ]; then
+							read -r _nat_s6 _nat_m6 _nat_f6 <<EOF
+$(_nat_parse_out "$_nat_tmp6" 6)
+EOF
+						fi
 						{
 							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)"
 							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)"
@@ -558,25 +572,26 @@ case "$1" in
 					exit 0
 				fi
 				# ------------------------------------------------------------------
-				# Cold-path: no valid cache — run blocking probe and return result.
+				# Cold-path: no valid cache — run blocking parallel probes.
 				# ------------------------------------------------------------------
 				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
 				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"
 				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
 				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
+				_p4=""; _p6=""
+				[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
+				[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
+				[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
+				[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
 				if [ -n "$_nat_v4" ]; then
-					_nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev"
-					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
-					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
-					_nat_m4=$(_nat_code "$_nat_map"); _nat_f4=$(_nat_code "$_nat_filter")
-					grep -qi 'Binding test: success' "$_nat_tmp4" 2>/dev/null && _nat_s4=$(_nat_level "$_nat_m4" "$_nat_f4")
+					read -r _nat_s4 _nat_m4 _nat_f4 <<EOF
+$(_nat_parse_out "$_nat_tmp4" 4)
+EOF
 				fi
 				if [ -n "$_nat_v6" ]; then
-					_nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev"
-					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
-					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
-					_nat_m6=$(_nat_code "$_nat_map"); _nat_f6=$(_nat_code "$_nat_filter")
-					grep -qi 'Binding test: success' "$_nat_tmp6" 2>/dev/null && _nat_s6=$(_nat_level "$_nat_m6" "$_nat_f6")
+					read -r _nat_s6 _nat_m6 _nat_f6 <<EOF
+$(_nat_parse_out "$_nat_tmp6" 6)
+EOF
 				fi
 				rm -f "$_nat_tmp4" "$_nat_tmp6"
 				HWDASH_NOW=$(date +%s 2>/dev/null)
