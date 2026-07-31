@@ -2254,7 +2254,7 @@ return view.extend({
                     return;
                 }
                 if (res.v4) {
-                    content.appendChild(natDialogRow('IPv4 NAT Behaviour', res.v4, wanClass));
+                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass));
                 } else {
                     content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.8;' }, 'No IPv4 address is configured on this interface.'));
                 }
