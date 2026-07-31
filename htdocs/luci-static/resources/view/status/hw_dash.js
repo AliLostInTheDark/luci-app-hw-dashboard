@@ -2199,14 +2199,14 @@ return view.extend({
         };
         var natVerdict = function(family, state, mapping, filtering, wanClass) {
             if (family === 4 && wanClass === 'cgnat')
-                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-grade NAT prevents unsolicited inbound IPv4 connections.' };
-            if (!state) return { short: 'TEST NAT', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering.' };
+                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (CG-NAT) prevents unsolicited inbound IPv4 connections.' };
+            if (!state) return { short: 'TEST NAT TYPE', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering.' };
             if (state === 'unavailable') return { short: 'UNAVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding test.' };
-            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behaviour data.' };
+            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behavior data.' };
             if (family === 6 && state === 'open' && mapping === 'direct')
-                return { short: 'OPEN · NATIVE', level: 'open', note: 'Native IPv6 has no address translation on this WAN path.' };
+                return { short: 'OPEN · NATIVE', level: 'open', note: 'Native IPv6 provides direct end-to-end reachability without address translation.' };
             if (state === 'open' && mapping === 'direct')
-                return { short: 'OPEN · DIRECT', level: 'open', note: 'No address translation was detected.' };
+                return { short: 'OPEN · DIRECT', level: 'open', note: 'Direct IP routing is available without address translation.' };
             if (state === 'open')
                 return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping and filtering were detected.' };
             if (state === 'moderate' && filtering === 'address_port_dependent')
@@ -2312,20 +2312,20 @@ return view.extend({
                     var badge = E('span', { style: 'font-size: 0.68em; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap;' });
                     var assign = E('span', { style: CHIP + ' text-transform: uppercase;' });
                     var nat4 = E('span', { style: CHIP });
-                    var nat6 = E('span', { style: CHIP });
-                    var natTest = E('button', { type: 'button', class: 'btn', style: CHIP + ' cursor:pointer; background:transparent;' }, 'TEST NAT');
-                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge, nat4, nat6, natTest]);
+                    var natTest = E('button', { type: 'button', class: 'btn', style: CHIP + ' cursor:pointer; background:transparent;' }, 'TEST NAT TYPE');
+                    var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [ifn, devs, proto, assign, alias, badge, nat4, natTest]);
                     // One label/value line per fact rather than a single run-on
                     // string: "IPv4 100.x/32 -> seen as 106.x" wrapped mid-address
                     // on a phone and read as one long token.
                     var kv4 = kvRow('IPv4'), kvPub = kvRow('Seen as');
                     var kv6 = kvRow('IPv6'), kvPfx = kvRow('Delegated');
                     var note = E('div', { style: 'font-size: 0.76em; opacity: 0.75; line-height: 1.4; word-break: break-word; margin-top: 3px;' });
+                    var natCard = E('div', { style: 'display: none; width: 100%; margin-top: 6px;' });
                     return {
-                        el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note]),
+                        el: E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [head, kv4.el, kvPub.el, kv6.el, kvPfx.el, note, natCard]),
                         ifn: ifn, devPar: devPar, devArrow: devArrow, devL3: devL3,
-                        proto: proto, alias: alias, badge: badge, assign: assign, nat4: nat4, nat6: nat6, natTest: natTest,
-                        kv4: kv4, kvPub: kvPub, kv6: kv6, kvPfx: kvPfx, note: note
+                        proto: proto, alias: alias, badge: badge, assign: assign, nat4: nat4, natTest: natTest,
+                        kv4: kv4, kvPub: kvPub, kv6: kv6, kvPfx: kvPfx, note: note, natCard: natCard
                     };
                 }, function(e, w) {
                     var cls = WAN_CLASS[w.class] || WAN_CLASS.unknown;
@@ -2398,13 +2398,13 @@ return view.extend({
                     // disappear completely; when present they stay compact and
                     // expose the detailed mapping/filtering terms in a dialog.
                     var setNatChip = function(el, family, address, state, mapping, filtering) {
-                        if (!self.stunClientAvailable || !address || !state || state === 'unavailable' || state === 'unknown') {
+                        if (!self.stunClientAvailable || !address || family !== 4 || !state || state === 'unavailable' || state === 'unknown') {
                             el.style.display = 'none';
                             return;
                         }
                         var verdict = natVerdict(family, state, mapping, filtering, w.class);
                         var ncol = natColor(verdict.level);
-                        setText(el, (family === 4 ? 'IPv4 · ' : 'IPv6 · ') + verdict.short);
+                        setText(el, verdict.short);
                         el.title = verdict.note;
                         el.style.color = ncol;
                         el.style.background = ncol + '18';
@@ -2412,9 +2412,18 @@ return view.extend({
                         el.style.display = '';
                     };
                     setNatChip(e.nat4, 4, w.ip4, w.nat4_state, w.nat4_mapping, w.nat4_filtering);
-                    setNatChip(e.nat6, 6, w.ip6, w.nat6_state, w.nat6_mapping, w.nat6_filtering);
-                    e.natTest.style.display = self.stunClientAvailable ? '' : 'none';
-                    if (self.stunClientAvailable) {
+
+                    var hasNat4Result = self.stunClientAvailable && !!w.ip4 && w.nat4_state && w.nat4_state !== 'unavailable' && w.nat4_state !== 'unknown';
+                    e.natCard.style.display = hasNat4Result ? '' : 'none';
+                    if (hasNat4Result) {
+                        e.natCard.innerHTML = '';
+                        var v4Result = { family: '4', state: w.nat4_state, mapping: w.nat4_mapping, filtering: w.nat4_filtering };
+                        e.natCard.appendChild(natDialogRow('IPv4 NAT Behaviour', v4Result, w.class));
+                    }
+
+                    var canTest = self.stunClientAvailable && !!w.ip4;
+                    e.natTest.style.display = canTest ? '' : 'none';
+                    if (canTest) {
                         var testCol = sevColor('info');
                         e.natTest.style.color = testCol;
                         e.natTest.style.border = '1px solid ' + testCol + '55';
