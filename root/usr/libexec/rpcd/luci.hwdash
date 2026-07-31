@@ -301,22 +301,27 @@ _nat_level() {
 }
 
 _nat_run() {
-	# BusyBox configurations do not consistently ship a timeout applet. Keep
-	# the optional test self-contained and put a firm cap on the client process.
 	_nat_out=$1; shift
-	"$@" > "$_nat_out" 2>&1 &
-	_nat_pid=$!
-	( sleep 12; kill -9 "$_nat_pid" 2>/dev/null ) &
-	_nat_watch=$!
-	wait "$_nat_pid" 2>/dev/null
-	kill "$_nat_watch" 2>/dev/null
-	wait "$_nat_watch" 2>/dev/null
+	"$@" > "$_nat_out" 2>&1
+}
+
+_has_stunclient() {
+	[ -x /usr/bin/stunclient ] || [ -x /usr/sbin/stunclient ] || [ -x /bin/stunclient ] || command -v stunclient >/dev/null 2>&1 || which stunclient >/dev/null 2>&1
+}
+
+_get_stunclient() {
+	if [ -x /usr/bin/stunclient ]; then echo "/usr/bin/stunclient"
+	elif [ -x /usr/sbin/stunclient ]; then echo "/usr/sbin/stunclient"
+	elif [ -x /bin/stunclient ]; then echo "/bin/stunclient"
+	else command -v stunclient 2>/dev/null || echo "stunclient"
+	fi
 }
 
 _nat_probe() {
 	_nat_family=$1; _nat_bind=$2; _nat_tmp=$3
 	[ -n "$_nat_bind" ] || return
-	_nat_run "$_nat_tmp" stunclient --mode full --family "$_nat_family" \
+	_nat_bin=$(_get_stunclient)
+	_nat_run "$_nat_tmp" "$_nat_bin" --mode full --family "$_nat_family" \
 		--protocol udp --localaddr "$_nat_bind" "$NAT_STUN_SERVER" "$NAT_STUN_PORT"
 }
 
@@ -445,9 +450,9 @@ case "$1" in
 				# Limit the probe to a WAN shown by this dashboard. This prevents a
 				# manual RPC call from testing LAN or unrelated tunnel interfaces.
 				_nat_in=""; IFS= read -r _nat_in 2>/dev/null
-				_nat_if=$(printf '%s' "$_nat_in" | jsonfilter -e '@.params[0].iface' 2>/dev/null)
+				_nat_if=$(printf '%s' "$_nat_in" | jsonfilter -e '@.iface' -e '@.params[0].iface' 2>/dev/null | head -n 1)
 				case "$_nat_if" in ''|*[!A-Za-z0-9_.-]*) echo '{"available":false,"error":"invalid_interface"}'; exit 0 ;; esac
-				if ! command -v stunclient >/dev/null 2>&1; then
+				if ! _has_stunclient; then
 					echo '{"available":false,"error":"stunclient_not_installed"}'
 					exit 0
 				fi
@@ -469,14 +474,14 @@ case "$1" in
 				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"
 				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"
 				if [ -n "$_nat_v4" ]; then
-					_nat_probe 4 "${_nat_dev:-$_nat_v4}" "$_nat_tmp4"
+					_nat_probe 4 "$_nat_v4" "$_nat_tmp4"
 					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
 					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp4" 2>/dev/null | head -1)
 					_nat_m4=$(_nat_code "$_nat_map"); _nat_f4=$(_nat_code "$_nat_filter")
 					grep -qi 'Binding test: success' "$_nat_tmp4" 2>/dev/null && _nat_s4=$(_nat_level "$_nat_m4" "$_nat_f4")
 				fi
 				if [ -n "$_nat_v6" ]; then
-					_nat_probe 6 "${_nat_dev:-$_nat_v6}" "$_nat_tmp6"
+					_nat_probe 6 "$_nat_v6" "$_nat_tmp6"
 					_nat_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
 					_nat_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_nat_tmp6" 2>/dev/null | head -1)
 					_nat_m6=$(_nat_code "$_nat_map"); _nat_f6=$(_nat_code "$_nat_filter")
@@ -511,7 +516,7 @@ case "$1" in
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				WI_DIR=/tmp/hwdash_wanmon
 				WI_STUN=0
-				command -v stunclient >/dev/null 2>&1 && WI_STUN=1
+				_has_stunclient && WI_STUN=1
 				WI_ITEMS=""; WI_FIRST=1
 				# Use the collector's tracked list rather than every interface
 				# ubus knows about: it is the same set the WAN Uptime card
