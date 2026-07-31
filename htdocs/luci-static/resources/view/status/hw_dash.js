@@ -1085,6 +1085,7 @@ return view.extend({
             jio: 'jio.com', reliance: 'jio.com',
             vodafone: 'myvi.in', ' vi ': 'myvi.in',
             bsnl: 'bsnl.co.in',
+            excitel: 'excitel.com',
             // Matched against the whole registry string, which includes the AS
             // handle -- so one key covers every ASN an operator holds:
             // "railtel" hits AS24186/AS135750/AS151100, "gtpl" hits
@@ -1113,7 +1114,8 @@ return view.extend({
             bsnl: L.resource('hwdash-icons/bsnl.png') + '?v=3',
             gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=2',
             railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
-            railwire: L.resource('hwdash-icons/railwire.png') + '?v=2'
+            railwire: L.resource('hwdash-icons/railwire.png') + '?v=2',
+            excitel: L.resource('hwdash-icons/excitel.png') + '?v=1'
         };
         // Friendly display names. The registry string is accurate but written
         // for network operators, not people: "AIRTELBROADBAND-AS-AP - Bharti
@@ -1175,6 +1177,8 @@ return view.extend({
                     org = 'BSNL'; asn = 'AS9829';
                 } else if (lowerIface.indexOf('railwire') !== -1 || lowerIface.indexOf('railtel') !== -1) {
                     org = 'RailWire'; asn = 'AS24186';
+                } else if (lowerIface.indexOf('excitel') !== -1) {
+                    org = 'Excitel Broadband'; asn = 'AS134889';
                 }
             }
             var isp = org.toLowerCase();
@@ -1205,6 +1209,7 @@ return view.extend({
             else if (isp.indexOf('jio') !== -1 || isp.indexOf('reliance') !== -1) { color = '#0F1C4D'; label = 'Jio'; }
             else if (isp.indexOf('vodafone') !== -1 || isp.indexOf('idea') !== -1 || isp.indexOf(' vi ') !== -1) { color = '#E60000'; label = 'Vi'; }
             else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; }
+            else if (isp.indexOf('excitel') !== -1) { color = '#F26522'; label = 'E'; }
             else if (isp.indexOf('gtpl') !== -1) { color = '#1B75BC'; label = 'GTPL'; }
             else if (isp.indexOf('railtel') !== -1 || isp.indexOf('railwire') !== -1) { color = '#00AEEF'; label = 'RW'; }
             else if (isp.indexOf('wish net private') !== -1) { color = '#DA252B'; label = 'WN'; }
