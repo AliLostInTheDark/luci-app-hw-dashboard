@@ -472,10 +472,17 @@ case "$1" in
 				_nat_dev=""; _nat_v4=""; _nat_v6=""
 				eval "$(printf '%s' "$_nat_status" | jsonfilter \
 					-e '_nat_dev=@.l3_device' -e '_nat_v4=@["ipv4-address"][0].address' 2>/dev/null)" 2>/dev/null
-				_nat_v6_all=$(printf '%s' "$_nat_status" | jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null)
+				_nat_v6_all=$(printf '%s' "$_nat_status" | jsonfilter -e '@["ipv6-address"][*].address' -e '@["ipv6-prefix-assignment"][0].address' 2>/dev/null)
 				for _nat_a6 in $_nat_v6_all; do
 					case "$_nat_a6" in fe80:*|FE80:*|fc*|FC*|fd*|FD*|::1|'') ;; *:*) _nat_v6=$_nat_a6; break ;; esac
 				done
+				if [ -z "$_nat_v4" ]; then
+					_nat_parent=$(printf '%s' "$_nat_status" | jsonfilter -e '@.parent' -e '@.device' 2>/dev/null)
+					if [ -n "$_nat_parent" ] && [ "$_nat_parent" != "$_nat_if" ]; then
+						_nat_pstatus=$(ubus call "network.interface.$_nat_parent" status 2>/dev/null)
+						[ -n "$_nat_pstatus" ] && _nat_v4=$(printf '%s' "$_nat_pstatus" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+					fi
+				fi
 				[ -n "$_nat_dev" ] || _nat_dev=$_nat_v4
 				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
 				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"

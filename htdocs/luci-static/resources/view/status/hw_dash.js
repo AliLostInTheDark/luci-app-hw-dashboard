@@ -2435,7 +2435,7 @@ return view.extend({
                     // disappear completely; when present they stay compact and
                     // expose the detailed mapping/filtering terms in a dialog.
                     var setNatChip = function(el, family, address, state, mapping, filtering) {
-                        if (!address || family !== 4) {
+                        if (!address) {
                             el.style.display = 'none';
                             return;
                         }
@@ -2453,7 +2453,7 @@ return view.extend({
                         }
                         if (!state || state === 'unavailable' || state === 'unknown') {
                             setText(el, 'NAT TYPE · NOT TESTED');
-                            el.title = 'No STUN NAT test has been performed for this IPv4 interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviors.';
+                            el.title = 'No STUN NAT test has been performed for this interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviors.';
                             el.style.color = mcol;
                             el.style.background = mcol + '15';
                             el.style.border = '1px solid ' + mcol + '44';
@@ -2473,11 +2473,11 @@ return view.extend({
                         el.onclick = null;
                         el.style.display = '';
                     };
-                    setNatChip(e.nat4, 4, w.ip4, w.nat4_state, w.nat4_mapping, w.nat4_filtering);
+                    setNatChip(e.nat4, w.ip4 ? 4 : 6, w.ip4 || w.ip6 || (w.up ? 'active' : ''), w.nat4_state || w.nat6_state, w.nat4_mapping || w.nat6_mapping, w.nat4_filtering || w.nat6_filtering);
 
                     e.natCard.style.display = 'none';
 
-                    var canTest = self.stunClientAvailable && !!w.ip4;
+                    var canTest = self.stunClientAvailable && (!!w.ip4 || !!w.ip6 || w.up);
                     e.natTest.style.display = canTest ? '' : 'none';
                     if (canTest) {
                         var testCol = sevColor('info');
