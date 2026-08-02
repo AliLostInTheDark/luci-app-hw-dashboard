@@ -925,8 +925,11 @@ return view.extend({
             pingGraphNode,
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
+        // Retitled at runtime on an access point, where the tracked link is
+        // the LAN bridge rather than a WAN -- see wanQTick.
+        var wanQualityTitle = E('h3', {}, 'WAN Uptime Status');
         var wanQualityCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
-            E('h3', {}, 'WAN Uptime Status'),
+            wanQualityTitle,
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
@@ -1005,6 +1008,7 @@ return view.extend({
         self.hiddenWanIfaces = cleanWanList(Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []));
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
+        self.persistDir = typeof savedCfg.persistDir === 'string' ? savedCfg.persistDir : '';
         var saveConfig = function() {
             if (typeof wanTgt4Input !== 'undefined' && wanTgt4Input && typeof wanTgt4Input.value === 'string') {
                 self.wanTarget4 = wanTgt4Input.value.trim() || '1.1.1.1';
@@ -1012,14 +1016,28 @@ return view.extend({
             if (typeof wanTgt6Input !== 'undefined' && wanTgt6Input && typeof wanTgt6Input.value === 'string') {
                 self.wanTarget6 = wanTgt6Input.value.trim() || '2606:4700:4700::1111';
             }
+            if (typeof persistDirInput !== 'undefined' && persistDirInput && typeof persistDirInput.value === 'string') {
+                self.persistDir = persistDirInput.value.trim();
+            }
+            // Resolves to the backend's own {result:...} so a caller can tell
+            // success from failure. A rejection is turned into an explicit
+            // error result rather than being swallowed: this used to end in
+            // .catch(function(){}), which resolved with undefined, and the
+            // page-level Save then reported "All settings saved." for a write
+            // that never reached the router.
             return callHwSetConfig({
                 hidden: self.hiddenCards,
                 targets: self.pingTargets,
                 disabledPings: self.disabledPings,
                 wanHidden: self.hiddenWanIfaces,
                 wanTarget4: self.wanTarget4,
-                wanTarget6: self.wanTarget6
-            }).catch(function() {});
+                wanTarget6: self.wanTarget6,
+                persistDir: self.persistDir
+            }).then(function(r) {
+                return (r && r.result) ? r : { result: 'error' };
+            }).catch(function() {
+                return { result: 'error' };
+            });
         };
         // Settings are staged, not written the instant a control moves. The
         // control still updates the live view -- that is the preview, and it
@@ -1462,7 +1480,7 @@ return view.extend({
             renderTargetList();
         };
         settingsPanel.appendChild(cbiSection('Ping Targets',
-            'Hosts the Ping Latency and Ping Graph cards probe, split by address family.',
+            'Hosts probed by the Ping Latency card, split by address family.',
             [
                 targetList,
                 E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
@@ -1581,6 +1599,47 @@ return view.extend({
                 cbiRow('IPv4 Quality Target', wanTgt4Input),
                 cbiRow('IPv6 Quality Target', wanTgt6Input)
             ]));
+
+        // Same shape as adguardhome's own "Working directory" field: a plain
+        // absolute path, empty means the built-in default, validated on the
+        // client and re-validated on the router since UCI can be edited by
+        // hand. Unlike adguardhome this is additive rather than a relocation
+        // -- the small set of values that already survive a graceful reboot
+        // (the WAN interface list, the NAND wear baseline) keep their
+        // existing home on internal flash no matter what, and this directory
+        // only ever receives a second copy alongside it. What is new here,
+        // not just relocated, is the 24-hour WAN uptime/downtime history and
+        // any saved NAT type test result: neither has ever survived a real
+        // power outage before, only a graceful reboot, because both live
+        // purely in tmpfs by design.
+        var persistDirInput = E('input', {
+            type: 'text', class: 'cbi-input-text', value: self.persistDir,
+            placeholder: '/mnt/usb1/hwdash (leave empty to disable)', style: 'width: 320px;'
+        });
+        var persistDirMsg = E('div', { style: 'font-size: 0.78em; margin-top: 4px;' });
+        var validatePersistDir = function() {
+            var v = persistDirInput.value.trim();
+            if (!v) { persistDirMsg.textContent = ''; persistDirInput.style.borderColor = ''; return; }
+            if (v.charAt(0) !== '/' || v.slice(-1) === '/') {
+                persistDirMsg.textContent = 'Must be an absolute path (e.g. /mnt/usb1/hwdash), without a trailing slash.';
+                persistDirMsg.style.color = '#ff5252';
+                persistDirInput.style.borderColor = '#ff5252';
+            } else {
+                persistDirMsg.textContent = '';
+                persistDirInput.style.borderColor = '';
+            }
+        };
+        persistDirInput.addEventListener('input', function() { validatePersistDir(); markDirty(); });
+        persistDirInput.addEventListener('change', validatePersistDir);
+        settingsPanel.appendChild(cbiSection('Persistent Storage Directory',
+            'Point this at an already-mounted, writable directory -- typically on a USB drive -- to keep a ' +
+            'second copy of the WAN interface list and NAND wear baseline there, and to let the WAN Uptime ' +
+            'card’s 24-hour history and any saved NAT type test result survive a real power outage rather ' +
+            'than only a graceful reboot. Internal flash keeps its own copy of everything regardless of this ' +
+            'setting, so an unplugged or missing drive never breaks the dashboard — it is checked before ' +
+            'every write, and anything written here is skipped rather than silently landing back on internal ' +
+            'flash. This package does not mount the drive itself.',
+            [cbiRow('Directory', persistDirInput), persistDirMsg]));
 
         var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
         var cpuPerfSection = E('div', {}, [cpuPerfBody]);
@@ -1873,9 +1932,19 @@ return view.extend({
             if (typeof aqlSaveCurrent === 'function') jobs.push(aqlSaveCurrent());
             Promise.all(jobs).then(function(r) {
                 pageBusy(false);
-                var aqlRes = r[1];
+                var cfgRes = r[0], aqlRes = r[1];
+                // The dashboard settings are the point of this button, so their
+                // result is checked first and a failure there is reported as a
+                // failure -- previously only the AQL half was inspected.
+                if (!cfgRes || cfgRes.result !== 'ok') {
+                    setPageMsg('Save failed — the router rejected the settings'
+                        + (cfgRes && cfgRes.result ? ' (' + cfgRes.result + ')' : '')
+                        + '. Your changes are still staged here.', '#ff5252');
+                    return;
+                }
                 if (aqlRes && aqlRes.result && aqlRes.result !== 'ok' && aqlRes.result !== 'skipped') {
-                    setPageMsg('Saved, but AQL was rejected: ' + aqlRes.result, '#ffa726');
+                    settingsDirty = false;
+                    setPageMsg('Settings saved, but AQL was rejected: ' + aqlRes.result, '#ffa726');
                 } else {
                     settingsDirty = false;
                     setPageMsg('All settings saved.', '#8bc34a');
@@ -1901,6 +1970,8 @@ return view.extend({
                     self.wanTarget6 = cfg.wanTarget6;
                     if (wanTgt6Input) wanTgt6Input.value = cfg.wanTarget6;
                 }
+                self.persistDir = typeof cfg.persistDir === 'string' ? cfg.persistDir : '';
+                if (persistDirInput) persistDirInput.value = self.persistDir;
                 applyCardVisibility();
                 if (typeof renderTargetList === 'function') renderTargetList();
                 if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
@@ -1920,6 +1991,8 @@ return view.extend({
             self.wanTarget6 = '2606:4700:4700::1111';
             if (wanTgt4Input) wanTgt4Input.value = self.wanTarget4;
             if (wanTgt6Input) wanTgt6Input.value = self.wanTarget6;
+            self.persistDir = '';
+            if (persistDirInput) persistDirInput.value = '';
             self.pingHist = {};
             applyCardVisibility();
             if (typeof renderTargetList === 'function') renderTargetList();
@@ -2237,7 +2310,14 @@ return view.extend({
             var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanIpCache) ? self._wanIpCache[wInfo.alias_of || wInfo.parent] : null;
             var localIp = result ? result.address : (wInfo ? (family === 6 ? (wInfo.ip6 || (parentInfo ? parentInfo.ip6 : '—')) : (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—'))) : '—');
             var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((family === 4) ? ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—') : (family === 6 ? localIp : '—'));
-            var serverUsed = family === 6 ? 'stun.l.google.com:19302 (Dual-Stack IPv6)' : 'stun.l.google.com:19302 / stun.miwifi.com:3478';
+            // The servers the backend actually queries, in the order it tries
+            // them (see _nat_probe in luci.hwdash). This line previously named
+            // stun.l.google.com for IPv4, which is never contacted on that
+            // family, and omitted stun.cloudflare.com on IPv6 even though it is
+            // tried first.
+            var serverUsed = family === 6
+                ? 'stun.cloudflare.com:3478, then stun.l.google.com:19302'
+                : 'stun.miwifi.com:3478, then stun.cloudflare.com:3478';
 
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
                 E('div', { style: 'display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;' }, [
@@ -2258,7 +2338,16 @@ return view.extend({
             ]);
         };
         var runNatTest = function(iface, wanClass) {
-            var content = E('div', { style: 'min-width:min(560px, 88vw); display:flex; flex-direction:column; gap:12px;' }, [
+            // width:100%, NOT a viewport-derived min-width. LuCI's own modal is
+            // `width:90%; max-width:600px; padding:1em 1em .5em`, so its usable
+            // inner box is 90vw-34px -- narrower than the 88vw this used to
+            // demand, and min-width beats the theme's `.modal > * {max-width:
+            // 100%}`. Measured against the router's real cascade.css, the dialog
+            // overflowed its own modal on every viewport below ~660px: 20.5px at
+            // 375px, 27.6px at 320px, spilling past the modal's right padding.
+            // Letting the modal do the sizing gives the same ~566px on desktop
+            // and a clean fit on a phone.
+            var content = E('div', { style: 'width:100%; display:flex; flex-direction:column; gap:12px;' }, [
                 E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with official STUN server probes (RFC 3489 / RFC 5780 / RFC 6598). It measures IPv4 and IPv6 NAT mapping and filtering behaviors.'),
                 E('div', { style: 'font-size:0.8em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
@@ -2276,8 +2365,16 @@ return view.extend({
                     content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
-                var isV6Only = (wInfo && wInfo.ip6 && !wInfo.ip4) || (iface.indexOf('6') !== -1 && iface !== '6rd' && iface !== '6in4');
-                var isV4Only = (wInfo && wInfo.ip4 && !wInfo.ip6) || (iface.indexOf('6') === -1);
+                // Each row is deliberately single-family: a wan/wan6 pair is two
+                // rows, and each one reports only its own family's behaviour.
+                // The address the row actually holds decides it; the name is
+                // only consulted when the row has both or neither.
+                //
+                // (The old form also tested iface !== '6rd' && iface !== '6in4',
+                // comparing an INTERFACE name against PROTOCOL names -- values
+                // that can never appear there, so the guard never did anything.)
+                var isV6Only = (wInfo && wInfo.ip6 && !wInfo.ip4) || iface.indexOf('6') !== -1;
+                var isV4Only = (wInfo && wInfo.ip4 && !wInfo.ip6) || iface.indexOf('6') === -1;
                 if (isV6Only) {
                     var v6Res = res.v6 || { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: (wInfo ? wInfo.ip6 : '—') };
                     content.appendChild(natDialogRow('IPv6 NAT Behavior', v6Res, wanClass, wInfo));
@@ -2438,6 +2535,8 @@ return view.extend({
                     // Whether the address moves, next to the protocol that
                     // decides it. It no longer needs to say "public" too -- the
                     // badge beside it already states reachability, and saying it
+                    // twice made the row read as though the two chips were
+                    // reporting different facts.
                     var alabel = (w.assign === 'static' || w.assign === 'dynamic') ? w.assign : '';
                     var ascol = sevColor('assign');
                     setText(e.assign, alabel);
@@ -4158,9 +4257,17 @@ return view.extend({
                     syncRows(pr.ethListWrap, pr.ethCache, hasEth ? res.eth_links : [], function(l) { return l.iface; }, function(l) {
                         var dot = E('div', { style: 'width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;' });
                         var ifaceSpan = E('span', { style: 'font-weight: bold;' }, l.iface.toUpperCase());
+                        // Shown only for a DSA conduit (the SoC's single MAC into an
+                        // external switch chip, e.g. eth0 feeding lan1-4+wan on a
+                        // Filogic/IPQ board) -- see the "conduit" field's origin
+                        // comment in luci.hwdash for why its numbers are not a
+                        // single port's traffic.
+                        var conduitTag = E('span', { style: 'display: none; font-size: 0.62em; font-weight: 700; letter-spacing: 0.4px; padding: 1px 6px; border-radius: 8px; opacity: 0.75; border: 1px solid currentColor;' }, 'SWITCH UPLINK');
                         var statusSpan = E('span', {});
+                        var throughLbl = E('span', {}, 'Throughput:');
                         var throughVal = E('span', { style: 'color:#00bcd4;' });
-                        var throughRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [E('span', {}, 'Throughput:'), throughVal]);
+                        var throughRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [throughLbl, throughVal]);
+                        var conduitNote = E('div', { style: 'display: none; font-size: 0.72em; opacity: 0.6; margin-top: 4px; line-height: 1.4;' }, 'Combined traffic for every port below, not this link alone -- packets routed between two ports both cross it.');
                         var errVal = E('span', {});
                         var errRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8; margin-top: 6px;' }, [E('span', {}, 'Errors/Drops:'), errVal]);
                         var phyVal = E('span', {});
@@ -4169,12 +4276,12 @@ return view.extend({
                         var macRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.8em; opacity: 0.6; margin-top: 4px;' }, [E('span', {}, 'MAC / MTU:'), macVal]);
                         var box = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 4px;' }, [
                             E('div', { style: 'display: flex; justify-content: space-between; align-items: center;' }, [
-                                E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [dot, ifaceSpan]),
+                                E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [dot, ifaceSpan, conduitTag]),
                                 statusSpan
                             ]),
-                            throughRow, errRow, phyRow, macRow
+                            throughRow, conduitNote, errRow, phyRow, macRow
                         ]);
-                        return { el: box, dot: dot, statusSpan: statusSpan, throughRow: throughRow, throughVal: throughVal, errRow: errRow, errVal: errVal, phyRow: phyRow, phyVal: phyVal, macRow: macRow, macVal: macVal };
+                        return { el: box, dot: dot, conduitTag: conduitTag, statusSpan: statusSpan, throughRow: throughRow, throughLbl: throughLbl, throughVal: throughVal, conduitNote: conduitNote, errRow: errRow, errVal: errVal, phyRow: phyRow, phyVal: phyVal, macRow: macRow, macVal: macVal };
                     }, function(entry, l) {
                         var st = l.speed;
                         var col = '#9e9e9e';
@@ -4185,6 +4292,7 @@ return view.extend({
                         entry.dot.style.boxShadow = '0 0 5px ' + col;
                         entry.statusSpan.style.color = col;
                         entry.statusSpan.textContent = st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')';
+                        entry.conduitTag.style.display = l.conduit ? '' : 'none';
                         var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
                         var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
                         var dlMbps = null, ulMbps = null;
@@ -4198,6 +4306,13 @@ return view.extend({
                         self.prevEth[l.iface] = { rx: curRx, tx: curTx, t: nowT };
                         if (st !== 'Down') {
                             entry.throughRow.style.display = dlMbps !== null ? 'flex' : 'none';
+                            // A conduit's numbers are real, just not what "Throughput"
+                            // implies here: they are the switch's combined traffic,
+                            // not this link's own. Relabelled rather than hidden --
+                            // the figures are still useful for confirming the
+                            // CPU<->switch link itself isn't the bottleneck.
+                            entry.throughLbl.textContent = l.conduit ? 'Combined Throughput:' : 'Throughput:';
+                            entry.conduitNote.style.display = (l.conduit && dlMbps !== null) ? 'block' : 'none';
                             if (dlMbps !== null) entry.throughVal.textContent = '↓ ' + fmtMbps(dlMbps) + '   ↑ ' + fmtMbps(ulMbps);
                             var errColor = (rxErr > 0 || txErr > 0 || rxDrop > 0 || txDrop > 0) ? '#ff5252' : 'currentColor';
                             entry.errRow.style.display = 'flex';
@@ -4214,6 +4329,7 @@ return view.extend({
                             }
                         } else {
                             entry.throughRow.style.display = 'none';
+                            entry.conduitNote.style.display = 'none';
                             entry.errRow.style.display = 'none';
                             entry.phyRow.style.display = 'none';
                         }
@@ -4884,8 +5000,7 @@ return view.extend({
 
         // WAN Quality gets its own poll tick at the same 2s cadence as
         // Ping Latency (both driven by the phased dispatcher below) rather
-        // than piggy-
-        // backing on the much heavier 3s info tick -- that heavier tick's
+        // than piggybacking on the much heavier 3s info tick -- that tick's
         // rate is what made this card feel a beat behind Ping Latency even
         // after the background collector itself sped up. 2s (not 1s) is a
         // deliberate balance: measured sustained CPU cost of 1s polling on
@@ -4914,6 +5029,9 @@ return view.extend({
                 var wqAll = (res && res.wan_quality) || null;
                 if (wqAll) wqAll = wqAll.slice().sort(function(a, b) { return byName(a.iface, b.iface); });
                 self.lastWq = wqAll || [];
+                // On an access point the tracked link is the LAN bridge, so the
+                // rows read LAN and the heading has to stop saying WAN.
+                setText(wanQualityTitle, (res && res.ap_mode) ? 'Uplink Uptime Status' : 'WAN Uptime Status');
                 renderAlerts();
                 var wanQBox = document.getElementById('hw-wanq-list');
                 if (!wanQBox) return;
@@ -5119,7 +5237,12 @@ return view.extend({
                     }
 
                     var ifnLabel = r.iface.toUpperCase();
-                    if (ib.asn) {
+                    if (res && res.ap_mode) {
+                        entry.ifaceAsn.textContent = ifnLabel + ' • AP Uplink';
+                        setText(entry.ispName, 'Main Router Gateway');
+                        entry.monogramEl.style.background = '#009688';
+                        entry.monogramEl.textContent = 'AP';
+                    } else if (ib.asn) {
                         entry.ifaceAsn.textContent = ifnLabel + ' • ' + ib.asn;
                     } else {
                         entry.ifaceAsn.textContent = ifnLabel + ' • WAN Link';

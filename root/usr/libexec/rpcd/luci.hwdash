@@ -6,6 +6,7 @@
 # call, dozens of calls per poll) only runs for a string that actually
 # contains a quote, backslash or control character.
 _JS_TAB=$(printf '\t')
+_JS_CR=$(printf '\r')
 # json_esc sets JSV to the escaped value with zero forks in the common case
 # — even a builtin-only $(json_str ...) still costs a subshell fork per call,
 # which adds up in the per-poll loops. json_str stays as a thin wrapper for
@@ -20,17 +21,18 @@ json_esc() {
 }
 json_str() { json_esc "$1"; printf '%s' "$JSV"; }
 
-# Strip leading/trailing spaces and tabs from the variable named $1 using
-# parameter expansion only — replaces the per-value `sed 's/[[:space:]]*$//'`
-# forks (sysfs model/serial strings are padded with trailing spaces).
+# Strip leading/trailing spaces, tabs and carriage returns from the variable
+# named $1 using parameter expansion only — replaces the per-value
+# `sed 's/[[:space:]]*$//'` forks (sysfs model/serial strings are padded with
+# trailing spaces; some debugfs and iwinfo outputs carry a trailing CR).
 trim_ws() {
 	local __v
 	eval "__v=\$$1"
-	while [ "${__v% }" != "$__v" ] || [ "${__v%$_JS_TAB}" != "$__v" ]; do
-		__v=${__v% }; __v=${__v%$_JS_TAB}
+	while [ "${__v% }" != "$__v" ] || [ "${__v%$_JS_TAB}" != "$__v" ] || [ "${__v%$_JS_CR}" != "$__v" ]; do
+		__v=${__v% }; __v=${__v%$_JS_TAB}; __v=${__v%$_JS_CR}
 	done
-	while [ "${__v# }" != "$__v" ] || [ "${__v#$_JS_TAB}" != "$__v" ]; do
-		__v=${__v# }; __v=${__v#$_JS_TAB}
+	while [ "${__v# }" != "$__v" ] || [ "${__v#$_JS_TAB}" != "$__v" ] || [ "${__v#$_JS_CR}" != "$__v" ]; do
+		__v=${__v# }; __v=${__v#$_JS_TAB}; __v=${__v#$_JS_CR}
 	done
 	eval "$1=\$__v"
 }
@@ -250,7 +252,7 @@ _sync_wan_targets() {
 	[ -z "$_raw" ] && _raw=$(uci -q get hwdash.main.settings_json 2>/dev/null)
 	_t4=""; _t6=""
 	if [ -n "$_raw" ] && command -v jsonfilter >/dev/null; then
-		eval $(printf '%s' "$_raw" | jsonfilter -e '_t4=@.wanTarget4' -e '_t6=@.wanTarget6' 2>/dev/null)
+		eval "$(printf '%s' "$_raw" | jsonfilter -e '_t4=@.wanTarget4' -e '_t6=@.wanTarget6' 2>/dev/null)"
 	fi
 	# The collector sources this file, so anything that survives into it is
 	# evaluated by a root shell. Reduce to the character set an address or
@@ -261,6 +263,51 @@ _sync_wan_targets() {
 	printf 'WANTGT_V=2\nWANTGT4="%s"\nWANTGT6="%s"\n' "$_t4" "$_t6" \
 		> /tmp/hwdash_wanmon/.wan_targets.$$ 2>/dev/null && \
 		mv /tmp/hwdash_wanmon/.wan_targets.$$ /tmp/hwdash_wanmon/.wan_targets 2>/dev/null
+}
+
+# Same relay as _sync_wan_targets above, for the optional external
+# persist_dir (Settings -> Persistent Storage Directory): the collector is a
+# separate long-running daemon and does not read UCI on every tick, so the
+# value crosses process boundaries through a file it sources.
+_sync_persist_dir() {
+	_raw=$1
+	[ -z "$_raw" ] && _raw=$(uci -q get hwdash.main.settings_json 2>/dev/null)
+	_pd=""
+	if [ -n "$_raw" ] && command -v jsonfilter >/dev/null; then
+		eval "$(printf '%s' "$_raw" | jsonfilter -e '_pd=@.persistDir' 2>/dev/null)"
+	fi
+	# Sourced by a root shell on the far end (both the collector's main loop
+	# and this script's own "info" handler), so reduced to the character set
+	# a real mount path can legally use before it goes anywhere near that --
+	# no quotes, no $, no backticks.
+	_pd=$(printf '%s' "$_pd" | tr -cd 'A-Za-z0-9/_.-')
+	case "$_pd" in /*) ;; *) _pd="" ;; esac
+	mkdir -p /tmp/hwdash_wanmon 2>/dev/null
+	printf 'PERSISTDIR_V=1\nPERSISTDIR="%s"\n' "$_pd" \
+		> /tmp/hwdash_wanmon/.persist_dir.$$ 2>/dev/null && \
+		mv /tmp/hwdash_wanmon/.persist_dir.$$ /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+}
+
+# Same mount-safety check as the collector's own copy (see its longer
+# comment): a plain directory that merely looks like a USB mountpoint is the
+# dangerous case, since after the drive is unplugged the old mountpoint is
+# still an ordinary, silently-writable directory on internal flash. The two
+# scripts do not share a library, so this is duplicated rather than sourced.
+_persist_mount_ok() {
+	_pm_dir=$1
+	[ -d "$_pm_dir" ] || return 1
+	_pm_best=""
+	while read -r _pm_dev _pm_mp _pm_fs _pm_rest; do
+		case "$_pm_mp" in
+			/|/overlay|/rom|/tmp|/dev|/proc|/sys) continue ;;
+		esac
+		case "$_pm_dir" in
+			"$_pm_mp"|"$_pm_mp"/*)
+				[ ${#_pm_mp} -gt ${#_pm_best} ] && _pm_best=$_pm_mp
+				;;
+		esac
+	done < /proc/mounts
+	[ -n "$_pm_best" ]
 }
 
 # NAT behaviour discovery is deliberately an explicit, on-demand operation.
@@ -365,7 +412,17 @@ _nat_parse_out() {
 	_p_file=$1; _p_fam=$2
 	_p_map=$(sed -n 's/^[Nn]at behavior:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
 	_p_filter=$(sed -n 's/^[Nn]at filtering:[[:space:]]*//p' "$_p_file" 2>/dev/null | head -1)
-	_p_mapped=$(sed -n 's/^[Mm]apped address:[[:space:]]*\([^:]*\):.*/\1/p' "$_p_file" 2>/dev/null | head -1)
+	# Strip the PORT, not "everything after the first colon".
+	#
+	# stunclient separates the port differently per family -- verified against
+	# the real binary on an OpenWrt target:
+	#   IPv4: Mapped address: 49.47.140.221:45087
+	#   IPv6: Mapped address: 2405:201:ac00:2000:a412:4d5a:4ad6:cea2.37018
+	# so IPv6 uses a DOT, and the address itself is full of colons. The old
+	# \([^:]*\): form kept only the text before the first colon and reported a
+	# real IPv6 egress as the string "2405". Matching a trailing [.:]<digits>
+	# covers both separators and leaves the address intact either way.
+	_p_mapped=$(sed -n 's/^[Mm]apped address:[[:space:]]*\(.*\)[.:][0-9][0-9]*[[:space:]]*$/\1/p' "$_p_file" 2>/dev/null | head -1)
 	_p_m=$(_nat_code "$_p_map"); _p_f=$(_nat_code "$_p_filter")
 	_p_s="unavailable"
 	if [ "$_p_fam" = "6" ]; then
@@ -401,6 +458,7 @@ case "$1" in
 				_res=$(uci -q get hwdash.main.settings_json 2>/dev/null)
 				[ -n "$_res" ] && echo "$_res" || echo '{}'
 				_sync_wan_targets "$_res"
+				_sync_persist_dir "$_res"
 				;;
 			set_config)
 				_IN=""
@@ -414,6 +472,7 @@ case "$1" in
 					uci -q set hwdash.main.settings_json="$_CFG"
 					uci -q commit hwdash
 					_sync_wan_targets "$_CFG"
+					_sync_persist_dir "$_CFG"
 					echo '{"result":"ok"}'
 				else
 					echo '{"result":"invalid"}'
@@ -520,6 +579,20 @@ case "$1" in
 				_nat_force=$(printf '%s' "$_nat_in" | jsonfilter -e '@.force' -e '@.params[0].force' -e '@.params[1]' 2>/dev/null | head -n 1)
 				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
 				_nat_cache="$NAT_CACHE_DIR/nat.$_nat_if"
+				# A NAT type test is explicit, user-triggered probing -- not
+				# something that silently redetects itself the way a DNS or
+				# ethtool cache does -- so the result is worth carrying across
+				# a reboot if the user has opted into persist_dir. Seeded only
+				# when tmpfs has nothing yet (a fresh boot); every call after
+				# that hits the cheap [ -f ] check and moves on.
+				if [ ! -s "$_nat_cache" ]; then
+					PERSISTDIR_V=""; PERSISTDIR=""
+					[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+					[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
+					if [ -n "$PERSISTDIR" ] && [ -f "$PERSISTDIR/nat/$_nat_if" ] && _persist_mount_ok "$PERSISTDIR"; then
+						cat "$PERSISTDIR/nat/$_nat_if" > "$_nat_cache" 2>/dev/null
+					fi
+				fi
 				# ------------------------------------------------------------------
 				# Fast-path: if a valid cache entry exists for the current IPs AND
 				# force is not set, serve it immediately and kick background refresh.
@@ -570,6 +643,10 @@ EOF
 							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)" "$_nat_p4"
 							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)" "$_nat_p6"
 						} > "$_nat_cache" 2>/dev/null
+						if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
+							mkdir -p "$PERSISTDIR/nat" 2>/dev/null
+							cat "$_nat_cache" > "$PERSISTDIR/nat/$_nat_if" 2>/dev/null
+						fi
 						rm -f "$_nat_tmp4" "$_nat_tmp6"
 					) &
 					exit 0
@@ -602,6 +679,10 @@ EOF
 					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW" "$_nat_p4"
 					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW" "$_nat_p6"
 				} > "$_nat_cache" 2>/dev/null
+				if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
+					mkdir -p "$PERSISTDIR/nat" 2>/dev/null
+					cat "$_nat_cache" > "$PERSISTDIR/nat/$_nat_if" 2>/dev/null
+				fi
 				json_esc "$_nat_if"; _nat_ifj=$JSV
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
 				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$_nat_p4"; else printf 'null'; fi
@@ -624,6 +705,14 @@ EOF
 				WI_DIR=/tmp/hwdash_wanmon
 				WI_STUN=0
 				_has_stunclient && WI_STUN=1
+				# Same persist_dir the collector and nat_test use, read once
+				# for the whole call. Lets a NAT result saved before a power
+				# outage reappear on this card on its own -- without this, it
+				# stayed invisible until the user re-ran the on-demand test,
+				# even though the answer was sitting right there on disk.
+				PERSISTDIR_V=""; PERSISTDIR=""
+				[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+				[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
 				WI_ITEMS=""; WI_FIRST=1
 				# Use the collector's tracked list rather than every interface
 				# ubus knows about: it is the same set the WAN Uptime card
@@ -641,7 +730,14 @@ EOF
 				# uci and nowhere else.
 				_wi_uci=$(uci -q show network 2>/dev/null)
 				for _wif in $_wi_ifaces; do
-					case "$_wif" in loopback|lan|lan6) continue ;; esac
+					# Only loopback is filtered by name here. LAN is not: the
+					# list being walked is the collector's .tracked, which
+					# already encodes the LAN decision -- LAN reaches it only on
+					# an access point, where it is the uplink. Re-filtering it
+					# here would put this card and the WAN Uptime card into
+					# disagreement about what counts as a link, which is exactly
+					# what sourcing both from .tracked exists to prevent.
+					case "$_wif" in loopback) continue ;; esac
 					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
 					[ -z "$_wst" ] && continue
 					# Only interfaces that actually carry a default route are
@@ -709,6 +805,14 @@ EOF
 					_wi_n4s=""; _wi_n4m=""; _wi_n4f=""; _wi_n4a=0
 					_wi_n6s=""; _wi_n6m=""; _wi_n6f=""; _wi_n6a=0
 					_wi_nat_cache="$NAT_CACHE_DIR/nat.$_wif"
+					# Cheap on every call once seeded: after the first poll of
+					# a fresh boot this file exists (or persist_dir has
+					# nothing for this WAN either), and every call after that
+					# is a single [ ! -f ] that short-circuits immediately.
+					if [ "$WI_STUN" = "1" ] && [ ! -f "$_wi_nat_cache" ] && [ -n "$PERSISTDIR" ] \
+						&& [ -f "$PERSISTDIR/nat/$_wif" ] && _persist_mount_ok "$PERSISTDIR"; then
+						cat "$PERSISTDIR/nat/$_wif" > "$_wi_nat_cache" 2>/dev/null
+					fi
 					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
 						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt _wi_np _wextra; do
 							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
@@ -901,10 +1005,10 @@ EOF
 				IFS= read -r _IN 2>/dev/null
 				_ALO=""; _AHI=""; _ATH=""; _AEN=""; _ARST=""
 				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					eval $(printf '%s' "$_IN" | head -c 1024 | jsonfilter \
+					eval "$(printf '%s' "$_IN" | head -c 1024 | jsonfilter \
 						-e '_ALO=@.aql.low' -e '_AHI=@.aql.high' \
 						-e '_ATH=@.aql.threshold' -e '_AEN=@.aql.enable' \
-						-e '_ARST=@.aql.reset' 2>/dev/null)
+						-e '_ARST=@.aql.reset' 2>/dev/null)"
 				fi
 				_aql_scan
 				if [ "$AQL_AVAIL" != "1" ]; then
@@ -947,7 +1051,7 @@ EOF
 				IFS= read -r _IN 2>/dev/null
 				_GOV=""; _MIN=""; _MAX=""; _TURBO=""
 				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					eval $(printf '%s' "$_IN" | head -c 2048 | jsonfilter -e '_GOV=@.perf.governor' -e '_MIN=@.perf.min_freq' -e '_MAX=@.perf.max_freq' -e '_TURBO=@.perf.turbo_enabled' 2>/dev/null)
+					eval "$(printf '%s' "$_IN" | head -c 2048 | jsonfilter -e '_GOV=@.perf.governor' -e '_MIN=@.perf.min_freq' -e '_MAX=@.perf.max_freq' -e '_TURBO=@.perf.turbo_enabled' 2>/dev/null)"
 				fi
 				_CF=/sys/devices/system/cpu/cpu0/cpufreq
 				_OK=1
@@ -1411,10 +1515,20 @@ EOF
 								*)  [ -f "$_wm_dir/${_wm_ifn}6.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn}6.isp" 2>/dev/null ;;
 							esac
 						fi
-					_wm_alias=""
-					if [ -f "$_wm_dir/.aliases" ]; then
-						_wm_alias=$(grep "^$_wm_ifn " "$_wm_dir/.aliases" 2>/dev/null | awk '{print $2}')
-					fi
+						# Builtin read, not grep|awk. This runs once per tracked
+						# interface on a method the dashboard polls every two
+						# seconds, so the pipeline cost two forks per interface
+						# per poll -- around 14k forks an hour on a four-WAN
+						# router -- to search a file with one line per alias.
+						_wm_alias=""
+						if [ -f "$_wm_dir/.aliases" ]; then
+							while read -r _al_child _al_parent; do
+								if [ "$_al_child" = "$_wm_ifn" ]; then
+									_wm_alias=$_al_parent
+									break
+								fi
+							done < "$_wm_dir/.aliases"
+						fi
 						json_esc "$_wm_isp"; _wm_ispj=$JSV
 						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
 						json_esc "$_wm_alias"; _wm_aliasj=$JSV
@@ -1502,7 +1616,11 @@ EOF
 					done
 					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"
 				fi
-				echo "{\"wan_quality\":$WAN_QUALITY}"
+				# Written by the collector when LAN is the only uplink. Lets the
+				# card retitle itself rather than labelling a LAN bridge "WAN".
+				WM_APMODE=false
+				[ -f "$_wm_dir/.apmode" ] && WM_APMODE=true
+				echo "{\"wan_quality\":$WAN_QUALITY,\"ap_mode\":$WM_APMODE}"
 				;;
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)
@@ -1878,11 +1996,11 @@ EOF
 						fi
 					fi
 					[ -z "$realdev" ] && realdev="${fs#/dev/}"
-					
+
 					meta="Virtual:0:"
 					[ -n "$devname" ] && [ "$devname" != "root" ] && meta=$(get_disk_meta "$devname")
 					[ "$devname" = "root" ] && [ -n "$realdev" ] && meta=$(get_disk_meta "$realdev")
-					
+
 					hw_type=${meta%%:*}
 					tmp_meta=${meta#*:}
 					hw_size=${tmp_meta%%:*}
@@ -1990,7 +2108,6 @@ EOF
 				THERMALS="["
 				FIRST=1
 				SEEN_TYPES=" "
-				_TMAX=0; _TMAX_NAME=""
 				for t in /sys/class/thermal/thermal_zone*; do
 					if [ -f "$t/type" ] && [ -f "$t/temp" ]; then
 						read_file TYPE "$t/type" "Unknown"
@@ -1998,7 +2115,6 @@ EOF
 						_tn=$TEMP
 						case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
 						[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
-						if [ "$_tn" -gt "$_TMAX" ] && [ "$_tn" -lt 150 ]; then _TMAX=$_tn; _TMAX_NAME=$TYPE; fi
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
 						for trip in "$t"/trip_point_*_type; do
@@ -2035,13 +2151,13 @@ EOF
 								phy*) LABEL="$_phy_name" ;;
 							esac
 						fi
-						
+
 						if [ -n "$LABEL" ]; then
 							TYPE="${TYPE_BASE} ($LABEL)"
 						else
 							TYPE="${TYPE_BASE}"
 						fi
-						
+
 						if case "$SEEN_TYPES" in *" $TYPE "*) true;; *) false;; esac; then
 							_dup_idx=2
 							while case "$SEEN_TYPES" in *" ${TYPE} #${_dup_idx} "*) true;; *) false;; esac; do
@@ -2053,8 +2169,7 @@ EOF
 						_tn=$TEMP
 						case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
 						[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
-						if [ "$_tn" -gt "$_TMAX" ] && [ "$_tn" -lt 150 ]; then _TMAX=$_tn; _TMAX_NAME=$TYPE; fi
-						
+
 						CRIT_TEMP="null"
 						PASS_TEMP="null"
 
@@ -2079,7 +2194,7 @@ EOF
 								fi
 							done
 						fi
-						
+
 						if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
 						json_esc "$TYPE"
 						THERMALS="$THERMALS{\"type\":\"$JSV\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
@@ -2204,7 +2319,7 @@ EOF_DMI
 
 
 				read -r UPTIME _ < /proc/uptime 2>/dev/null; UPTIME=${UPTIME%%.*}
-				
+
 
 				read_file CPU_GOV /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "unknown"
 
@@ -2305,7 +2420,8 @@ EOF_DMI
 				# every 3s poll. The whole block (config + counts) now lives
 				# behind a 5s stale-while-revalidate cache: the request serves
 				# the last computed value instantly and a detached child does
-				# the heavy read at most once per 5s.
+				# the heavy read at most once per refresh window (15s cache,
+					# 30s in-flight lock).
 				_offload_refresh() {
 					local _ft=0 _swcfg=0 _hwcfg=0 _ppe=-1 _sw=-1 _wed=0 _ptot=0 _pl _p _w _hl _hv _pd _pn
 					local _qcom_json="null"
@@ -2487,7 +2603,7 @@ EOF_DMI
 									case "$_line" in
 										*\(port=*\),dropcode:*)
 											_pkt=${_line%%(port*}
-											_pkt=${_pkt//[ 	]/}
+											trim_ws _pkt
 											_port=${_line##*port=}
 											_port=${_port%%)*}
 											while [ "${_port#0}" != "$_port" ]; do
@@ -2495,7 +2611,7 @@ EOF_DMI
 											done
 											[ -z "$_port" ] && _port=0
 											_drop=${_line##*dropcode:}
-											_drop=${_drop//[ 	\r\n]/}
+											trim_ws _drop
 											while [ "${_drop#0}" != "$_drop" ]; do
 												_drop=${_drop#0}
 											done
@@ -2544,7 +2660,7 @@ EOF_DMI
 											trim_ws _k
 											_k=$(printf '%s' "$_k" | tr 'A-Z ' 'a-z_')
 											_v=${_line##*=}
-											_v=${_v//[ 	]/}
+											trim_ws _v
 											[ $_first -eq 0 ] && _edma_err_json="$_edma_err_json,"
 											_edma_err_json="$_edma_err_json\"$_k\":${_v:-0}"
 											_first=0
@@ -2575,29 +2691,15 @@ EOF_DMI
 					OFFLOAD_JSON="{\"ft\":0,\"sw_cfg\":0,\"hw_cfg\":0,\"ppe_flows\":-1,\"sw_flows\":-1,\"ppe_total\":0,\"wed\":0,\"qcom\":null}"
 				fi
 
-				# --- since-boot watermarks (peak temp / conntrack / PPE flows).
-				# Sourced from a /tmp file (clears on reboot); rewritten only
-				# when a record is actually broken, so steady state costs one
-				# builtin source per poll and zero writes.
-				PK_TEMP=0; PK_TEMP_NAME=""; PK_TEMP_TS=0; PK_CT=0; PK_PPE=0
-				[ -f /tmp/hwdash_peaks.sh ] && . /tmp/hwdash_peaks.sh 2>/dev/null
-				_PK_DIRTY=0
-				if [ "${_TMAX:-0}" -gt "${PK_TEMP:-0}" ]; then
-					PK_TEMP=$_TMAX; PK_TEMP_NAME=$_TMAX_NAME; PK_TEMP_TS=${HWDASH_NOW:-0}; _PK_DIRTY=1
-				fi
-				if [ "${CONN_COUNT:-0}" -gt "${PK_CT:-0}" ]; then PK_CT=$CONN_COUNT; _PK_DIRTY=1; fi
-				if [ "${PPE_FLOWS:--1}" -gt "${PK_PPE:-0}" ]; then PK_PPE=$PPE_FLOWS; _PK_DIRTY=1; fi
-				if [ "$_PK_DIRTY" = "1" ]; then
-					{
-						printf 'PK_TEMP=%s\n' "$PK_TEMP"
-						printf "PK_TEMP_NAME='%s'\n" "$PK_TEMP_NAME"
-						printf 'PK_TEMP_TS=%s\n' "$PK_TEMP_TS"
-						printf 'PK_CT=%s\n' "$PK_CT"
-						printf 'PK_PPE=%s\n' "$PK_PPE"
-					} > /tmp/hwdash_peaks.sh.$$ 2>/dev/null && mv /tmp/hwdash_peaks.sh.$$ /tmp/hwdash_peaks.sh 2>/dev/null
-				fi
-				json_esc "$PK_TEMP_NAME"
-				PEAKS_JSON="{\"temp\":$PK_TEMP,\"temp_sensor\":\"$JSV\",\"temp_ts\":$PK_TEMP_TS,\"conntrack\":$PK_CT,\"ppe\":$PK_PPE}"
+				# The since-boot watermark block (peak temp / conntrack / PPE)
+				# used to live here and has been removed. Nothing consumed it:
+				# hw_dash.js never read the "peaks" object at any point, and its
+				# ppe field could not have been right anyway -- it was computed
+				# from a PPE_FLOWS variable this script never assigns, so it
+				# reported 0 permanently even on a router with hardware offload
+				# actively binding flows. It cost a sourced file plus a rewrite
+				# on every record break, and shipped five more fields in a
+				# payload polled every three seconds, for no reader.
 
 				# --- hardware events: interesting dmesg lines (thermal, ECC,
 				# link flaps, USB, OOM, voltage). dmesg+grep forks only run
@@ -2646,6 +2748,16 @@ EOF
 							case "$eth" in
 								lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
 							esac
+							# Name patterns above cover every naming scheme this driver
+							# stack is known to use, but a radio's actual netdev name is
+							# whatever the vendor build chose. The one thing every wifi
+							# netdev has in common, regardless of name, is a phy80211
+							# symlink -- the same structural check WIFI_SURVEY and
+							# wifi_clients already key on elsewhere in this file. Belt-
+							# and-braces: without it, a radio named outside the known
+							# patterns silently ran ethtool against a device that was
+							# never a wired port.
+							[ -e "$netdev/phy80211" ] && continue
 							[ -f "$netdev/speed" ] || continue
 							_an=""
 							while read -r _k _v _; do
@@ -2728,6 +2840,11 @@ EOF
 						case "$eth" in
 							lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
 						esac
+						# See the matching comment on the ethtool loop above: a wifi
+						# radio outside the known name patterns is still a radio, and
+						# phy80211 is the one structural marker every driver sets
+						# regardless of what it calls the netdev.
+						[ -e "$netdev/phy80211" ] && continue
 						if [ -f "$netdev/speed" ]; then
 							read_file speed "$netdev/speed" ""
 							read_file duplex "$netdev/duplex" ""
@@ -2741,8 +2858,22 @@ EOF
 							read_file rx_b "$netdev/statistics/rx_bytes" "0"
 							read_file tx_b "$netdev/statistics/tx_bytes" "0"
 							if [ "$speed" = "-1" ] || [ -z "$speed" ]; then speed="Down"; fi
+							# DSA conduit (the SoC's single MAC into an external switch
+							# chip, e.g. eth0 on a Filogic/IPQ board with lan1-4+wan as
+							# the real DSA "user" ports) carries the traffic of every
+							# port behind it, twice -- once inbound, once back out --
+							# since packets routed between two ports both cross this one
+							# link. Measured live: WAN downloading at 800 Mbps down /
+							# 12.6 Mbps up reported the conduit itself at 815/813, i.e.
+							# roughly the WAN download mirrored onto BOTH directions --
+							# correct for that wire, but unreadable next to per-port
+							# figures in a card titled "Ports Topology". Only a conduit
+							# netdev has its own dsa/ subdirectory; a DSA user port has
+							# DEVTYPE=dsa in its uevent but no dsa/ dir of its own.
+							_conduit=false
+							[ -d "$netdev/dsa" ] && _conduit=true
 							if [ $FIRST_ETH -eq 0 ]; then ETH_LINKS="$ETH_LINKS,"; fi
-							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\",\"mac\":\"$_emac\",\"mtu\":${_emtu:-0},\"carrier_changes\":${_ecch:-0},\"rx_drop\":$rx_d,\"tx_drop\":$tx_d,\"rx_err\":$rx_e,\"tx_err\":$tx_e,\"rx_bytes\":$rx_b,\"tx_bytes\":$tx_b}"
+							ETH_LINKS="$ETH_LINKS{\"iface\":\"$eth\",\"speed\":\"$speed\",\"duplex\":\"$duplex\",\"mac\":\"$_emac\",\"mtu\":${_emtu:-0},\"carrier_changes\":${_ecch:-0},\"rx_drop\":$rx_d,\"tx_drop\":$tx_d,\"rx_err\":$rx_e,\"tx_err\":$tx_e,\"rx_bytes\":$rx_b,\"tx_bytes\":$tx_b,\"conduit\":$_conduit}"
 							FIRST_ETH=0
 						fi
 					fi
@@ -2869,7 +3000,7 @@ EOF
 					# Get size
 					read_file _bsz "$dev/size" 0
 					size_bytes=$((_bsz * 512))
-					
+
 					# Get IO stats
 					read_bytes=0
 					write_bytes=0
@@ -2885,7 +3016,7 @@ EOF
 						read_bytes=$(( ${_rsec:-0} * 512 ))
 						write_bytes=$(( ${_wsec:-0} * 512 ))
 					fi
-					
+
 					# Mount point + fs type straight from /proc/mounts with the
 					# builtin read — zero forks. `block info` (which exec()s blkid
 					# machinery) is only consulted for unmounted devices, and its
@@ -2997,7 +3128,7 @@ EOF
 						read_file max_speed "$pci/max_link_speed" "Unknown"
 						read_file max_width "$pci/max_link_width" "Unknown"
 						name="PCIe Device ($vendor:$device)"
-						
+
 						if [ $FIRST_PCIE -eq 0 ]; then PCIE_DEVS="$PCIE_DEVS,"; fi
 						PCIE_DEVS="$PCIE_DEVS{\"name\":\"$name\",\"speed\":\"$speed\",\"width\":\"$width\",\"max_speed\":\"$max_speed\",\"max_width\":\"$max_width\"}"
 						FIRST_PCIE=0
@@ -3130,7 +3261,7 @@ EOF
 
 						# Per-radio country code (falls back to global regdomain).
 						cc=$(iwinfo "$iface" countrycode 2>/dev/null)
-						cc=${cc//[ 	\r\n]/}
+						trim_ws cc
 						[ -z "$cc" ] && cc="$REG_COUNTRY"
 						[ -z "$cc" ] && cc="00"
 
@@ -3325,6 +3456,19 @@ EOF
 					mkdir -p "$ECC_BASE_DIR" 2>/dev/null
 					cat /tmp/hwdash/ecc.baseline > "$ECC_BASE_FILE" 2>/dev/null
 				fi
+				PERSISTDIR_V=""; PERSISTDIR=""
+				[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+				[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
+				# Internal flash has no baseline at all -- most likely a full
+				# reflash or a fresh install -- but the external drive still
+				# does. This is the one place persist_dir genuinely outlives
+				# more than a graceful reboot: NAND wear history that would
+				# otherwise restart counting from zero on the new install.
+				if [ ! -f "$ECC_BASE_FILE" ] && [ -n "$PERSISTDIR" ] \
+					&& [ -f "$PERSISTDIR/ecc.baseline" ] && _persist_mount_ok "$PERSISTDIR"; then
+					mkdir -p "$ECC_BASE_DIR" 2>/dev/null
+					cat "$PERSISTDIR/ecc.baseline" > "$ECC_BASE_FILE" 2>/dev/null
+				fi
 				ECC_BASE_DATE=0
 				if [ -f "$ECC_BASE_FILE" ]; then
 					read -r _eb_hdr < "$ECC_BASE_FILE" 2>/dev/null
@@ -3342,7 +3486,7 @@ EOF
 						[ "$mdev" = "dev:" ] && continue
 						mn=${mdev#mtd}; mn=${mn%:}
 						[ -z "$mn" ] && continue
-						mname=${mname//\"/}
+						mname=${mname#\"}; mname=${mname%\"}
 						msz_b=$((0x${msz})) 2>/dev/null || msz_b=0
 						mesz_b=$((0x${mesz})) 2>/dev/null || mesz_b=0
 						mtype="nand"
@@ -3381,6 +3525,10 @@ EOF
 						printf '%s' "$_ECC_SNAP"
 					} > "$ECC_BASE_FILE.$$" 2>/dev/null && mv "$ECC_BASE_FILE.$$" "$ECC_BASE_FILE" 2>/dev/null && \
 						ECC_BASE_DATE=${HWDASH_NOW:-0}
+					if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
+						mkdir -p "$PERSISTDIR" 2>/dev/null
+						cat "$ECC_BASE_FILE" > "$PERSISTDIR/ecc.baseline" 2>/dev/null
+					fi
 				fi
 				{
 					printf "_SI_EXP=%s\n" "$((${HWDASH_NOW:-0} + 30))"
@@ -3540,7 +3688,7 @@ EOF_DMESG
 							_nv_json=$(smartctl -a "/dev/$_nvme_ns" -j 2>/dev/null)
 							if [ -n "$_nv_json" ]; then
 								_nv_pass=0; _nv_tempcur=0; _nv_tempwarn=0; _nv_tempcrit=0; _nv_crit=0; _nv_spare=0; _nv_sparethr=0; _nv_used=0; _nv_dread=0; _nv_dwrite=0; _nv_poh=0; _nv_pcyc=0; _nv_unsafe=0; _nv_merr=0; _nv_errlog=0; _nv_hreads=0; _nv_hwrites=0; _nv_nsutil=0; _nv_nscap=0
-								eval $(printf '%s' "$_nv_json" | jsonfilter \
+								eval "$(printf '%s' "$_nv_json" | jsonfilter \
 									-e '_nv_pass=@.smart_status.passed' \
 									-e '_nv_tempcur=@.temperature.current' \
 									-e '_nv_tempwarn=@.temperature.op_limit_max' \
@@ -3559,7 +3707,7 @@ EOF_DMESG
 									-e '_nv_hreads=@.nvme_smart_health_information_log.host_reads' \
 									-e '_nv_hwrites=@.nvme_smart_health_information_log.host_writes' \
 									-e '_nv_nsutil=@["nvme_namespaces"][0].utilization.bytes' \
-									-e '_nv_nscap=@["nvme_namespaces"][0].capacity.bytes' 2>/dev/null)
+									-e '_nv_nscap=@["nvme_namespaces"][0].capacity.bytes' 2>/dev/null)"
 								[ "$_nv_pass" = "1" ] || [ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
 								case "$_nv_tempcur" in ''|*[!0-9]*) _nv_tempcur=0 ;; esac
 								case "$_nv_tempwarn" in ''|*[!0-9]*) _nv_tempwarn=0 ;; esac
@@ -3766,7 +3914,7 @@ EOF_LSCPU
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"peaks\":$PEAKS_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"aql\":$AQL_JSON, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":$RX_TOTAL, \"tx\":$TX_TOTAL}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"aql\":$AQL_JSON, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
