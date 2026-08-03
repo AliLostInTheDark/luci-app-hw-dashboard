@@ -395,9 +395,15 @@ discover_ifaces() {
 
 		_routes=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].route[*].target" -e "@.interface[$_i].route[*].mask" 2>/dev/null)
 		_family=""
+		# "::" checked first, unambiguously: an IPv6 default route's mask is
+		# prefix length 0, printed as a bare "0" -- which the v4 catch-all
+		# below also matches, so a v6-only interface (target "::" twice, no
+		# "0.0.0.0" anywhere) was losing to *0* on mask alone and coming out
+		# family=4. "::" never appears in a decimal address or mask, so it
+		# is a safe interface for v6 to win outright when present.
 		case "$_routes" in
-			*0.0.0.0*|*0*) _family="4" ;;
 			*::*) _family="6" ;;
+			*0.0.0.0*|*0*) _family="4" ;;
 		esac
 		if [ "$_is_lan" = "1" ] && [ -n "$_ip4" ]; then
 			_family="4"
