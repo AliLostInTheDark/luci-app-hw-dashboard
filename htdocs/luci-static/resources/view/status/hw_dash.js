@@ -2807,25 +2807,33 @@ return view.extend({
                 // its own, so it keeps an explicit center alignment.
                 var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; align-self: center;' });
                 var ifnLabel = E('span', { style: 'font-weight: 700; font-size: 1.05em; letter-spacing: 0.4px;' });
+                // The gateway (upstream) and the AP's own address are both
+                // just IPs on the same wire, but confusing one for the other
+                // is exactly the AP-vs-router mixup this whole card exists
+                // to avoid -- each gets its own short tag rather than
+                // leaving it to position alone to imply which is which.
                 var gwAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.65; font-family: monospace; margin-left: 8px;' });
-                var head = E('div', { style: 'display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;' }, [statusDot, ifnLabel, gwAddr]);
+                var mgmtAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.65; font-family: monospace;' });
+                var head = E('div', { style: 'display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;' }, [statusDot, ifnLabel, gwAddr, mgmtAddr]);
                 var kStatus = kvRow('Status'), kGwPing = kvRow('Gateway Ping'),
                     kUptime = kvRow('Uptime (24h)'), kDowntime = kvRow('Downtime (24h)'),
-                    kInet = kvRow('Internet Ping'), kRate = kvRow('Throughput'), kIsp = kvRow('ISP');
+                    kInet = kvRow('Internet Ping'), kRate = kvRow('Throughput'),
+                    kIsp = kvRow('ISP'), kVlan = kvRow('VLAN');
                 var reasonEl = E('div', { style: 'display: none; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); font-size: 0.78em; line-height: 1.4; word-break: break-word;' });
                 var el = E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [
-                    head, kStatus.el, kGwPing.el, kUptime.el, kDowntime.el, kInet.el, kRate.el, kIsp.el, reasonEl
+                    head, kStatus.el, kGwPing.el, kUptime.el, kDowntime.el, kInet.el, kRate.el, kIsp.el, kVlan.el, reasonEl
                 ]);
                 return {
-                    el: el, statusDot: statusDot, ifnLabel: ifnLabel, gwAddr: gwAddr,
+                    el: el, statusDot: statusDot, ifnLabel: ifnLabel, gwAddr: gwAddr, mgmtAddr: mgmtAddr,
                     kStatus: kStatus, kGwPing: kGwPing, kUptime: kUptime, kDowntime: kDowntime,
-                    kInet: kInet, kRate: kRate, kIsp: kIsp, reasonEl: reasonEl
+                    kInet: kInet, kRate: kRate, kIsp: kIsp, kVlan: kVlan, reasonEl: reasonEl
                 };
             }, function(e, r) {
                 var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
                 e.statusDot.style.background = statusColor;
                 setText(e.ifnLabel, r.iface.toUpperCase());
-                setText(e.gwAddr, r.gateway || '—');
+                setText(e.gwAddr, r.gateway ? ('GW ' + r.gateway) : '');
+                setText(e.mgmtAddr, r.management_ip ? ('MGMT ' + r.management_ip) : '');
 
                 // .hw-kv-v carries no font-weight of its own (it's shared
                 // with the NAT Type card's plain rows) -- bold to match the
@@ -2871,6 +2879,12 @@ return view.extend({
                 var ib = ispBadge(r.isp, r.iface);
                 setText(e.kIsp.val, ib.asn ? (ib.name + '  ·  ' + ib.asn) : ib.name);
                 e.kIsp.val.style.fontWeight = '700';
+
+                // Empty on a plain untagged bridge, which is the normal case
+                // -- not an error, so no color and no "—" placeholder noise.
+                setText(e.kVlan.val, r.vlan ? r.vlan.split(' ').join(', ') : 'None');
+                e.kVlan.val.style.opacity = r.vlan ? '1' : '0.6';
+                e.kVlan.val.style.fontWeight = r.vlan ? '700' : '400';
 
                 var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
                 if (rsn) rsn = rsn.charAt(0).toUpperCase() + rsn.slice(1);

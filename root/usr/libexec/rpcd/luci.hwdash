@@ -751,14 +751,12 @@ EOF
 				# uci and nowhere else.
 				_wi_uci=$(uci -q show network 2>/dev/null)
 				for _wif in $_wi_ifaces; do
-					# Only loopback is filtered by name here. LAN is not: the
-					# list being walked is the collector's .tracked, which
-					# already encodes the LAN decision -- LAN reaches it only on
-					# an access point, where it is the uplink. Re-filtering it
-					# here would put this card and the WAN Uptime card into
-					# disagreement about what counts as a link, which is exactly
-					# what sourcing both from .tracked exists to prevent.
-					case "$_wif" in loopback) continue ;; esac
+					# LAN/LAN6 reach .tracked only on an access point, where
+					# they are the promoted uplink -- but NAT testing has
+					# nothing to test there (no WAN, no NAT), and it now has
+					# its own dedicated AP Mode card. Filtered out by name
+					# here rather than relying on .tracked's own membership.
+					case "$_wif" in loopback|lan|lan6) continue ;; esac
 					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
 					[ -z "$_wst" ] && continue
 					# Only interfaces that actually carry a default route are
@@ -1659,6 +1657,9 @@ EOF
 					_wm_tr=""
 					[ -f "$_wm_dir/.tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_dir/.tracked" 2>/dev/null)
 					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
+					# One uci snapshot for the whole call, not a lookup per
+					# interface -- same reasoning as wan_ips' own _wi_uci.
+					_ap_uci=$(uci -q show network 2>/dev/null)
 					_ap_items=""
 					_ap_first=1
 					for _gw_ring in "$_wm_dir"/*.gwstats; do
@@ -1673,6 +1674,56 @@ EOF
 						_ap_gw=""
 						[ -f "$_wm_dir/$_ap_ifn.gw" ] && read -r _ap_gw < "$_wm_dir/$_ap_ifn.gw" 2>/dev/null
 						[ "$_ap_gw" = "-" ] && _ap_gw=""
+
+						# The AP's own address on this interface -- what an
+						# admin actually types into a browser to reach this
+						# box, as distinct from the upstream gateway above.
+						# One ubus call per AP interface (at most one or two
+						# per box), not worth caching -- ap_stats itself is
+						# already gated to do nothing at all off an AP.
+						_ap_st=$(ubus call network.interface."$_ap_ifn" status 2>/dev/null)
+						_ap_dev=""
+						_ap_mgmt=""
+						if [ -n "$_ap_st" ]; then
+							_ap_dev=$(printf '%s' "$_ap_st" | jsonfilter -e '@.l3_device' 2>/dev/null)
+							if [ "$_ap_family" = "6" ]; then
+								_ap_mgmt=$(printf '%s' "$_ap_st" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+							else
+								_ap_mgmt=$(printf '%s' "$_ap_st" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+							fi
+						fi
+
+						# VLAN(s) this interface's device carries. A plain
+						# "base.NNN" device name (the classic 8021q naming
+						# OpenWrt still uses for VLAN-tagged WAN links) is
+						# the cheap, common case; a vlan-filtering bridge
+						# (br-lan with a DSA switch) needs its bridge-vlan
+						# sections checked instead, since the bridge device
+						# itself never carries a VLAN suffix in its name.
+						_ap_vlans=""
+						case "$_ap_dev" in
+							*.[0-9]*)
+								_ap_vs=${_ap_dev##*.}
+								case "$_ap_vs" in ''|*[!0-9]*) ;; *) _ap_vlans=$_ap_vs ;; esac
+								;;
+						esac
+						if [ -n "$_ap_dev" ]; then
+							_bv_i=0
+							while [ "$_bv_i" -lt 64 ]; do
+								case "$_ap_uci" in
+									*"network.@bridge-vlan[$_bv_i].device='$_ap_dev'"*)
+										_bv_v=$(printf '%s\n' "$_ap_uci" | sed -n "s/^network\.@bridge-vlan\[$_bv_i\]\.vlan='\([^']*\)'\$/\1/p")
+										if [ -n "$_bv_v" ]; then
+											case " $_ap_vlans " in *" $_bv_v "*) ;; *) _ap_vlans="$_ap_vlans $_bv_v" ;; esac
+										fi
+										;;
+								esac
+								_bv_i=$((_bv_i + 1))
+							done
+						fi
+						_ap_vlans=${_ap_vlans# }
+						json_esc "$_ap_mgmt"; _ap_mgmtj=$JSV
+						json_esc "$_ap_vlans"; _ap_vlansj=$JSV
 
 						# Retry-once-on-partial-read, same reason as wan_quality:
 						# the collector rewrites this file in place every tick.
@@ -1768,7 +1819,7 @@ EOF
 						json_esc "$_ap_rdev"; _ap_rdevj=$JSV
 
 						[ $_ap_first -eq 0 ] && _ap_items="$_ap_items,"
-						_ap_items="$_ap_items{\"iface\":\"$_ap_ifnj\",\"family\":$_ap_family,\"gateway\":\"$_ap_gwj\",\"status\":\"$_ap_status\",\"uptime_pct\":$_ap_uptime,\"downtime_pct\":$_ap_downtime,\"gw_ms\":$_ap_gwms,\"since_change_s\":$_ap_streak,\"down_code\":\"$_ap_rcodej\",\"down_reason\":\"$_ap_reasonj\",\"inet_status\":\"$_ap_istatus\",\"inet_ms\":$_ap_ims,\"isp\":\"$_ap_ispj\",\"rx_bps\":$_ap_rxbps,\"tx_bps\":$_ap_txbps,\"rate_dev\":\"$_ap_rdevj\"}"
+						_ap_items="$_ap_items{\"iface\":\"$_ap_ifnj\",\"family\":$_ap_family,\"gateway\":\"$_ap_gwj\",\"management_ip\":\"$_ap_mgmtj\",\"vlan\":\"$_ap_vlansj\",\"status\":\"$_ap_status\",\"uptime_pct\":$_ap_uptime,\"downtime_pct\":$_ap_downtime,\"gw_ms\":$_ap_gwms,\"since_change_s\":$_ap_streak,\"down_code\":\"$_ap_rcodej\",\"down_reason\":\"$_ap_reasonj\",\"inet_status\":\"$_ap_istatus\",\"inet_ms\":$_ap_ims,\"isp\":\"$_ap_ispj\",\"rx_bps\":$_ap_rxbps,\"tx_bps\":$_ap_txbps,\"rate_dev\":\"$_ap_rdevj\"}"
 						_ap_first=0
 					done
 					[ -n "$_ap_items" ] && AP_STATS="[$_ap_items]"
