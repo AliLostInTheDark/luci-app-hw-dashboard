@@ -561,15 +561,60 @@ case "$1" in
 				case " $_nat_tr " in *" $_nat_if "*) ;; *) echo '{"available":true,"error":"not_a_tracked_wan"}'; exit 0 ;; esac
 				_nat_status=$(ubus call "network.interface.$_nat_if" status 2>/dev/null)
 				[ -n "$_nat_status" ] || { echo '{"available":true,"error":"interface_unavailable"}'; exit 0; }
-				_nat_dev=""; _nat_v4=""; _nat_v6=""
+				# IPv4 only. Native/dual-stack IPv6 has no real NAT to report --
+				# RFC 4291 end-to-end reachability is the point of the address
+				# family -- so a STUN probe there almost always answers "open,
+				# direct mapping" regardless of ISP, and occasionally answers
+				# nothing at all on a single lost UDP packet with no retry,
+				# which read on the card as a fault on a link that was fine.
+				# IPv4 is where real CG-NAT lives, including on the tunnel
+				# protocols (MAP-E, DS-Lite, 6rd, 464xlat, ...) that exist
+				# specifically because an ISP is doing CG-NAT on the v4 side --
+				# and that path already resolves the parent's v4 address below
+				# for a tunnel interface with none of its own, so testing stays
+				# meaningful for exactly the links it used to matter for.
+				_nat_dev=""; _nat_v4=""
 				eval "$(printf '%s' "$_nat_status" | jsonfilter \
 					-e '_nat_dev=@.l3_device' -e '_nat_v4=@["ipv4-address"][0].address' 2>/dev/null)" 2>/dev/null
-				_nat_v6_all=$(printf '%s' "$_nat_status" | jsonfilter -e '@["ipv6-address"][*].address' -e '@["ipv6-prefix-assignment"][0].address' 2>/dev/null)
-				for _nat_a6 in $_nat_v6_all; do
-					case "$_nat_a6" in fe80:*|FE80:*|fc*|FC*|fd*|FD*|::1|'') ;; *:*) _nat_v6=$_nat_a6; break ;; esac
-				done
 				if [ -z "$_nat_v4" ]; then
-					_nat_parent=$(printf '%s' "$_nat_status" | jsonfilter -e '@.parent' -e '@.device' 2>/dev/null)
+					# ubus status has no "parent interface" field -- .parent is
+					# not a real key on any protocol handler -- so the sibling
+					# has to be found through uci. Two shapes both occur in
+					# the wild and neither alone covers both:
+					#
+					#   device='@wanb'  -- the formal alias syntax: bind to
+					#                      whatever device interface "wanb" is
+					#                      using. The referenced name IS an
+					#                      interface, always.
+					#   device='wan'    -- a literal device name, not the
+					#                      alias syntax. Sometimes that literal
+					#                      happens to equal a real interface's
+					#                      own name too (a WAN device that was
+					#                      simply named "wan"), in which case
+					#                      it still resolves as one by luck of
+					#                      naming, not by declared relationship.
+					#
+					# Found live: wanb6 (device='@wanb') resolved no IPv4 at
+					# all under the old .device-as-interface-name guess, since
+					# ubus's own .device field there is the L3 device
+					# "pppoe-wanb" -- never a valid network.interface.X path.
+					# wan6 (device='wan') is the opposite case: the uci alias
+					# pattern does not match a bare name, so that one still
+					# needs the ubus-field guess. Tried in this order because
+					# the uci form is an explicit, unambiguous declaration;
+					# the ubus guess is a coincidence that happens to work
+					# whenever it works at all.
+					_nat_parent=""
+					_nat_uci=$(uci -q show network 2>/dev/null)
+					case "$_nat_uci" in
+						*"network.$_nat_if.device='@"*)
+							_nat_parent=${_nat_uci#*network.$_nat_if.device=\'@}
+							_nat_parent=${_nat_parent%%\'*}
+							;;
+					esac
+					if [ -z "$_nat_parent" ]; then
+						_nat_parent=$(printf '%s' "$_nat_status" | jsonfilter -e '@.parent' -e '@.device' 2>/dev/null)
+					fi
 					if [ -n "$_nat_parent" ] && [ "$_nat_parent" != "$_nat_if" ]; then
 						_nat_pstatus=$(ubus call "network.interface.$_nat_parent" status 2>/dev/null)
 						[ -n "$_nat_pstatus" ] && _nat_v4=$(printf '%s' "$_nat_pstatus" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
@@ -597,87 +642,65 @@ case "$1" in
 				# Fast-path: if a valid cache entry exists for the current IPs AND
 				# force is not set, serve it immediately and kick background refresh.
 				# ------------------------------------------------------------------
+				# A stale "6 ..." line from a version that still tested IPv6
+				# is simply never matched below -- cf is compared against 4
+				# only -- so an old cache file drains itself out on first read
+				# without needing a migration step.
 				_nat_cached_v4=""; _nat_cached_s4=""; _nat_cached_m4=""; _nat_cached_f4=""; _nat_cached_p4=""
-				_nat_cached_v6=""; _nat_cached_s6=""; _nat_cached_m6=""; _nat_cached_f6=""; _nat_cached_p6=""
 				_nat_cache_hit=0
 				if [ -s "$_nat_cache" ]; then
 					while IFS=' ' read -r _cf _ca _cs _cm _cfl _ct _cp; do
 						case "$_cf" in
 							4) if [ "$_ca" = "$_nat_v4" ] && [ "$_cs" != "unavailable" ]; then
 								_nat_cached_v4=$_ca; _nat_cached_s4=$_cs; _nat_cached_m4=$_cm; _nat_cached_f4=$_cfl; _nat_cached_p4=$_cp; _nat_cache_hit=1; fi ;;
-							6) if [ "$_ca" = "$_nat_v6" ] && [ "$_cs" != "unavailable" ]; then
-								_nat_cached_v6=$_ca; _nat_cached_s6=$_cs; _nat_cached_m6=$_cm; _nat_cached_f6=$_cfl; _nat_cached_p6=$_cp; fi ;;
 						esac
 					done < "$_nat_cache"
 				fi
-				if [ "$_nat_force" != "1" ] && [ "$_nat_force" != "true" ] && { [ "$_nat_cache_hit" = "1" ] || { [ -z "$_nat_v4" ] && [ -n "$_nat_cached_v6" ]; }; }; then
+				if [ "$_nat_force" != "1" ] && [ "$_nat_force" != "true" ] && [ "$_nat_cache_hit" = "1" ]; then
 					# Return cached result immediately
 					json_esc "$_nat_if"; _nat_ifj=$JSV
 					printf '{"available":true,"iface":"%s","cached":true,"v4":' "$_nat_ifj"
 					if [ -n "$_nat_cached_v4" ]; then _nat_json 4 "$_nat_cached_v4" "$_nat_cached_s4" "$_nat_cached_m4" "$_nat_cached_f4" "$_nat_cached_p4"; else printf 'null'; fi
-					printf ',"v6":'
-					if [ -n "$_nat_cached_v6" ]; then _nat_json 6 "$_nat_cached_v6" "$_nat_cached_s6" "$_nat_cached_m6" "$_nat_cached_f6" "$_nat_cached_p6"; else printf 'null'; fi
 					echo '}'
 					# Kick background re-probe to refresh cache for next time
 					(
 						_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.bg"
-						_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.bg"
 						_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"; _nat_p4="—"
-						_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"; _nat_p6="—"
-						# Run v4 and v6 probes in parallel background processes
 						[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
-						[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
 						[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
-						[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
 						if [ -n "$_nat_v4" ]; then
 							read -r _nat_s4 _nat_m4 _nat_f4 _nat_p4 <<EOF
 $(_nat_parse_out "$_nat_tmp4" 4)
 EOF
 						fi
-						if [ -n "$_nat_v6" ]; then
-							read -r _nat_s6 _nat_m6 _nat_f6 _nat_p6 <<EOF
-$(_nat_parse_out "$_nat_tmp6" 6)
-EOF
-						fi
 						{
 							[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$(date +%s 2>/dev/null)" "$_nat_p4"
-							[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$(date +%s 2>/dev/null)" "$_nat_p6"
 						} > "$_nat_cache" 2>/dev/null
 						if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
 							mkdir -p "$PERSISTDIR/nat" 2>/dev/null
 							cat "$_nat_cache" > "$PERSISTDIR/nat/$_nat_if" 2>/dev/null
 						fi
-						rm -f "$_nat_tmp4" "$_nat_tmp6"
+						rm -f "$_nat_tmp4"
 					) &
 					exit 0
 				fi
 				# ------------------------------------------------------------------
-				# Cold-path: no valid cache — run blocking parallel probes.
+				# Cold-path: no valid cache — run a blocking probe.
 				# ------------------------------------------------------------------
 				_nat_tmp4="/tmp/hwdash/.nat.${_nat_if}.4.$$"
-				_nat_tmp6="/tmp/hwdash/.nat.${_nat_if}.6.$$"
 				_nat_s4="unavailable"; _nat_m4="unknown"; _nat_f4="unknown"; _nat_p4="—"
-				_nat_s6="unavailable"; _nat_m6="unknown"; _nat_f6="unknown"; _nat_p6="—"
-				_p4=""; _p6=""
+				_p4=""
 				[ -n "$_nat_v4" ] && { _nat_probe 4 "$_nat_v4" "$_nat_tmp4" "$_nat_dev" & _p4=$!; }
-				[ -n "$_nat_v6" ] && { _nat_probe 6 "$_nat_v6" "$_nat_tmp6" "$_nat_dev" & _p6=$!; }
 				[ -n "$_p4" ] && wait "$_p4" 2>/dev/null
-				[ -n "$_p6" ] && wait "$_p6" 2>/dev/null
 				if [ -n "$_nat_v4" ]; then
 					read -r _nat_s4 _nat_m4 _nat_f4 _nat_p4 <<EOF
 $(_nat_parse_out "$_nat_tmp4" 4)
 EOF
 				fi
-				if [ -n "$_nat_v6" ]; then
-					read -r _nat_s6 _nat_m6 _nat_f6 _nat_p6 <<EOF
-$(_nat_parse_out "$_nat_tmp6" 6)
-EOF
-				fi
-				rm -f "$_nat_tmp4" "$_nat_tmp6"
+				rm -f "$_nat_tmp4"
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				{
 					[ -n "$_nat_v4" ] && printf '4 %s %s %s %s %s %s\n' "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$HWDASH_NOW" "$_nat_p4"
-					[ -n "$_nat_v6" ] && printf '6 %s %s %s %s %s %s\n' "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$HWDASH_NOW" "$_nat_p6"
 				} > "$_nat_cache" 2>/dev/null
 				if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
 					mkdir -p "$PERSISTDIR/nat" 2>/dev/null
@@ -686,8 +709,6 @@ EOF
 				json_esc "$_nat_if"; _nat_ifj=$JSV
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
 				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$_nat_p4"; else printf 'null'; fi
-				printf ',"v6":'
-				if [ -n "$_nat_v6" ]; then _nat_json 6 "$_nat_v6" "$_nat_s6" "$_nat_m6" "$_nat_f6" "$_nat_p6"; else printf 'null'; fi
 				echo '}'
 				;;
 			wan_ips)
@@ -800,10 +821,11 @@ EOF
 
 					_wpub=""
 					[ -f "$WI_DIR/$_wif.pubip" ] && read -r _wpub < "$WI_DIR/$_wif.pubip" 2>/dev/null
-					# Full NAT behaviour is optional and on-demand. Reuse a recent
-					# result only while it belongs to the current WAN address.
+					# Full NAT behaviour is optional and on-demand, and IPv4 only --
+					# see the matching comment in the nat_test handler for why.
+					# Reuse a recent result only while it belongs to the current
+					# WAN address.
 					_wi_n4s=""; _wi_n4m=""; _wi_n4f=""; _wi_n4a=0
-					_wi_n6s=""; _wi_n6m=""; _wi_n6f=""; _wi_n6a=0
 					_wi_nat_cache="$NAT_CACHE_DIR/nat.$_wif"
 					# Cheap on every call once seeded: after the first poll of
 					# a fresh boot this file exists (or persist_dir has
@@ -814,11 +836,13 @@ EOF
 						cat "$PERSISTDIR/nat/$_wif" > "$_wi_nat_cache" 2>/dev/null
 					fi
 					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
+						# A stale "6 ..." line from before this was IPv4-only
+						# simply never matches the case below and ages out of
+						# the cache file on its own next time nat_test writes it.
 						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt _wi_np _wextra; do
 							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
 							case "$_wi_nf:$_wi_na" in
 								4:"$_wv4") [ -n "$_wv4" ] && { _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)); } ;;
-								6:"$_wv6") [ -n "$_wv6" ] && { _wi_n6s=$_wi_ns; _wi_n6m=$_wi_nm; _wi_n6f=$_wi_nfi; _wi_n6a=$((HWDASH_NOW - _wi_nt)); } ;;
 							esac
 						done < "$_wi_nat_cache"
 					fi
@@ -870,7 +894,7 @@ EOF
 					[ $WI_FIRST -eq 0 ] && WI_ITEMS="$WI_ITEMS,"
 					json_esc "$_wpar"; _wparj=$JSV
 					json_esc "$_walias"; _waliasj=$JSV
-					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\",\"nat4_state\":\"$_wi_n4s\",\"nat4_mapping\":\"$_wi_n4m\",\"nat4_filtering\":\"$_wi_n4f\",\"nat4_age\":$_wi_n4a,\"nat6_state\":\"$_wi_n6s\",\"nat6_mapping\":\"$_wi_n6m\",\"nat6_filtering\":\"$_wi_n6f\",\"nat6_age\":$_wi_n6a}"
+					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\",\"nat4_state\":\"$_wi_n4s\",\"nat4_mapping\":\"$_wi_n4m\",\"nat4_filtering\":\"$_wi_n4f\",\"nat4_age\":$_wi_n4a}"
 					WI_FIRST=0
 				done
 				echo "{\"stunclient\":$WI_STUN,\"wans\":[$WI_ITEMS]}"

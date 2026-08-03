@@ -2278,14 +2278,20 @@ return view.extend({
             address_port_dependent: 'Address and Port-Dependent',
             unknown: 'Not Determined'
         };
-        var natVerdict = function(family, state, mapping, filtering, wanClass) {
-            if (family === 4 && wanClass === 'cgnat')
+        // IPv4 only. Native IPv6 is always end-to-end by construction (RFC
+        // 4291), so a "NAT type" verdict for it is either a foregone "open,
+        // direct" or a spurious "unavailable" from one lost UDP packet with
+        // no retry -- neither is worth a card. IPv4 is where NAT (including
+        // CG-NAT) is real, and that covers the tunnel protocols too: MAP-E,
+        // DS-Lite, 6rd and friends exist specifically because an ISP is doing
+        // CG-NAT on the IPv4 side, and the backend already resolves a
+        // tunnel's parent IPv4 address for exactly this test.
+        var natVerdict = function(state, mapping, filtering, wanClass) {
+            if (wanClass === 'cgnat')
                 return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (CG-NAT) prevents unsolicited inbound IPv4 connections (RFC 6598).' };
             if (!state) return { short: 'NAT TYPE · NOT TESTED', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering behaviors.' };
             if (state === 'unavailable') return { short: 'UNAVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding test.' };
             if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behavioral data.' };
-            if (family === 6 && state === 'open' && mapping === 'direct')
-                return { short: 'OPEN · NATIVE', level: 'open', note: 'Native IPv6 provides direct end-to-end reachability without address translation.' };
             if (state === 'open' && mapping === 'direct')
                 return { short: 'OPEN · DIRECT', level: 'open', note: 'Direct IP routing is available without address translation.' };
             if (state === 'open')
@@ -2300,30 +2306,23 @@ return view.extend({
             return sevColor(level === 'open' ? 'good' : level === 'moderate' ? 'warn' : level === 'strict' || level === 'unavailable' ? 'bad' : 'mute');
         };
         var natDialogRow = function(title, result, wanClass, wInfo) {
-            var family = result ? (result.family === '6' ? 6 : 4) : 4;
-            var protoTag = (family === 6) ? 'UDP / IPv6' : 'UDP / IPv4';
-            var verdict = result ? natVerdict(family, result.state, result.mapping, result.filtering, wanClass) :
-                { short: 'NOT AVAILABLE', level: 'unknown', note: family === 6 ? 'IPv6 is not configured or no global unicast address is assigned.' : 'IPv4 address is not configured.' };
+            var verdict = result ? natVerdict(result.state, result.mapping, result.filtering, wanClass) :
+                { short: 'NOT AVAILABLE', level: 'unknown', note: 'IPv4 address is not configured.' };
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
             var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanIpCache) ? self._wanIpCache[wInfo.alias_of || wInfo.parent] : null;
-            var localIp = result ? result.address : (wInfo ? (family === 6 ? (wInfo.ip6 || (parentInfo ? parentInfo.ip6 : '—')) : (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—'))) : '—');
-            var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((family === 4) ? ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—') : (family === 6 ? localIp : '—'));
+            var localIp = result ? result.address : (wInfo ? (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—')) : '—');
+            var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—');
             // The servers the backend actually queries, in the order it tries
-            // them (see _nat_probe in luci.hwdash). This line previously named
-            // stun.l.google.com for IPv4, which is never contacted on that
-            // family, and omitted stun.cloudflare.com on IPv6 even though it is
-            // tried first.
-            var serverUsed = family === 6
-                ? 'stun.cloudflare.com:3478, then stun.l.google.com:19302'
-                : 'stun.miwifi.com:3478, then stun.cloudflare.com:3478';
+            // them (see _nat_probe in luci.hwdash).
+            var serverUsed = 'stun.miwifi.com:3478, then stun.cloudflare.com:3478';
 
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
                 E('div', { style: 'display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;' }, [
                     E('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
                         E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.6px; color:' + col + ';' }, title),
-                        E('span', { style: 'font-size:0.7em; font-weight:700; padding:1px 6px; border-radius:6px; background:' + col + '22; color:' + col + ';' }, protoTag)
+                        E('span', { style: 'font-size:0.7em; font-weight:700; padding:1px 6px; border-radius:6px; background:' + col + '22; color:' + col + ';' }, 'UDP / IPv4')
                     ]),
                     E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 8px;' }, verdict.short)
                 ]),
@@ -2348,7 +2347,7 @@ return view.extend({
             // Letting the modal do the sizing gives the same ~566px on desktop
             // and a clean fit on a phone.
             var content = E('div', { style: 'width:100%; display:flex; flex-direction:column; gap:12px;' }, [
-                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with official STUN server probes (RFC 3489 / RFC 5780 / RFC 6598). It measures IPv4 and IPv6 NAT mapping and filtering behaviors.'),
+                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with official STUN server probes (RFC 3489 / RFC 5780 / RFC 6598). It measures IPv4 NAT mapping and filtering behavior.'),
                 E('div', { style: 'font-size:0.8em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
             ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
@@ -2365,24 +2364,14 @@ return view.extend({
                     content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'NAT test could not run: ' + String(res.error).replace(/_/g, ' ') + '.'));
                     return;
                 }
-                // Each row is deliberately single-family: a wan/wan6 pair is two
-                // rows, and each one reports only its own family's behaviour.
-                // The address the row actually holds decides it; the name is
-                // only consulted when the row has both or neither.
-                //
-                // (The old form also tested iface !== '6rd' && iface !== '6in4',
-                // comparing an INTERFACE name against PROTOCOL names -- values
-                // that can never appear there, so the guard never did anything.)
-                var isV6Only = (wInfo && wInfo.ip6 && !wInfo.ip4) || iface.indexOf('6') !== -1;
-                var isV4Only = (wInfo && wInfo.ip4 && !wInfo.ip6) || iface.indexOf('6') === -1;
-                if (isV6Only) {
-                    var v6Res = res.v6 || { family: '6', state: 'open', mapping: 'direct', filtering: 'endpoint_independent', address: (wInfo ? wInfo.ip6 : '—') };
-                    content.appendChild(natDialogRow('IPv6 NAT Behavior', v6Res, wanClass, wInfo));
-                } else if (isV4Only) {
-                    if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
+                // IPv4 only -- see the matching comment on natVerdict for why
+                // native IPv6 is never tested. res.v4 is empty only when
+                // neither this interface nor its tunnel parent has an IPv4
+                // address of any kind.
+                if (res.v4) {
+                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
                 } else {
-                    if (res.v4) content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
-                    if (res.v6) content.appendChild(natDialogRow('IPv6 NAT Behavior', res.v6, wanClass, wInfo));
+                    content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.75;' }, 'No IPv4 address is available on this interface, or its tunnel parent, to test.'));
                 }
                 if (res.cached) {
                     content.appendChild(E('div', { style: 'font-size:0.75em; opacity:0.55; margin-top:4px;' }, '↻ Showing cached result · Background re-probe in progress'));
@@ -2548,7 +2537,7 @@ return view.extend({
                     // dependency. When it is absent these chips and the action
                     // disappear completely; when present they stay compact and
                     // expose the detailed mapping/filtering terms in a dialog.
-                    var setNatChip = function(el, family, address, state, mapping, filtering) {
+                    var setNatChip = function(el, address, state, mapping, filtering) {
                         if (!address) {
                             el.style.display = 'none';
                             return;
@@ -2576,7 +2565,7 @@ return view.extend({
                             el.style.display = '';
                             return;
                         }
-                        var verdict = natVerdict(family, state, mapping, filtering, w.class);
+                        var verdict = natVerdict(state, mapping, filtering, w.class);
                         var ncol = natColor(verdict.level);
                         setText(el, verdict.short);
                         el.title = verdict.note;
@@ -2587,15 +2576,18 @@ return view.extend({
                         el.onclick = null;
                         el.style.display = '';
                     };
+                    // IPv4 only -- native IPv6 has no real NAT to report (see
+                    // the backend's nat_test handler), so a WAN with no IPv4
+                    // of its own or a parent's simply gets no chip at all.
                     var parentW = (w.alias_of || w.parent) ? self._wanIpCache[w.alias_of || w.parent] : null;
-                    var st4 = w.nat4_state || w.nat6_state || (parentW ? (parentW.nat4_state || parentW.nat6_state) : null);
-                    var map4 = w.nat4_mapping || w.nat6_mapping || (parentW ? (parentW.nat4_mapping || parentW.nat6_mapping) : null);
-                    var filt4 = w.nat4_filtering || w.nat6_filtering || (parentW ? (parentW.nat4_filtering || parentW.nat6_filtering) : null);
-                    setNatChip(e.nat4, w.ip4 ? 4 : 6, w.ip4 || w.ip6 || (w.up ? 'active' : ''), st4, map4, filt4);
+                    var st4 = w.nat4_state || (parentW ? parentW.nat4_state : null);
+                    var map4 = w.nat4_mapping || (parentW ? parentW.nat4_mapping : null);
+                    var filt4 = w.nat4_filtering || (parentW ? parentW.nat4_filtering : null);
+                    setNatChip(e.nat4, w.ip4 || (parentW && parentW.ip4), st4, map4, filt4);
 
                     e.natCard.style.display = 'none';
 
-                    var canTest = self.stunClientAvailable && (!!w.ip4 || !!w.ip6 || w.up);
+                    var canTest = self.stunClientAvailable && !!(w.ip4 || (parentW && parentW.ip4));
                     e.natTest.style.display = canTest ? '' : 'none';
                     if (canTest) {
                         var testCol = sevColor('info');
