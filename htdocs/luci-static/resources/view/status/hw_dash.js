@@ -1078,6 +1078,16 @@ return view.extend({
         var isGwDisabled = function(fam) {
             return self.disabledPings.indexOf('__gateway|' + fam) !== -1;
         };
+        // The RPC never sees this -- a custom target's friendly name exists
+        // only in settings, so anything that displays a target (the Ping
+        // Latency card's legend/table, the Settings checkbox list) has to
+        // look it up here rather than expect it on the ping response.
+        var customNameFor = function(host) {
+            for (var _ci = 0; _ci < self.pingTargets.length; _ci++) {
+                if (self.pingTargets[_ci].host === host) return self.pingTargets[_ci].name || '';
+            }
+            return '';
+        };
         var pingTargetPairs = function() {
             var seen = {};
             var items = [];
@@ -1451,10 +1461,13 @@ return view.extend({
                 // not follow the sorted position.
                 var cust = [];
                 self.pingTargets.forEach(function(t, i) {
-                    if (expandFams(t).indexOf(fam) !== -1) cust.push({ host: t.host, idx: i });
+                    if (expandFams(t).indexOf(fam) !== -1) cust.push({ host: t.host, name: t.name || '', idx: i });
                 });
                 cust.sort(function(a, b) { return byName(a.host, b.host); });
-                group('Custom', cust.map(function(c) { return makePingToggle(c.host, fam, c.host, true, c.idx); }));
+                // A literal IP with no name still reads as a bare address in
+                // the checkbox list -- the name (when given) replaces it
+                // there too, not just on the card itself.
+                group('Custom', cust.map(function(c) { return makePingToggle(c.host, fam, c.name || c.host, true, c.idx); }));
                 var kids = [E('div', { style: 'font-weight: 700; font-size: 0.9em; letter-spacing: 0.5px;' }, 'IPv' + fam)];
                 // Say it plainly when the family cannot work at all, rather
                 // than leaving a box of targets that will only ever report as
@@ -1470,6 +1483,13 @@ return view.extend({
         };
         renderTargetList();
         var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'host or IP (e.g. quad9.net)', style: 'width: 220px; max-width: 60%;' });
+        // A literal IP has no domain to fall back on for a name -- a game
+        // server is commonly reachable only by IP and has no PTR record
+        // either, so both the RPC's reverse-DNS attempt and the raw address
+        // itself leave the card unable to say what the target actually is.
+        // This is purely a client-side label: never sent to or interpreted
+        // by the backend, just carried along in the same settings blob.
+        var tgtNameInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'Name (optional, e.g. Valorant EU)', style: 'width: 220px; max-width: 60%;' });
         var tgtFam = E('select', { class: 'cbi-input-select' }, [
             E('option', { value: '4' }, 'IPv4'),
             E('option', { value: '6' }, 'IPv6'),
@@ -1486,10 +1506,11 @@ return view.extend({
             var missing = want.filter(function(fam) { return !existing[h + '|' + fam]; });
             if (missing.length === 0) { tgtInput.style.borderColor = '#ff5252'; return; }
             tgtInput.style.borderColor = '';
-            self.pingTargets.push({ host: h, fam: missing.length === 2 ? 'both' : missing[0] });
+            self.pingTargets.push({ host: h, fam: missing.length === 2 ? 'both' : missing[0], name: tgtNameInput.value.trim() });
             markDirty();
             self.pingHist = {};
             tgtInput.value = '';
+            tgtNameInput.value = '';
             renderTargetList();
         };
         settingsPanel.appendChild(cbiSection('Ping Targets',
@@ -1497,7 +1518,7 @@ return view.extend({
             [
                 targetList,
                 E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
-                    tgtInput, tgtFam,
+                    tgtInput, tgtNameInput, tgtFam,
                     E('button', { type: 'button', class: 'cbi-button cbi-button-add', click: addTarget }, 'Add'),
                     E('button', {
                         type: 'button',
@@ -3005,7 +3026,7 @@ return view.extend({
                         var isGw = (res.gateway && t.host === res.gateway) ? 4 : (res.gateway6 && t.host === res.gateway6) ? 6 : 0;
                         if (isGw && isGwDisabled(isGw)) return;
                         hist[key] = {
-                            label: isGw ? 'Gateway v' + isGw : t.host + ' (v' + t.fam + ')',
+                            label: isGw ? 'Gateway v' + isGw : (customNameFor(t.host) || t.host) + ' (v' + t.fam + ')',
                             gw: isGw,
                             host: t.host,
                             fam: t.fam,
@@ -3028,6 +3049,13 @@ return view.extend({
                     var h = hist[key];
                     if (t.ip) h.ip = t.ip;
                     if (t.rdns) h.rdns = t.rdns;
+                    // Refreshed every tick, not just at creation, so renaming
+                    // a target in Settings and hitting Save updates the
+                    // already-running graph without a full page reload.
+                    if (!h.gw) {
+                        var cn0 = customNameFor(t.host);
+                        h.label = (cn0 || t.host) + ' (v' + t.fam + ')';
+                    }
                     var v = typeof t.ms === 'number' ? t.ms : null;
                     h.data.push(v);
                     h.allData.push(v);
@@ -3187,7 +3215,13 @@ return view.extend({
                             return;
                         }
                         var isIpLit = /^[0-9.]+$/.test(t.host) || t.host.indexOf(':') !== -1;
-                        var tgtTxt = t.gw ? 'Gateway' + (t.rdns ? ' (' + t.rdns + ')' : '') : (isIpLit ? (t.rdns || '—') : t.host);
+                        // A custom name outranks reverse DNS -- it exists
+                        // specifically for the case rdns has nothing to
+                        // offer (a game server IP with no PTR record), but
+                        // it's honored even when rdns did resolve, since the
+                        // user asked for that label deliberately.
+                        var cnt = customNameFor(t.host);
+                        var tgtTxt = t.gw ? 'Gateway' + (t.rdns ? ' (' + t.rdns + ')' : '') : (cnt || (isIpLit ? (t.rdns || '—') : t.host));
                         row.cells.target.textContent = tgtTxt;
                         row.cells.target.title = tgtTxt;
                         var ipTxt = isIpLit ? t.host : (t.ip || '—');
