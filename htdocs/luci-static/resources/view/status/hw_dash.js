@@ -115,7 +115,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; } .btn, .cbi-button, button, input[type=button], input[type=submit], input[type=reset] { white-space: nowrap !important; text-overflow: clip !important; max-width: none !important; min-width: max-content !important; box-sizing: border-box !important; }  .cbi-page-actions, .right, .hw-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; } }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  #hw-wanip .hw-kv-k { opacity: 1; font-weight: 700; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; } .hw-wanq-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; flex: 1 1 100% !important; max-width: 100% !important; margin-top: 8px; } } @media (max-width: 480px) { .hw-wanq-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .hw-kv { flex-direction: column; align-items: flex-start; gap: 2px; } .hw-kv-v { text-align: left; word-break: break-all; } .hw-wifi-card-body > div { font-size: 0.85em; } } .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } .hw-card { padding: 15px; } .hw-card.half { flex-basis: 100%; } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card.half { flex: 1 1 calc(50% - 10px); } .hw-card-dragging { opacity: 0.45; box-shadow: 0 8px 20px rgba(0,0,0,0.3); } .hw-card-editbar { position: absolute; top: 6px; right: 6px; z-index: 5; display: none; gap: 4px; align-items: center; } .hw-card-handle { cursor: grab; touch-action: none; user-select: none; font-size: 1.1em; opacity: 0.6; padding: 3px 6px; border-radius: 6px; background: rgba(128,128,128,0.18); } .hw-card-handle:active { cursor: grabbing; opacity: 1; } .hw-card-sizebtn { cursor: pointer; font-size: 0.68em; font-weight: 700; letter-spacing: 0.3px; padding: 3px 7px; border-radius: 6px; background: rgba(128,128,128,0.18); border: none; opacity: 0.75; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; } .btn, .cbi-button, button, input[type=button], input[type=submit], input[type=reset] { white-space: nowrap !important; text-overflow: clip !important; max-width: none !important; min-width: max-content !important; box-sizing: border-box !important; }  .cbi-page-actions, .right, .hw-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; } }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  #hw-wanip .hw-kv-k { opacity: 1; font-weight: 700; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; } .hw-wanq-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; flex: 1 1 100% !important; max-width: 100% !important; margin-top: 8px; } } @media (max-width: 480px) { .hw-wanq-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .hw-kv { flex-direction: column; align-items: flex-start; gap: 2px; } .hw-kv-v { text-align: left; word-break: break-all; } .hw-wifi-card-body > div { font-size: 0.85em; } } .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -1021,6 +1021,12 @@ return view.extend({
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
         self.persistDir = typeof savedCfg.persistDir === 'string' ? savedCfg.persistDir : '';
+        // Empty on every existing install until this ships -- applyCardOrder
+        // below treats that as "use whatever order the cards already render
+        // in today", not the registry's own declaration order, so nothing
+        // reshuffles on upgrade before a user ever drags anything.
+        self.cardOrder = Array.isArray(savedCfg.cardOrder) ? savedCfg.cardOrder : [];
+        self.cardSize = (savedCfg.cardSize && typeof savedCfg.cardSize === 'object' && !Array.isArray(savedCfg.cardSize)) ? savedCfg.cardSize : {};
         var saveConfig = function() {
             if (typeof wanTgt4Input !== 'undefined' && wanTgt4Input && typeof wanTgt4Input.value === 'string') {
                 self.wanTarget4 = wanTgt4Input.value.trim() || '1.1.1.1';
@@ -1044,7 +1050,9 @@ return view.extend({
                 wanHidden: self.hiddenWanIfaces,
                 wanTarget4: self.wanTarget4,
                 wanTarget6: self.wanTarget6,
-                persistDir: self.persistDir
+                persistDir: self.persistDir,
+                cardOrder: self.cardOrder,
+                cardSize: self.cardSize
             }).then(function(r) {
                 return (r && r.result) ? r : { result: 'error' };
             }).catch(function() {
@@ -2006,7 +2014,11 @@ return view.extend({
                 }
                 self.persistDir = typeof cfg.persistDir === 'string' ? cfg.persistDir : '';
                 if (persistDirInput) persistDirInput.value = self.persistDir;
+                self.cardOrder = Array.isArray(cfg.cardOrder) ? cfg.cardOrder : [];
+                self.cardSize = (cfg.cardSize && typeof cfg.cardSize === 'object' && !Array.isArray(cfg.cardSize)) ? cfg.cardSize : {};
                 applyCardVisibility();
+                if (typeof applyCardOrder === 'function') applyCardOrder();
+                if (typeof applyCardSizes === 'function') applyCardSizes();
                 if (typeof renderTargetList === 'function') renderTargetList();
                 if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
                 aqlLoaded = false; loadAql();
@@ -2028,7 +2040,11 @@ return view.extend({
             self.persistDir = '';
             if (persistDirInput) persistDirInput.value = '';
             self.pingHist = {};
+            self.cardOrder = [];
+            self.cardSize = {};
             applyCardVisibility();
+            if (typeof applyCardOrder === 'function') applyCardOrder();
+            if (typeof applyCardSizes === 'function') applyCardSizes();
             if (typeof renderTargetList === 'function') renderTargetList();
             if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
             Promise.all([saveConfig(), callHwSetAql({ reset: true }).catch(function() { return null; })])
@@ -2059,6 +2075,146 @@ return view.extend({
         container.insertBefore(settingsPanel, sysCard);
         container.insertBefore(settingsRow, settingsPanel);
         applyCardVisibility();
+
+        // Card rearrange (drag-to-reorder) + 3-tier resize (Small/Half/Full).
+        //
+        // A plain JS property on each node, not a Map -- keeps this
+        // ES5-consistent with the rest of the file, and lets DOM hit-testing
+        // (elementFromPoint) resolve straight back to a registry key with no
+        // separate lookup table. Multi-node entries (ext: [extCard,
+        // myExtWrapper]) get every node tagged, so hovering over either one
+        // resolves to the same key.
+        Object.keys(cardRegistry).forEach(function(key) {
+            cardRegistry[key].nodes.forEach(function(nd) { if (nd) nd.__hwCardKey = key; });
+        });
+        var currentDomOrder = function() {
+            var seen = {}, order = [], kids = container.children;
+            for (var i = 0; i < kids.length; i++) {
+                var k = kids[i].__hwCardKey;
+                if (k && !seen[k]) { seen[k] = true; order.push(k); }
+            }
+            return order;
+        };
+        // Captured once, before any reorder/resize ever happens -- the real
+        // order/size every card renders in today. self.cardOrder/cardSize
+        // are empty on every existing install until this ships, and falling
+        // back to Object.keys(cardRegistry) there would be wrong: that's
+        // registry *declaration* order, not the real append order (Alerts
+        // is appended first for prominence -- see the comment above
+        // alertsCard's own appendChild -- but declared near the end of the
+        // registry literal). Using the wrong fallback would silently
+        // reshuffle every existing user's layout the moment this update
+        // installs, before they ever touch anything.
+        var defaultOrder = currentDomOrder();
+        var defaultSize = {};
+        Object.keys(cardRegistry).forEach(function(key) {
+            var n0 = cardRegistry[key].nodes[0];
+            defaultSize[key] = (n0 && n0.classList && n0.classList.contains('wide')) ? 'wide' : 'small';
+        });
+        var applyCardOrder = function() {
+            var seen = {};
+            var order = (self.cardOrder || []).filter(function(k) {
+                if (!cardRegistry.hasOwnProperty(k) || seen[k]) return false;
+                seen[k] = true;
+                return true;
+            });
+            defaultOrder.forEach(function(k) { if (!seen[k]) { seen[k] = true; order.push(k); } });
+            // appendChild on an already-attached node moves it -- one pass in
+            // the wanted order repositions everything without ever
+            // detaching/recreating a live card (which would drop its
+            // in-progress ticks, listeners, and id-addressed children).
+            order.forEach(function(k) {
+                cardRegistry[k].nodes.forEach(function(n) { container.appendChild(n); });
+            });
+        };
+        var applyCardSizes = function() {
+            Object.keys(cardRegistry).forEach(function(key) {
+                var n = cardRegistry[key].nodes[0];
+                if (!n || !n.classList) return;
+                // thermal's primary node is a display:contents pass-through
+                // shell (the real card is injected into it elsewhere) --
+                // there's no box of its own to size, only to reorder.
+                if (window.getComputedStyle(n).display === 'contents') return;
+                var size = self.cardSize[key] || defaultSize[key];
+                n.classList.remove('wide', 'half');
+                if (size === 'wide') n.classList.add('wide');
+                else if (size === 'half') n.classList.add('half');
+            });
+        };
+        applyCardOrder();
+        applyCardSizes();
+
+        var rearrangeBtn = E('button', { class: 'cbi-button', style: 'padding: 4px 14px;' }, '⇕ Rearrange Cards');
+        rearrangeBtn.addEventListener('click', function() {
+            self.rearrangeMode = !self.rearrangeMode;
+            setText(rearrangeBtn, self.rearrangeMode ? '✓ Done Arranging' : '⇕ Rearrange Cards');
+            var bars = container.querySelectorAll('.hw-card-editbar');
+            for (var bi = 0; bi < bars.length; bi++) bars[bi].style.display = self.rearrangeMode ? 'flex' : 'none';
+        });
+        settingsRow.appendChild(rearrangeBtn);
+
+        // One generic pass over the registry builds every card's drag
+        // handle + size control -- zero changes to any individual card's
+        // own construction code. Every .hw-card already has
+        // position:relative (see the stylesheet), so the absolutely
+        // positioned overlay anchors correctly regardless of a card's own
+        // internal layout.
+        Object.keys(cardRegistry).forEach(function(key) {
+            var n = cardRegistry[key].nodes[0];
+            if (!n) return;
+            var handle = E('span', { class: 'hw-card-handle', title: 'Drag to reorder' }, '☰');
+            var editbar = E('div', { class: 'hw-card-editbar' }, [handle]);
+            if (window.getComputedStyle(n).display !== 'contents') {
+                var sizeLabel = function() {
+                    var s = self.cardSize[key] || defaultSize[key];
+                    return s === 'wide' ? 'W' : s === 'half' ? 'H' : 'S';
+                };
+                var sizeBtn = E('button', { type: 'button', class: 'hw-card-sizebtn', title: 'Card width: Small / Half / Full -- click to cycle' }, sizeLabel());
+                sizeBtn.addEventListener('click', function() {
+                    var cur = self.cardSize[key] || defaultSize[key];
+                    self.cardSize[key] = cur === 'small' ? 'half' : cur === 'half' ? 'wide' : 'small';
+                    setText(sizeBtn, sizeLabel());
+                    applyCardSizes();
+                    markDirty();
+                });
+                editbar.appendChild(sizeBtn);
+            }
+            n.insertBefore(editbar, n.firstChild);
+
+            // Pointer Events unify mouse and touch -- no separate touch-event
+            // path needed. touch-action:none on the handle (stylesheet) is
+            // what stops a touch here from being hijacked as a page-scroll
+            // gesture, which is the actual reason this needs a dedicated
+            // handle rather than "drag anywhere on the card".
+            handle.addEventListener('pointerdown', function(ev) {
+                ev.preventDefault();
+                try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+                n.classList.add('hw-card-dragging');
+                var lastOver = null;
+                var onMove = function(mv) {
+                    var el = document.elementFromPoint(mv.clientX, mv.clientY);
+                    var card = el;
+                    while (card && card.parentNode !== container) card = card.parentNode;
+                    if (!card || card === n || card === lastOver || !card.__hwCardKey) return;
+                    lastOver = card;
+                    var r = card.getBoundingClientRect();
+                    var before = mv.clientY < r.top + r.height / 2;
+                    container.insertBefore(n, before ? card : card.nextSibling);
+                };
+                var onUp = function() {
+                    n.classList.remove('hw-card-dragging');
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                    document.removeEventListener('pointercancel', onUp);
+                    self.cardOrder = currentDomOrder();
+                    markDirty();
+                };
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp);
+                document.addEventListener('pointercancel', onUp);
+            });
+        });
+
         var syncRows = function(container, cache, items, keyFn, buildFn, patchFn) {
             var seen = {};
             var prev = null;
