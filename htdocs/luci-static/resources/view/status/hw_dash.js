@@ -2791,6 +2791,9 @@ return view.extend({
         // A detail sheet, not a multi-column list like Wi-Fi Clients above --
         // one kvRow per fact reads better than staCell's fixed-width columns
         // for the handful of stats an access point's single uplink has.
+        // Same badge + 5-stat grid the WAN card uses (see wanQTick below) --
+        // a plain kv-list here read as a different, blander product instead
+        // of the same dashboard's own AP-specific card.
         var renderApStats = function(res) {
             var list = (res && res.ap_stats) || [];
             if (self.hiddenCards && self.hiddenCards.indexOf('ap_stats') !== -1) return;
@@ -2800,48 +2803,122 @@ return view.extend({
             if (!box) return;
             if (!self._apStatsCache) self._apStatsCache = {};
             syncRows(box, self._apStatsCache, list, function(r) { return r.iface; }, function() {
-                // baseline, not center: LAN (1.05em) and the IP (0.8em
-                // monospace) sit visibly off from each other under
-                // height-based centering -- text of different sizes lines up
-                // by its actual baseline instead. The dot has no baseline of
-                // its own, so it keeps an explicit center alignment.
-                var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; align-self: center;' });
-                var ifnLabel = E('span', { style: 'font-weight: 700; font-size: 1.05em; letter-spacing: 0.4px;' });
-                // The gateway (upstream) and the AP's own address are both
-                // just IPs on the same wire, but confusing one for the other
-                // is exactly the AP-vs-router mixup this whole card exists
-                // to avoid -- each gets its own short tag rather than
-                // leaving it to position alone to imply which is which.
-                var gwAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.65; font-family: monospace; margin-left: 8px;' });
-                var mgmtAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.65; font-family: monospace;' });
-                var head = E('div', { style: 'display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;' }, [statusDot, ifnLabel, gwAddr, mgmtAddr]);
-                var kStatus = kvRow('Status'), kGwPing = kvRow('Gateway Ping'),
-                    kUptime = kvRow('Uptime (24h)'), kDowntime = kvRow('Downtime (24h)'),
-                    kInet = kvRow('Internet Ping'), kRate = kvRow('Throughput'),
-                    kIsp = kvRow('ISP'), kVlan = kvRow('VLAN');
-                var reasonEl = E('div', { style: 'display: none; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); font-size: 0.78em; line-height: 1.4; word-break: break-word;' });
-                var el = E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [
-                    head, kStatus.el, kGwPing.el, kUptime.el, kDowntime.el, kInet.el, kRate.el, kIsp.el, kVlan.el, reasonEl
+                var monogramEl = E('span', { style: 'display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 0.8em; font-weight: 700; color: #fff; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.15); flex-shrink: 0;' });
+                var logoImg = E('img', { style: 'width: 34px; height: 34px; object-fit: contain; background: transparent; box-sizing: border-box; flex-shrink: 0; display: none; position: absolute; top: 0; left: 0;' });
+                logoImg.onload = function() {
+                    var tile = pageIsDark() && logoNeedsTile(logoImg);
+                    logoImg.style.background = tile ? '#fff' : 'transparent';
+                    logoImg.style.borderRadius = tile ? '7px' : '0';
+                    logoImg.style.padding = tile ? '2px' : '0';
+                    monogramEl.style.display = 'none';
+                    logoImg.style.display = '';
+                };
+                logoImg.onerror = function() {
+                    var alt = logoImg.dataset.fallback;
+                    if (alt && logoImg.src.indexOf(alt) === -1) {
+                        logoImg.dataset.fallback = '';
+                        logoImg.src = alt;
+                        return;
+                    }
+                    logoImg.style.display = 'none';
+                    monogramEl.style.display = 'inline-flex';
+                    logoImg.dataset.src = '';
+                };
+                var badgeWrapper = E('div', { style: 'position: relative; width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;' }, [monogramEl, logoImg]);
+                var ispNameSpan = E('span', { style: 'font-weight: 600; font-size: 1.05em; white-space: normal; word-break: break-word; line-height: 1.25;' });
+                var ifaceAsnSpan = E('span', { style: 'font-size: 0.78em; opacity: 0.55; white-space: nowrap; font-family: monospace; letter-spacing: 0.3px;' });
+                var infoBlock = E('div', { style: 'display: flex; flex-direction: column; min-width: 0; gap: 2px;' }, [ispNameSpan, ifaceAsnSpan]);
+
+                var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; vertical-align: middle;' });
+                var statusVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; vertical-align: middle;' });
+                var statusLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; font-weight: 500; white-space: nowrap;' });
+                var statusBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                    E('div', { style: 'display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; line-height: 1; flex: 1; min-height: 26px;' }, [statusDot, statusVal]),
+                    statusLbl
                 ]);
+
+                var gwVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                var gwLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'GATEWAY PING');
+                var gwBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                    E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [gwVal]),
+                    gwLbl
+                ]);
+
+                var uptimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                var uptimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'UPTIME 24H');
+                var uptimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                    E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [uptimeVal]),
+                    uptimeLbl
+                ]);
+
+                var downtimeVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; font-family: monospace; line-height: 1; white-space: nowrap;' });
+                var downtimeLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN 24H');
+                var downtimeBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                    E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [downtimeVal]),
+                    downtimeLbl
+                ]);
+
+                var rateVal = E('span', { style: 'font-size: 0.82em; font-weight: 700; font-family: monospace; line-height: 1.25; white-space: pre;' });
+                var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
+                var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
+                    E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [rateVal]),
+                    rateLbl
+                ]);
+
+                // Secondary detail chips, visually a step down from the
+                // primary 5-stat grid above -- gateway/management IP, VLAN
+                // and the informational internet ping don't need their own
+                // full-width grid slot each.
+                var CHIP = 'font-size: 0.72em; font-weight: 700; letter-spacing: 0.3px; padding: 3px 9px; border-radius: 10px; white-space: nowrap; font-family: monospace; background: rgba(128,128,128,0.14);';
+                var gwChip = E('span', { style: CHIP });
+                var mgmtChip = E('span', { style: CHIP });
+                var vlanChip = E('span', { style: CHIP });
+                var inetChip = E('span', { style: CHIP + ' opacity: 0.7;' });
+                var chipRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 10px;' }, [gwChip, mgmtChip, vlanChip, inetChip]);
+
+                var reasonEl = E('div', { style: 'display: none; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); font-size: 0.78em; line-height: 1.4; word-break: break-word;' });
+                var el = E('div', { style: 'width: 100%; padding: 10px 12px; background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 8px; margin-bottom: 6px;' }, [
+                    E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px;' }, [
+                        E('div', { style: 'display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px;' }, [badgeWrapper, infoBlock]),
+                        E('div', { class: 'hw-wanq-metrics', style: 'display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 8px; width: 100%; max-width: 440px; flex: 1 1 320px;' }, [statusBlock, gwBlock, rateBlock, uptimeBlock, downtimeBlock])
+                    ]),
+                    chipRow,
+                    reasonEl
+                ]);
+
                 return {
-                    el: el, statusDot: statusDot, ifnLabel: ifnLabel, gwAddr: gwAddr, mgmtAddr: mgmtAddr,
-                    kStatus: kStatus, kGwPing: kGwPing, kUptime: kUptime, kDowntime: kDowntime,
-                    kInet: kInet, kRate: kRate, kIsp: kIsp, kVlan: kVlan, reasonEl: reasonEl
+                    el: el, monogramEl: monogramEl, logoImg: logoImg, ispName: ispNameSpan, ifaceAsn: ifaceAsnSpan,
+                    statusDot: statusDot, statusVal: statusVal, statusLbl: statusLbl,
+                    gw: gwVal, uptime: uptimeVal, downtime: downtimeVal, rate: rateVal,
+                    gwChip: gwChip, mgmtChip: mgmtChip, vlanChip: vlanChip, inetChip: inetChip,
+                    reasonEl: reasonEl
                 };
             }, function(e, r) {
                 var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
                 e.statusDot.style.background = statusColor;
-                setText(e.ifnLabel, r.iface.toUpperCase());
-                setText(e.gwAddr, r.gateway ? ('GW ' + r.gateway) : '');
-                setText(e.mgmtAddr, r.management_ip ? ('MGMT ' + r.management_ip) : '');
+                e.statusVal.style.color = statusColor;
+                e.statusVal.textContent = r.status === 'up' ? 'ONLINE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
+                e.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
 
-                // .hw-kv-v carries no font-weight of its own (it's shared
-                // with the NAT Type card's plain rows) -- bold to match the
-                // WAN card's own colored stat blocks, which is the look this
-                // card is meant to sit alongside.
-                setText(e.kStatus.val, (r.status === 'up' ? 'ONLINE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN') + '  ·  ' + fmtDurationFull(r.since_change_s));
-                e.kStatus.val.style.color = statusColor;
-                e.kStatus.val.style.fontWeight = '700';
+                var ib = ispBadge(r.isp, r.iface);
+                setText(e.ispName, ib.name);
+                if (e.ispName.title !== ib.full) e.ispName.title = ib.full;
+                e.monogramEl.style.background = ib.color;
+                e.monogramEl.textContent = ib.label;
+                var remoteSrc = ib.domain ? 'https://logos.hunter.io/' + ib.domain : '';
+                var logoSrc = ib.logo || remoteSrc;
+                if (logoSrc && e.logoImg.dataset.src !== logoSrc) {
+                    e.logoImg.dataset.src = logoSrc;
+                    e.logoImg.dataset.fallback = (ib.logo && remoteSrc) ? remoteSrc : '';
+                    e.logoImg.style.display = 'none';
+                    e.monogramEl.style.display = 'inline-flex';
+                    e.logoImg.src = logoSrc;
+                } else if (!logoSrc && e.logoImg.dataset.src) {
+                    e.logoImg.dataset.src = '';
+                    e.logoImg.style.display = 'none';
+                    e.monogramEl.style.display = 'inline-flex';
+                }
+                setText(e.ifaceAsn, r.iface.toUpperCase() + ' • AP Uplink');
 
                 var gwColor = '#4caf50';
                 if (r.gw_ms != null) {
@@ -2850,41 +2927,24 @@ return view.extend({
                     else if (r.gw_ms > 100) gwColor = '#ffb300';
                     else if (r.gw_ms > 50) gwColor = '#8bc34a';
                 }
-                setText(e.kGwPing.val, (r.status === 'up' && r.gw_ms != null) ? (r.gw_ms + ' ms') : '—');
-                e.kGwPing.val.style.color = gwColor;
-                e.kGwPing.val.style.fontWeight = '700';
+                e.gw.style.color = gwColor;
+                setText(e.gw, (r.status === 'up' && r.gw_ms != null) ? (r.gw_ms + ' ms') : '—');
 
-                setText(e.kUptime.val, r.uptime_pct.toFixed(2) + '%');
-                e.kUptime.val.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
-                e.kUptime.val.style.fontWeight = '700';
+                setText(e.uptime, r.uptime_pct.toFixed(2) + '%');
+                e.uptime.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
 
-                setText(e.kDowntime.val, r.downtime_pct.toFixed(2) + '%');
-                e.kDowntime.val.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
-                e.kDowntime.val.style.fontWeight = '700';
+                setText(e.downtime, r.downtime_pct.toFixed(2) + '%');
+                e.downtime.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
 
+                setText(e.rate, fmtSpeedDf(r.rx_bps || 0) + '\n' + fmtSpeedDf(r.tx_bps || 0));
+
+                setText(e.gwChip, 'GW ' + (r.gateway || '—'));
+                setText(e.mgmtChip, 'MGMT ' + (r.management_ip || '—'));
+                setText(e.vlanChip, 'VLAN ' + (r.vlan ? r.vlan.split(' ').join(', ') : 'None'));
                 // Informational only -- an internet outage beyond this
                 // router's own gateway is not something an AP can fix, so
-                // it stays uncolored rather than picking up a status hue --
-                // but still legible, not washed out.
-                setText(e.kInet.val, (r.inet_status === 'up' && r.inet_ms != null) ? (r.inet_ms + ' ms') : '—');
-                e.kInet.val.style.opacity = '0.8';
-
-                setText(e.kRate.val, fmtSpeedDf(r.rx_bps || 0) + ' / ' + fmtSpeedDf(r.tx_bps || 0));
-                e.kRate.val.style.fontWeight = '700';
-
-                // ib.color is a brand swatch meant for a badge background
-                // (see the WAN card's monogram), not body text -- Jio's navy
-                // #0F1C4D as a foreground on a dark card is nearly invisible.
-                // Left uncolored, .hw-kv-v already themes correctly either way.
-                var ib = ispBadge(r.isp, r.iface);
-                setText(e.kIsp.val, ib.asn ? (ib.name + '  ·  ' + ib.asn) : ib.name);
-                e.kIsp.val.style.fontWeight = '700';
-
-                // Empty on a plain untagged bridge, which is the normal case
-                // -- not an error, so no color and no "—" placeholder noise.
-                setText(e.kVlan.val, r.vlan ? r.vlan.split(' ').join(', ') : 'None');
-                e.kVlan.val.style.opacity = r.vlan ? '1' : '0.6';
-                e.kVlan.val.style.fontWeight = r.vlan ? '700' : '400';
+                // it stays a plain chip rather than picking up a status hue.
+                setText(e.inetChip, 'INET ' + ((r.inet_status === 'up' && r.inet_ms != null) ? (r.inet_ms + ' ms') : '—'));
 
                 var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
                 if (rsn) rsn = rsn.charAt(0).toUpperCase() + rsn.slice(1);
