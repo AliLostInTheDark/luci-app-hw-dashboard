@@ -2800,10 +2800,15 @@ return view.extend({
             if (!box) return;
             if (!self._apStatsCache) self._apStatsCache = {};
             syncRows(box, self._apStatsCache, list, function(r) { return r.iface; }, function() {
-                var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0;' });
+                // baseline, not center: LAN (1.05em) and the IP (0.8em
+                // monospace) sit visibly off from each other under
+                // height-based centering -- text of different sizes lines up
+                // by its actual baseline instead. The dot has no baseline of
+                // its own, so it keeps an explicit center alignment.
+                var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; align-self: center;' });
                 var ifnLabel = E('span', { style: 'font-weight: 700; font-size: 1.05em; letter-spacing: 0.4px;' });
-                var gwAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.6; font-family: monospace; margin-left: 8px;' });
-                var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px;' }, [statusDot, ifnLabel, gwAddr]);
+                var gwAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.65; font-family: monospace; margin-left: 8px;' });
+                var head = E('div', { style: 'display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;' }, [statusDot, ifnLabel, gwAddr]);
                 var kStatus = kvRow('Status'), kGwPing = kvRow('Gateway Ping'),
                     kUptime = kvRow('Uptime (24h)'), kDowntime = kvRow('Downtime (24h)'),
                     kInet = kvRow('Internet Ping'), kRate = kvRow('Throughput'), kIsp = kvRow('ISP');
@@ -2822,8 +2827,13 @@ return view.extend({
                 setText(e.ifnLabel, r.iface.toUpperCase());
                 setText(e.gwAddr, r.gateway || '—');
 
+                // .hw-kv-v carries no font-weight of its own (it's shared
+                // with the NAT Type card's plain rows) -- bold to match the
+                // WAN card's own colored stat blocks, which is the look this
+                // card is meant to sit alongside.
                 setText(e.kStatus.val, (r.status === 'up' ? 'ONLINE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN') + '  ·  ' + fmtDurationFull(r.since_change_s));
                 e.kStatus.val.style.color = statusColor;
+                e.kStatus.val.style.fontWeight = '700';
 
                 var gwColor = '#4caf50';
                 if (r.gw_ms != null) {
@@ -2834,25 +2844,33 @@ return view.extend({
                 }
                 setText(e.kGwPing.val, (r.status === 'up' && r.gw_ms != null) ? (r.gw_ms + ' ms') : '—');
                 e.kGwPing.val.style.color = gwColor;
+                e.kGwPing.val.style.fontWeight = '700';
 
                 setText(e.kUptime.val, r.uptime_pct.toFixed(2) + '%');
                 e.kUptime.val.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
+                e.kUptime.val.style.fontWeight = '700';
 
                 setText(e.kDowntime.val, r.downtime_pct.toFixed(2) + '%');
                 e.kDowntime.val.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
+                e.kDowntime.val.style.fontWeight = '700';
 
                 // Informational only -- an internet outage beyond this
                 // router's own gateway is not something an AP can fix, so
-                // it's shown de-emphasized rather than color-coded like a
-                // status signal.
+                // it stays uncolored rather than picking up a status hue --
+                // but still legible, not washed out.
                 setText(e.kInet.val, (r.inet_status === 'up' && r.inet_ms != null) ? (r.inet_ms + ' ms') : '—');
-                e.kInet.val.style.opacity = '0.6';
+                e.kInet.val.style.opacity = '0.8';
 
                 setText(e.kRate.val, fmtSpeedDf(r.rx_bps || 0) + ' / ' + fmtSpeedDf(r.tx_bps || 0));
+                e.kRate.val.style.fontWeight = '700';
 
+                // ib.color is a brand swatch meant for a badge background
+                // (see the WAN card's monogram), not body text -- Jio's navy
+                // #0F1C4D as a foreground on a dark card is nearly invisible.
+                // Left uncolored, .hw-kv-v already themes correctly either way.
                 var ib = ispBadge(r.isp, r.iface);
-                setText(e.kIsp.val, ib.name);
-                e.kIsp.val.style.color = ib.color;
+                setText(e.kIsp.val, ib.asn ? (ib.name + '  ·  ' + ib.asn) : ib.name);
+                e.kIsp.val.style.fontWeight = '700';
 
                 var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
                 if (rsn) rsn = rsn.charAt(0).toUpperCase() + rsn.slice(1);
