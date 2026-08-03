@@ -436,7 +436,7 @@ _nat_parse_out() {
 
 case "$1" in
 	list)
-		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { }, "wan_ips": { }, "nat_test": { "iface": "" } }'
+		echo '{ "info": { }, "ping": { }, "wan_quality": { }, "ap_stats": { }, "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "wifi_clients": { }, "wan_ips": { }, "nat_test": { "iface": "" } }'
 		;;
 	call)
 		case "$2" in
@@ -1645,6 +1645,135 @@ EOF
 				WM_APMODE=false
 				[ -f "$_wm_dir/.apmode" ] && WM_APMODE=true
 				echo "{\"wan_quality\":$WAN_QUALITY,\"ap_mode\":$WM_APMODE}"
+				;;
+			ap_stats)
+				# Standalone reader for the dedicated AP Mode card. Only ever
+				# does real work on an access point -- .apmode absent means
+				# an instant, cheap "nothing to report" for every ordinary
+				# router, which is the overwhelming majority of callers.
+				WM_APMODE=false
+				_wm_dir=/tmp/hwdash_wanmon
+				AP_STATS="null"
+				if [ -f "$_wm_dir/.apmode" ]; then
+					WM_APMODE=true
+					_wm_tr=""
+					[ -f "$_wm_dir/.tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_dir/.tracked" 2>/dev/null)
+					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
+					_ap_items=""
+					_ap_first=1
+					for _gw_ring in "$_wm_dir"/*.gwstats; do
+						[ -f "$_gw_ring" ] || continue
+						_ap_ifn=${_gw_ring##*/}; _ap_ifn=${_ap_ifn%.gwstats}
+						# Only an interface .gwstats' own collector still tracks --
+						# same membership guard wan_quality uses against .stats.
+						case " $_wm_tr " in *" $_ap_ifn "*) ;; *) continue ;; esac
+						_ap_family=4
+						case "$_ap_ifn" in *6) _ap_family=6 ;; esac
+
+						_ap_gw=""
+						[ -f "$_wm_dir/$_ap_ifn.gw" ] && read -r _ap_gw < "$_wm_dir/$_ap_ifn.gw" 2>/dev/null
+						[ "$_ap_gw" = "-" ] && _ap_gw=""
+
+						# Retry-once-on-partial-read, same reason as wan_quality:
+						# the collector rewrites this file in place every tick.
+						_ap_try=0
+						while :; do
+							_ap_total=0; _ap_success=0; _ap_status="unknown"
+							_ap_streak_start=$_wm_uptime_now
+							_ap_lastgood_ms="x"; _ap_consec_miss=0
+							if read -r _ap_total _ap_success _ap_status _ap_streak_start _ap_lastgood_ms _ap_consec_miss < "$_gw_ring" 2>/dev/null && \
+								[ -n "$_ap_total" ] && [ -n "$_ap_success" ] && [ -n "$_ap_status" ] && \
+								[ -n "$_ap_streak_start" ] && [ -n "$_ap_lastgood_ms" ] && [ -n "$_ap_consec_miss" ]; then
+								break
+							fi
+							_ap_try=$((_ap_try + 1))
+							[ "$_ap_try" -ge 2 ] && break
+						done
+						case "$_ap_total" in ''|*[!0-9]*) _ap_total=0 ;; esac
+						case "$_ap_success" in ''|*[!0-9]*) _ap_success=0 ;; esac
+						case "$_ap_streak_start" in ''|*[!0-9]*) _ap_streak_start=$_wm_uptime_now ;; esac
+						case "$_ap_status" in up|down) ;; *) _ap_status="unknown" ;; esac
+
+						_ap_day_total=0; _ap_day_success=0
+						read -r _ap_day_total _ap_day_success < "$_wm_dir/$_ap_ifn.gwdaystats" 2>/dev/null
+						case "$_ap_day_total" in ''|*[!0-9]*) _ap_day_total=0 ;; esac
+						case "$_ap_day_success" in ''|*[!0-9]*) _ap_day_success=0 ;; esac
+						[ "$_ap_day_total" -gt 0 ] && { _ap_total=$_ap_day_total; _ap_success=$_ap_day_success; }
+
+						_ap_uptime=0; _ap_downtime=0
+						if [ "${_ap_total:-0}" -gt 0 ]; then
+							_ap_u100=$(( _ap_success * 10000 / _ap_total ))
+							_ap_d100=$(( 10000 - _ap_u100 ))
+							_ap_uptime=$(printf '%d.%02d' $((_ap_u100 / 100)) $((_ap_u100 % 100)))
+							_ap_downtime=$(printf '%d.%02d' $((_ap_d100 / 100)) $((_ap_d100 % 100)))
+						fi
+
+						_ap_gwms=null
+						if [ "$_ap_status" = "up" ]; then
+							case "$_ap_lastgood_ms" in ''|x|*[!0-9]*) ;; *) _ap_gwms="$_ap_lastgood_ms" ;; esac
+						fi
+
+						_ap_streak=$((_wm_uptime_now - _ap_streak_start))
+						[ "$_ap_streak" -lt 0 ] && _ap_streak=0
+
+						# Why it's down: prefer the gateway-specific reason, fall
+						# back to the interface's own .reason (netifd withdrawing
+						# the route is the same root cause for both streams).
+						_ap_rcode=""; _ap_reason=""
+						if [ "$_ap_status" = "down" ]; then
+							if [ -f "$_wm_dir/$_ap_ifn.gwreason" ]; then
+								read -r _ap_rts _ap_rcode _ap_reason < "$_wm_dir/$_ap_ifn.gwreason" 2>/dev/null
+							elif [ -f "$_wm_dir/$_ap_ifn.reason" ]; then
+								read -r _ap_rts _ap_rcode _ap_reason < "$_wm_dir/$_ap_ifn.reason" 2>/dev/null
+							fi
+						fi
+						json_esc "$_ap_rcode"; _ap_rcodej=$JSV
+						json_esc "$_ap_reason"; _ap_reasonj=$JSV
+
+						# Secondary/informational internet-ping stream: the
+						# interface's ordinary .stats file, read but never used
+						# to drive status/uptime above.
+						_ap_istatus="unknown"; _ap_ims=null
+						if [ -f "$_wm_dir/$_ap_ifn.stats" ]; then
+							_ap_itot=0; _ap_isucc=0; _ap_ilg="x"; _ap_icm=0; _ap_iss=$_wm_uptime_now
+							read -r _ap_itot _ap_isucc _ap_istatus _ap_iss _ap_ilg _ap_icm < "$_wm_dir/$_ap_ifn.stats" 2>/dev/null
+							case "$_ap_istatus" in up|down) ;; *) _ap_istatus="unknown" ;; esac
+							if [ "$_ap_istatus" = "up" ]; then
+								case "$_ap_ilg" in ''|x|*[!0-9]*) ;; *) _ap_ims="$_ap_ilg" ;; esac
+							fi
+						fi
+
+						_ap_isp=""
+						if [ -f "$_wm_dir/$_ap_ifn.isp" ]; then
+							read -r _ap_isp < "$_wm_dir/$_ap_ifn.isp" 2>/dev/null
+						fi
+						if [ -z "$_ap_isp" ]; then
+							case "$_ap_ifn" in
+								*6) [ -f "$_wm_dir/${_ap_ifn%6}.isp" ] && read -r _ap_isp < "$_wm_dir/${_ap_ifn%6}.isp" 2>/dev/null ;;
+								*)  [ -f "$_wm_dir/${_ap_ifn}6.isp" ] && read -r _ap_isp < "$_wm_dir/${_ap_ifn}6.isp" 2>/dev/null ;;
+							esac
+						fi
+						json_esc "$_ap_isp"; _ap_ispj=$JSV
+						json_esc "$_ap_ifn"; _ap_ifnj=$JSV
+						json_esc "$_ap_gw"; _ap_gwj=$JSV
+
+						_ap_rxbps=0; _ap_txbps=0; _ap_rdev=""
+						if [ -f "$_wm_dir/$_ap_ifn.rate" ]; then
+							_ap_r1=""; _ap_r2=""; _ap_r3=""
+							read -r _ap_r1 _ap_r2 _ap_r3 _ap_rxbps _ap_txbps _ap_rdev < "$_wm_dir/$_ap_ifn.rate" 2>/dev/null
+						fi
+						case "$_ap_rxbps" in ''|*[!0-9]*) _ap_rxbps=0 ;; esac
+						case "$_ap_txbps" in ''|*[!0-9]*) _ap_txbps=0 ;; esac
+						case "$_ap_rdev" in -) _ap_rdev="" ;; esac
+						json_esc "$_ap_rdev"; _ap_rdevj=$JSV
+
+						[ $_ap_first -eq 0 ] && _ap_items="$_ap_items,"
+						_ap_items="$_ap_items{\"iface\":\"$_ap_ifnj\",\"family\":$_ap_family,\"gateway\":\"$_ap_gwj\",\"status\":\"$_ap_status\",\"uptime_pct\":$_ap_uptime,\"downtime_pct\":$_ap_downtime,\"gw_ms\":$_ap_gwms,\"since_change_s\":$_ap_streak,\"down_code\":\"$_ap_rcodej\",\"down_reason\":\"$_ap_reasonj\",\"inet_status\":\"$_ap_istatus\",\"inet_ms\":$_ap_ims,\"isp\":\"$_ap_ispj\",\"rx_bps\":$_ap_rxbps,\"tx_bps\":$_ap_txbps,\"rate_dev\":\"$_ap_rdevj\"}"
+						_ap_first=0
+					done
+					[ -n "$_ap_items" ] && AP_STATS="[$_ap_items]"
+				fi
+				echo "{\"ap_mode\":$WM_APMODE,\"ap_stats\":$AP_STATS}"
 				;;
 			info)
 				HWDASH_NOW=$(date +%s 2>/dev/null)

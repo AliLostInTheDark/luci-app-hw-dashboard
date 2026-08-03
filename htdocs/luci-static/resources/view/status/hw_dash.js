@@ -20,6 +20,11 @@ var callHwGetWanQuality = rpc.declare({
     method: 'wan_quality',
     expect: {}
 });
+var callHwApStats = rpc.declare({
+    object: 'luci.hwdash',
+    method: 'ap_stats',
+    expect: {}
+});
 var callHwGetConfig = rpc.declare({
     object: 'luci.hwdash',
     method: 'get_config',
@@ -925,12 +930,18 @@ return view.extend({
             pingGraphNode,
             E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
         ]);
-        // Retitled at runtime on an access point, where the tracked link is
-        // the LAN bridge rather than a WAN -- see wanQTick.
         var wanQualityTitle = E('h3', {}, 'WAN Uptime Status');
         var wanQualityCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             wanQualityTitle,
             E('div', { id: 'hw-wanq-list', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
+        ]);
+        // Hidden whenever this card is: on an access point there is no real
+        // WAN, so wan_quality's array is 100% the promoted LAN link and this
+        // card replaces it wholesale rather than the two coexisting -- see
+        // wanQTick and apStatsTick.
+        var apStatsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'AP Mode'),
+            E('div', { id: 'hw-ap-stats', style: 'width: 100%; display: flex; flex-direction: column; gap: 16px;' })
         ]);
         var wifiCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wi-Fi PHY & Spectrum'), E('div', { id: 'hw-wifi-radios', style: 'margin-top: 0; padding-top: 0; width: 100%;' })]);
         var wanStunNotice = E('div', { id: 'hw-wanip-notice', style: 'display: none; width: 100%; padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; font-size: 0.78em; line-height: 1.45;' });
@@ -979,6 +990,7 @@ return view.extend({
         container.appendChild(pcieCard);
         container.appendChild(pingCard);
         container.appendChild(wanQualityCard);
+        container.appendChild(apStatsCard);
         container.appendChild(wifiCard);
         container.appendChild(wifiStaCard);
         container.appendChild(wanIpCard);
@@ -1281,6 +1293,7 @@ return view.extend({
             pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
             wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
+            ap_stats: { nodes: [apStatsCard], label: 'AP Mode', show: null },
             wifi: { nodes: [wifiCard], label: 'Wi-Fi PHY & Spectrum', show: null },
             wifi_clients: { nodes: [wifiStaCard], label: 'Wi-Fi Clients', show: null },
             alerts: { nodes: [alertsCard], label: 'Alerts', show: null },
@@ -2774,6 +2787,89 @@ return view.extend({
                 self.staBusy = false;
                 renderWifiSta(res || {});
             }).catch(function() { self.staBusy = false; });
+        };
+        // A detail sheet, not a multi-column list like Wi-Fi Clients above --
+        // one kvRow per fact reads better than staCell's fixed-width columns
+        // for the handful of stats an access point's single uplink has.
+        var renderApStats = function(res) {
+            var list = (res && res.ap_stats) || [];
+            if (self.hiddenCards && self.hiddenCards.indexOf('ap_stats') !== -1) return;
+            apStatsCard.style.display = list.length ? 'flex' : 'none';
+            if (!list.length) return;
+            var box = document.getElementById('hw-ap-stats');
+            if (!box) return;
+            if (!self._apStatsCache) self._apStatsCache = {};
+            syncRows(box, self._apStatsCache, list, function(r) { return r.iface; }, function() {
+                var statusDot = E('span', { style: 'width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0;' });
+                var ifnLabel = E('span', { style: 'font-weight: 700; font-size: 1.05em; letter-spacing: 0.4px;' });
+                var gwAddr = E('span', { style: 'font-size: 0.8em; opacity: 0.6; font-family: monospace; margin-left: 8px;' });
+                var head = E('div', { style: 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px;' }, [statusDot, ifnLabel, gwAddr]);
+                var kStatus = kvRow('Status'), kGwPing = kvRow('Gateway Ping'),
+                    kUptime = kvRow('Uptime (24h)'), kDowntime = kvRow('Downtime (24h)'),
+                    kInet = kvRow('Internet Ping'), kRate = kvRow('Throughput'), kIsp = kvRow('ISP');
+                var reasonEl = E('div', { style: 'display: none; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); font-size: 0.78em; line-height: 1.4; word-break: break-word;' });
+                var el = E('div', { class: 'hw-sta-row', style: 'flex-direction: column; gap: 5px;' }, [
+                    head, kStatus.el, kGwPing.el, kUptime.el, kDowntime.el, kInet.el, kRate.el, kIsp.el, reasonEl
+                ]);
+                return {
+                    el: el, statusDot: statusDot, ifnLabel: ifnLabel, gwAddr: gwAddr,
+                    kStatus: kStatus, kGwPing: kGwPing, kUptime: kUptime, kDowntime: kDowntime,
+                    kInet: kInet, kRate: kRate, kIsp: kIsp, reasonEl: reasonEl
+                };
+            }, function(e, r) {
+                var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
+                e.statusDot.style.background = statusColor;
+                setText(e.ifnLabel, r.iface.toUpperCase());
+                setText(e.gwAddr, r.gateway || '—');
+
+                setText(e.kStatus.val, (r.status === 'up' ? 'ONLINE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN') + '  ·  ' + fmtDurationFull(r.since_change_s));
+                e.kStatus.val.style.color = statusColor;
+
+                var gwColor = '#4caf50';
+                if (r.gw_ms != null) {
+                    if (r.gw_ms > 250) gwColor = '#f44336';
+                    else if (r.gw_ms > 150) gwColor = '#ff9800';
+                    else if (r.gw_ms > 100) gwColor = '#ffb300';
+                    else if (r.gw_ms > 50) gwColor = '#8bc34a';
+                }
+                setText(e.kGwPing.val, (r.status === 'up' && r.gw_ms != null) ? (r.gw_ms + ' ms') : '—');
+                e.kGwPing.val.style.color = gwColor;
+
+                setText(e.kUptime.val, r.uptime_pct.toFixed(2) + '%');
+                e.kUptime.val.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
+
+                setText(e.kDowntime.val, r.downtime_pct.toFixed(2) + '%');
+                e.kDowntime.val.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
+
+                // Informational only -- an internet outage beyond this
+                // router's own gateway is not something an AP can fix, so
+                // it's shown de-emphasized rather than color-coded like a
+                // status signal.
+                setText(e.kInet.val, (r.inet_status === 'up' && r.inet_ms != null) ? (r.inet_ms + ' ms') : '—');
+                e.kInet.val.style.opacity = '0.6';
+
+                setText(e.kRate.val, fmtSpeedDf(r.rx_bps || 0) + ' / ' + fmtSpeedDf(r.tx_bps || 0));
+
+                var ib = ispBadge(r.isp, r.iface);
+                setText(e.kIsp.val, ib.name);
+                e.kIsp.val.style.color = ib.color;
+
+                var rsn = (r.status === 'down' && r.down_reason) ? r.down_reason : '';
+                if (rsn) rsn = rsn.charAt(0).toUpperCase() + rsn.slice(1);
+                if (e.reasonEl.textContent !== rsn) setText(e.reasonEl, rsn);
+                e.reasonEl.style.display = rsn ? '' : 'none';
+                e.reasonEl.style.color = rsn ? statusColor : '';
+            });
+        };
+        var apStatsTick = function() {
+            if (document.hidden) return Promise.resolve();
+            if (self.hiddenCards && self.hiddenCards.indexOf('ap_stats') !== -1) return Promise.resolve();
+            if (self.apStatsBusy) return Promise.resolve();
+            self.apStatsBusy = true;
+            return callHwApStats().then(function(res) {
+                self.apStatsBusy = false;
+                renderApStats(res || {});
+            }).catch(function() { self.apStatsBusy = false; });
         };
         var pingTick = function() {
             if (document.hidden) return Promise.resolve();
@@ -5020,18 +5116,22 @@ return view.extend({
                 // which interface netifd happened to bring up first.
                 var wqAll = (res && res.wan_quality) || null;
                 if (wqAll) wqAll = wqAll.slice().sort(function(a, b) { return byName(a.iface, b.iface); });
-                self.lastWq = wqAll || [];
-                // On an access point the tracked link is the LAN bridge, so the
-                // rows read LAN and the heading has to stop saying WAN.
-                setText(wanQualityTitle, (res && res.ap_mode) ? 'Uplink Uptime Status' : 'WAN Uptime Status');
+                var apMode = !!(res && res.ap_mode);
+                // On an access point the array is 100% the promoted LAN link,
+                // already covered by its own dedicated AP Mode card -- feeding
+                // it to Alerts too would raise a misattributed "WAN down" off
+                // what is now a secondary, informational ping stream.
+                self.lastWq = apMode ? [] : (wqAll || []);
+                if (apMode) apStatsTick(); else apStatsCard.style.display = 'none';
                 renderAlerts();
                 var wanQBox = document.getElementById('hw-wanq-list');
                 if (!wanQBox) return;
                 var isHidden = self.hiddenCards && self.hiddenCards.indexOf('wan_quality') !== -1;
                 var hasWanQ = wqAll && wqAll.length > 0;
-                wanQualityCard.style.display = hasWanQ && !isHidden ? 'flex' : 'none';
+                wanQualityCard.style.display = hasWanQ && !isHidden && !apMode ? 'flex' : 'none';
                 var wanIfaceSectionNode = wanIfaceSection;
-                if (wanIfaceSectionNode) wanIfaceSectionNode.style.display = hasWanQ ? '' : 'none';
+                if (wanIfaceSectionNode) wanIfaceSectionNode.style.display = hasWanQ && !apMode ? '' : 'none';
+                if (apMode) return;
                 if (!hasWanQ) return;
                 var wanqChecks = document.getElementById('hw-wanq-checks');
                 if (wanqChecks) {
@@ -5229,12 +5329,7 @@ return view.extend({
                     }
 
                     var ifnLabel = r.iface.toUpperCase();
-                    if (res && res.ap_mode) {
-                        entry.ifaceAsn.textContent = ifnLabel + ' • AP Uplink';
-                        setText(entry.ispName, 'Main Router Gateway');
-                        entry.monogramEl.style.background = '#009688';
-                        entry.monogramEl.textContent = 'AP';
-                    } else if (ib.asn) {
+                    if (ib.asn) {
                         entry.ifaceAsn.textContent = ifnLabel + ' • ' + ib.asn;
                     } else {
                         entry.ifaceAsn.textContent = ifnLabel + ' • WAN Link';

@@ -369,6 +369,7 @@ discover_ifaces() {
 	# keeps this from regressing into "LAN listed next to the real uplinks".
 	_lan_deferred=""
 	_lan_names=""
+	_lan_gws=""
 	for _ifn in $_names; do
 		_i=$_idx
 		_idx=$((_idx + 1))
@@ -421,14 +422,26 @@ discover_ifaces() {
 		# get_target_for_iface.
 		_tgt=$(get_target_for_iface "$_ifn" "$_family" 0)
 		_btgt=$(get_target_for_iface "$_ifn" "$_family" 1)
+		# Gateway is only meaningful for a LAN entry that might get promoted
+		# to AP-mode uplink below -- a real WAN gets the "-" sentinel so the
+		# field count stays fixed and process_iface can tell the two apart
+		# without a second lookup.
+		_gw="-"
+		[ "$_is_lan" = "1" ] && _gw=$(discover_gateway "$_family")
 		if [ "$_is_lan" = "1" ]; then
 			# Held back until the whole dump has been walked -- see above.
-			_lan_deferred="$_lan_deferred$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt
+			_lan_deferred="$_lan_deferred$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
 "
 			_lan_names="$_lan_names $_ifn"
+			# Kept separately from _lan_deferred (2 fields, neither ever
+			# empty) so writing the .gw file below doesn't need to re-parse
+			# the 7-field line and risk the same shift the comment above
+			# warns about.
+			_lan_gws="$_lan_gws$_ifn $_gw
+"
 			continue
 		fi
-		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt
+		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
 "
 		_active="${_active}${_ifn}
 "
@@ -446,6 +459,12 @@ discover_ifaces() {
 			_active="${_active}${_ap_ifn}
 "
 			ACTIVE_IFACES="$ACTIVE_IFACES $_ap_ifn"
+		done
+		# Resolved gateway, one line per promoted interface, for the rpc to
+		# read back -- .gwstats has no spare field for the address itself.
+		printf '%s' "$_lan_gws" | while read -r _pg_ifn _pg_gw; do
+			[ -z "$_pg_ifn" ] && continue
+			printf '%s\n' "$_pg_gw" > "$RINGDIR/${_pg_ifn}.gw"
 		done
 	fi
 	# Read by the RPC so the card can title itself honestly: on an access
@@ -741,6 +760,62 @@ get_target_for_iface() {
 	printf '%s' "$1"
 }
 
+# The upstream router's address on an access point -- the actual thing an AP
+# uplink should be measured against, not a public anchor three hops beyond
+# it. Resolved once per discovery (like get_target_for_iface above), never
+# per tick: this is the system's own default route, which does not change
+# without a network event that already forces rediscovery on its own (see
+# the hotplug trigger). $1 = family. Prints the gateway, or "-" if none.
+#
+# Ported from the Ping Latency rpc handler's identical gateway lookup, minus
+# its 60s TTL cache -- that exists to bound cost for a human-triggered rpc
+# call; discovery's own ~300s cadence already amortizes this one.
+discover_gateway() {
+	_dgw_family=$1
+	if [ "$_dgw_family" = "6" ]; then
+		_dgw=""
+		if command -v ip >/dev/null; then
+			while read -r _dgw_d _dgw_via _dgw_g _dgw_dev _dgw_if _; do
+				[ "$_dgw_d" = "default" ] || continue
+				[ "$_dgw_via" = "via" ] || continue
+				_dgw=$_dgw_g
+				case "$_dgw_g" in
+					fe80:*) [ "$_dgw_dev" = "dev" ] && _dgw="$_dgw_g%$_dgw_if" ;;
+				esac
+				break
+			done <<EOF6
+$(ip -6 route show default 2>/dev/null)
+EOF6
+		fi
+		if [ -z "$_dgw" ] && command -v jsonfilter >/dev/null; then
+			for _dgw_w6 in wan6 wan_6 wan; do
+				_dgw_ifn6=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+				_dgw_g=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+				case "$_dgw_g" in
+					'') ;;
+					fe80:*) _dgw="$_dgw_g${_dgw_ifn6:+%$_dgw_ifn6}"; break ;;
+					*:*) _dgw=$_dgw_g; break ;;
+				esac
+			done
+		fi
+		printf '%s' "${_dgw:--}"
+		return
+	fi
+	_dgw=""
+	while read -r _dgw_rif _dgw_rdst _dgw_rgw _dgw_rflg _; do
+		[ "$_dgw_rdst" = "00000000" ] || continue
+		case "$_dgw_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
+		[ "$_dgw_rgw" = "00000000" ] && continue
+		_dgw_b1=${_dgw_rgw#??????}
+		_dgw_b2=${_dgw_rgw#????}; _dgw_b2=${_dgw_b2%??}
+		_dgw_b3=${_dgw_rgw#??}; _dgw_b3=${_dgw_b3%????}
+		_dgw_b4=${_dgw_rgw%??????}
+		_dgw="$((0x$_dgw_b1)).$((0x$_dgw_b2)).$((0x$_dgw_b3)).$((0x$_dgw_b4))"
+		break
+	done < /proc/net/route
+	printf '%s' "${_dgw:--}"
+}
+
 ping_with_backup() {
 	_dev=$1; _srcip=$2; _mark=$3; _family=$4; _ifn=$5; _anchor=$6; _backup=$7
 	_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_anchor" "$_ifn")
@@ -959,11 +1034,11 @@ resolve_isp() {
 # removes its expired contribution first, so rpcd can read one tiny summary
 # file instead of aggregating a full day's worth of two-second samples.
 record_window_sample() {
-	_ifn=$1; _ok=$2
+	_ifn=$1; _ok=$2; _pfx=${3:-}
 	_bucket=$((_now / WINDOW_BUCKET_SECS))
 	_slot=$((_bucket % WINDOW_BUCKETS))
-	_bucket_file="$RINGDIR/${_ifn}.day.${_slot}"
-	_summary_file="$RINGDIR/${_ifn}.daystats"
+	_bucket_file="$RINGDIR/${_ifn}.${_pfx}day.${_slot}"
+	_summary_file="$RINGDIR/${_ifn}.${_pfx}daystats"
 	_old_bucket=""; _old_total=0; _old_success=0
 	[ -f "$_bucket_file" ] && read -r _old_bucket _old_total _old_success < "$_bucket_file" 2>/dev/null
 	_total=0; _success=0
@@ -1039,6 +1114,79 @@ sample_rate() {
 	printf '%s %s %s %s %s %s\n' "$_rt_rx" "$_rt_tx" "$_now" "$_rt_rbps" "$_rt_tbps" "$_rt_dev" > "$_rt_file"
 }
 
+# The AP-mode counterpart to the bookkeeping in process_iface below, run
+# against the actual upstream router instead of a public anchor -- this is
+# what drives the AP card's primary status/uptime, kept in its own .gwstats
+# ring entirely separate from .stats so the interface's ordinary
+# internet-ping history (still collected right after this returns) is
+# untouched and still means exactly what it always meant.
+#
+# Deliberately duplicates process_iface's miss-threshold/status-flip logic
+# rather than sharing it: that function is already tuned and shipped for
+# every real WAN, and a small duplication here is a smaller regression risk
+# than making it depend on a new shared code path.
+#
+# Uses do_ping directly, never ping_with_backup: a single upstream hop either
+# answers or is genuinely unreachable, and there is no meaningful "backup
+# gateway" to fail over to the way a public anchor legitimately has one.
+process_ap_gateway() {
+	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _gw=$6
+	_gwp_stats_file="$RINGDIR/${_ifn}.gwstats"
+	_gwp_ms=""
+	if [ -n "$_srcip" ]; then
+		_gwp_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_gw" "$_ifn")
+		case "$_gwp_out" in
+			*time=*)
+				_gwp_ms=${_gwp_out#*time=}
+				_gwp_ms=${_gwp_ms%% *}
+				_gwp_ms=${_gwp_ms%%.*}
+				case "$_gwp_ms" in ''|*[!0-9]*) _gwp_ms="" ;; esac
+				;;
+		esac
+	fi
+	_gwp_total=0; _gwp_success=0; _gwp_status="unknown"; _gwp_streak_start=$_now
+	_gwp_lastgood_ms="x"; _gwp_consec_miss=0
+	[ -f "$_gwp_stats_file" ] && read -r _gwp_total _gwp_success _gwp_status _gwp_streak_start _gwp_lastgood_ms _gwp_consec_miss < "$_gwp_stats_file" 2>/dev/null
+	case "$_gwp_lastgood_ms" in ''|*[!0-9]*) _gwp_lastgood_ms="x" ;; esac
+	case "$_gwp_consec_miss" in ''|*[!0-9]*) _gwp_consec_miss=0 ;; esac
+	_gwp_total=$((_gwp_total + 1))
+	if [ -n "$_gwp_ms" ]; then
+		_gwp_success=$((_gwp_success + 1))
+		_gwp_new_status="up"
+		_gwp_lastgood_ms="$_gwp_ms"
+		_gwp_consec_miss=0
+		_gwp_sample_up=1
+	else
+		_gwp_consec_miss=$((_gwp_consec_miss + 1))
+		if [ "$_gwp_consec_miss" -lt "$MISS_THRESHOLD" ] && [ "$_gwp_status" = "up" ]; then
+			_gwp_success=$((_gwp_success + 1))
+			_gwp_new_status="up"
+			_gwp_sample_up=1
+		else
+			_gwp_new_status="down"
+			_gwp_sample_up=0
+		fi
+	fi
+	if [ "$_gwp_new_status" != "$_gwp_status" ]; then
+		case "$_gwp_status" in
+			up|down) log_transition "$_ifn" "$_gwp_new_status" \
+				"Gateway ${_gw:-router} is not responding to ping from interface $_dev." ;;
+		esac
+		_gwp_status="$_gwp_new_status"
+		_gwp_streak_start=$_now
+	fi
+	printf '%d %d %s %d %s %d\n' \
+		"$_gwp_total" "$_gwp_success" "$_gwp_status" "$_gwp_streak_start" \
+		"$_gwp_lastgood_ms" "$_gwp_consec_miss" > "$_gwp_stats_file"
+	record_window_sample "$_ifn" "$_gwp_sample_up" "gw"
+	if [ "$_gwp_status" = "down" ]; then
+		printf '%d unreachable Gateway %s is not responding to ping from interface %s.\n' \
+			"$_now" "$_gw" "$_dev" > "$RINGDIR/${_ifn}.gwreason"
+	elif [ -f "$RINGDIR/${_ifn}.gwreason" ]; then
+		rm -f "$RINGDIR/${_ifn}.gwreason" 2>/dev/null
+	fi
+}
+
 # One interface's full per-tick update: ping, roll the availability stats,
 # resolve ISP. Run backgrounded (one subshell per interface, see
 # the main loop below) so a single slow or timed-out link can't stall
@@ -1058,7 +1206,8 @@ sample_rate() {
 #   MISS_THRESHOLD do we declare a real outage, count the tick as a failure
 #   for the availability window, and flip status to "down".
 process_iface() {
-	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7
+	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7; _gw=$8
+	[ -n "$_gw" ] && [ "$_gw" != "-" ] && process_ap_gateway "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_gw"
 	_stats_file="$RINGDIR/${_ifn}.stats"
 	if [ -z "$_srcip" ]; then
 		_out=""
@@ -1295,6 +1444,27 @@ process_down_iface() {
 		"$_total" "$_success" "$_status" "$_streak_start" \
 		"$_lastgood_ms" "$MISS_THRESHOLD" > "$_stats_file"
 	record_window_sample "$_ifn" 0
+	# Mirror the same forced-down accounting into .gwstats, but only for an
+	# interface that actually has one -- its presence is what tells us this
+	# is an AP-mode uplink under gateway tracking, no separate flag needed.
+	# No .gwreason write: when netifd itself withdrew the route, .reason
+	# above already carries the real diagnosis for both streams.
+	_gwd_stats_file="$RINGDIR/${_ifn}.gwstats"
+	if [ -f "$_gwd_stats_file" ]; then
+		_gwd_total=0; _gwd_success=0; _gwd_status="unknown"; _gwd_streak_start=$_now
+		_gwd_lastgood_ms="x"; _gwd_consec_miss=0
+		read -r _gwd_total _gwd_success _gwd_status _gwd_streak_start _gwd_lastgood_ms _gwd_consec_miss < "$_gwd_stats_file" 2>/dev/null
+		case "$_gwd_lastgood_ms" in ''|*[!0-9]*) _gwd_lastgood_ms="x" ;; esac
+		_gwd_total=$((_gwd_total + 1))
+		if [ "$_gwd_status" != "down" ]; then
+			_gwd_status="down"
+			_gwd_streak_start=$_now
+		fi
+		printf '%d %d %s %d %s %d\n' \
+			"$_gwd_total" "$_gwd_success" "$_gwd_status" "$_gwd_streak_start" \
+			"$_gwd_lastgood_ms" "$MISS_THRESHOLD" > "$_gwd_stats_file"
+		record_window_sample "$_ifn" 0 "gw"
+	fi
 	# Zero it explicitly: leaving the last rate in place showed traffic still
 	# flowing over a link that is down.
 	#
@@ -1398,9 +1568,9 @@ while :; do
 	fi
 	_pids=""
 	if [ -n "$IFACE_LIST" ]; then
-		while read -r _ifn _dev _srcip _mark _family _tgt _btgt; do
+		while read -r _ifn _dev _srcip _mark _family _tgt _btgt _gw; do
 			[ -z "$_ifn" ] && continue
-			process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_tgt" "$_btgt" &
+			process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_tgt" "$_btgt" "$_gw" &
 			_pids="$_pids $!"
 		done <<EOF
 $IFACE_LIST
