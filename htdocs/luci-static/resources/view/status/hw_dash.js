@@ -2340,13 +2340,30 @@ return view.extend({
                     E('span', { style: 'font-size:0.8em; font-weight:700; letter-spacing:0.4px; color:' + col + '; border:1px solid ' + col + '66; border-radius:10px; padding:2px 8px;' }, verdict.short)
                 ]),
                 E('div', { style: 'font-size:0.8em; opacity:0.85; line-height:1.4;' }, verdict.note),
-                E('div', { style: 'display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:4px 12px; font-size:0.78em; opacity:0.82; margin-top:3px; line-height:1.45;' }, [
-                    E('div', {}, 'Local Address: ' + (localIp || '—')),
-                    E('div', {}, 'Public Egress: ' + (pubIp || '—')),
-                    E('div', {}, 'Mapping: ' + mapping),
-                    E('div', {}, 'Filtering: ' + filtering),
-                    E('div', { style: 'grid-column:1 / -1; opacity:0.75;' }, 'Official STUN Server: ' + serverUsed)
-                ])
+                E('div', { style: 'display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:6px 12px; font-size:0.78em; margin-top:3px; line-height:1.45;' },
+                    // Label muted/uppercase, value bold and colored -- flat
+                    // gray text on every line was the "no colors" complaint.
+                    // Addresses get the same info-blue as everywhere else
+                    // technical readouts show up; mapping/filtering reuse the
+                    // verdict's own color since they're literally what it was
+                    // derived from, so the two read as connected at a glance.
+                    [
+                        ['Local Address', localIp || '—', sevColor('info')],
+                        ['Public Egress', pubIp || '—', sevColor('info')],
+                        ['Mapping', mapping, col],
+                        ['Filtering', filtering, col]
+                    ].map(function(row) {
+                        return E('div', { style: 'display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;' }, [
+                            E('span', { style: 'font-size:0.85em; font-weight:600; letter-spacing:0.3px; text-transform:uppercase; opacity:0.55; white-space:nowrap;' }, row[0]),
+                            E('span', { style: 'font-family:monospace; font-weight:700; color:' + row[2] + ';' }, row[1])
+                        ]);
+                    }).concat([
+                        E('div', { style: 'grid-column:1 / -1; opacity:0.6; display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;' }, [
+                            E('span', { style: 'font-size:0.85em; font-weight:600; letter-spacing:0.3px; text-transform:uppercase; white-space:nowrap;' }, 'Official STUN Server'),
+                            E('span', {}, serverUsed)
+                        ])
+                    ])
+                )
             ]);
         };
         var runNatTest = function(iface, wanClass) {
