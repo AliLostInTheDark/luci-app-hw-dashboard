@@ -2242,20 +2242,25 @@ return view.extend({
                 var onUp = function() {
                     ghost.remove();
                     n.classList.remove('hw-card-placeholder');
-                    handle.removeEventListener('pointermove', onMove);
-                    handle.removeEventListener('pointerup', onUp);
-                    handle.removeEventListener('pointercancel', onUp);
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                    document.removeEventListener('pointercancel', onUp);
                     self.cardOrder = currentDomOrder();
                     markDirty();
                 };
-                // Listening on the captured element itself, not document --
-                // the documented, canonical pattern for setPointerCapture:
-                // once captured, pointermove/pointerup are guaranteed to
-                // keep targeting this element even if the pointer strays
-                // outside its bounds mid-drag.
-                handle.addEventListener('pointermove', onMove);
-                handle.addEventListener('pointerup', onUp);
-                handle.addEventListener('pointercancel', onUp);
+                // On document, not the handle. Proven wrong the hard way:
+                // setPointerCapture threw "No active pointer with the given
+                // id" in a live test against this exact router, and without
+                // capture actually active, the browser routes pointermove/
+                // pointerup to whatever element is physically under the
+                // cursor -- which by definition is NOT the handle once the
+                // drag has moved anywhere -- so onUp never ran and the ghost
+                // was orphaned forever. document-level listening receives
+                // every pointer event regardless of capture, since
+                // everything bubbles up to document either way.
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp);
+                document.addEventListener('pointercancel', onUp);
             });
         });
 
