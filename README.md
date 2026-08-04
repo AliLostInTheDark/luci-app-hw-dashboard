@@ -34,7 +34,10 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 | **Topology** | PCIe, USB and Ethernet link state — negotiated speed/width shown next to the hardware's rated maximum |
 | **WiFi** | Per-band PHY details (channel, TX power, NSS, bitrate, noise floor) straight from `iwinfo`/`iw` |
 | **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess — plus a bufferbloat grade |
-| **WAN Quality** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3` or carrier-grade NAT |
+| **WAN Uptime Status** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3`, carrier-grade NAT, or 464xlat/NAT64 tunnels |
+| **NAT Type Test** | On-demand STUN probe (RFC 3489/5780) reporting NAT behavior, filtering, and public egress address — dual-stack, and isolated per protocol family |
+| **AP Mode** | Dedicated card for access points behind a router — pings the real upstream gateway rather than assuming a WAN that doesn't exist |
+| **Card Layout** | Drag to reorder any card, and cycle its width between Small / Half / Full — saved per device, works on touch as well as mouse |
 | **Wireless AQL** | Tune airtime queue limits for lower Wi‑Fi latency under load — with presets, save/revert/reset, and persistence across reboots |
 | **Privacy** | Every background DNS lookup this package makes is automatically kept off a filtering resolver (AdGuard Home, Pi‑hole, Unbound) |
 | **Settings** | Persist on-device via UCI — follow the router across browsers, sysupgrades and backups |
@@ -50,6 +53,8 @@ apk add --allow-untrusted luci-app-hw-dashboard-<version>.apk
 ```
 
 Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
+
+Optional packages unlock extra detail where present, and are omitted gracefully where not: `stuntman-client` (NAT Type Test), `lscpu` (CPU core names on ARM), `dmidecode` (memory speed), `smartmontools` (NVMe/SATA SMART health).
 
 > [!TIP]
 > Installing a newer release over an existing one clears all cached hardware data automatically, so stale readings from a previous version are never served.
@@ -133,9 +138,33 @@ Realtime graph of router-side latency to configurable targets (defaults: `dns.go
 </details>
 
 <details>
-<summary><b>WAN Quality</b></summary>
+<summary><b>WAN Uptime Status</b></summary>
 
-One row per internet-facing interface — logo, status, rolling 24-hour uptime/downtime, time in current state, and latency. Works with or without `mwan3`, and picks up any interface with a genuine default route automatically, including VPN tunnels used as a full exit path. The ISP is identified by ASN lookup against the link's real public egress IP (never assumed from the interface address, which can sit inside carrier-NAT space announced by a completely different operator), shown with its full registry name, and resolved for IPv6-only links too.
+One row per internet-facing interface — logo, status, rolling 24-hour uptime/downtime, time in current state, and latency. Works with or without `mwan3`, and picks up any interface with a genuine default route automatically, including VPN tunnels, PPPoE, and 464xlat/NAT64 CLAT interfaces used as a full exit path. The ISP is identified by ASN lookup against the link's real public egress IP (never assumed from the interface address, which can sit inside carrier-NAT space announced by a completely different operator), shown with its full registry name, and resolved for IPv6-only and translated links too. Every row also carries a plain-English reason the moment a link goes down, both here and in Alerts.
+</details>
+
+<details>
+<summary><b>NAT Type Test</b></summary>
+
+Each WAN row carries a **TEST NAT TYPE** button that runs an on-demand STUN probe (RFC 3489/5780/6598) against dual-stack Google/Xiaomi/Cloudflare servers, isolated strictly per address family so an IPv4 card never shows IPv6 data or vice versa. Reports NAT behavior (endpoint-independent, address/port-restricted, symmetric) and filtering separately, the public egress address as actually seen by the internet, and the private-to-public mapping. Works across DHCP, PPPoE, DHCPv6, 464xlat, 6rd, 6in4, 6to4, MAP-T, MAP-E, DS-Lite, WireGuard and other tunnel protocols, resolving the correct public IPv4 through the parent/alias interface where the tunneling protocol itself doesn't expose one directly. Requires the optional `stuntman-client` package; the card explains this rather than failing silently when it's absent. Results are cached in RAM (never written to flash) and served instantly on next view, with a fresh probe triggered in the background.
+</details>
+
+<details>
+<summary><b>AP Mode</b></summary>
+
+Appears in place of WAN Uptime Status when the router has no real WAN of its own — an access point bridged behind another router. Pings the actual upstream gateway (not a fabricated "WAN" that doesn't exist on this device) for uptime, downtime and latency, and shows the AP's own management IP and VLAN alongside it.
+</details>
+
+<details>
+<summary><b>Wi-Fi Clients</b></summary>
+
+One row per associated station — hostname/MAC, signal strength with a live bar, TX/RX rate, cumulative TX/RX data, connection duration, and PHY modulation detail (MCS, spatial streams, channel width) shown under the name it describes rather than as a stray line below the row.
+</details>
+
+<details>
+<summary><b>Alerts</b></summary>
+
+A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong.
 </details>
 
 <details>
@@ -162,13 +191,15 @@ One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, con
 
 ## Settings
 
-Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN Quality rows, edit ping targets, tune Wireless AQL, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), tune Wireless AQL, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+
+**⇕ Rearrange Cards** (next to the gear icon) turns on drag handles and a size-cycle button on every card — drag to reorder, or click the size button to step through Small → Half → Full width. Works with touch as well as mouse. Layout and sizing are saved the same way as every other setting.
 
 ## How it works
 
-**Backend** — a single POSIX shell `rpcd` call object (`luci.hwdash`) serving the full hardware readout in one round-trip, plus dedicated ping and settings methods. Slow-changing data (WiFi capabilities, SoC identity, storage layout) is cached with short-lived TTLs so the per-poll process count stays low on embedded hardware.
+**Backend** — a single POSIX shell `rpcd` call object (`luci.hwdash`) serving the full hardware readout in one round-trip, plus dedicated ping, NAT-type/STUN probe, and settings methods. Slow-changing data (WiFi capabilities, SoC identity, storage layout) is cached with short-lived TTLs so the per-poll process count stays low on embedded hardware. NAT-type results are cached in RAM tmpfs, never written to flash.
 
-**WAN Quality** runs as its own always-on `procd` service (`hwdash-wanmon`) independent of the on-demand `rpcd` calls, since per-link history needs to persist whether or not the dashboard is open. On `mwan3` routers it reuses `mwan3`'s own `LD_PRELOAD` fwmark wrapper to reach the correct WAN; on everything else it binds directly to the right device or address per protocol family.
+**WAN Uptime Status** runs as its own always-on `procd` service (`hwdash-wanmon`) independent of the on-demand `rpcd` calls, since per-link history needs to persist whether or not the dashboard is open. On `mwan3` routers it reuses `mwan3`'s own `LD_PRELOAD` fwmark wrapper to reach the correct WAN; on everything else it binds directly to the right device or address per protocol family.
 
 **DNS privacy** — every lookup this package makes (ASN queries, egress-IP lookups, reverse-DNS, custom domain targets) is automatically routed around the router's own resolver whenever that resolver is a filtering one (AdGuard Home, Pi-hole, Unbound), so a background dashboard never becomes noise in your DNS log. Plain `dnsmasq` is left alone, since it doesn't log per-query.
 
