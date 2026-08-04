@@ -620,6 +620,20 @@ case "$1" in
 						[ -n "$_nat_pstatus" ] && _nat_v4=$(printf '%s' "$_nat_pstatus" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
 					fi
 				fi
+				if [ -z "$_nat_v4" ]; then
+					# 464xlat has no parent/alias to inherit an IPv4 from --
+					# it's a standalone proto=464xlat interface, the clat
+					# device itself, not an alias riding another one -- so
+					# neither path above ever finds anything for it. Same
+					# fallback as wan_ips: netifd's 464xlat handler already
+					# publishes the address the kernel actually SNATs from
+					# (RFC 7335's default 192.0.0.1) as firewall data.
+					_nat_snat=""; _nat_snattgt=""
+					eval "$(printf '%s' "$_nat_status" | jsonfilter \
+						-e '_nat_snat=@.data.firewall[0].snat_ip' \
+						-e '_nat_snattgt=@.data.firewall[0].target' 2>/dev/null)" 2>/dev/null
+					[ "$_nat_snattgt" = "SNAT" ] && [ -n "$_nat_snat" ] && _nat_v4="$_nat_snat"
+				fi
 				[ -n "$_nat_dev" ] || _nat_dev=$_nat_v4
 				_nat_force=$(printf '%s' "$_nat_in" | jsonfilter -e '@.force' -e '@.params[0].force' -e '@.params[1]' 2>/dev/null | head -n 1)
 				mkdir -p "$NAT_CACHE_DIR" 2>/dev/null
@@ -775,6 +789,28 @@ EOF
 						esac
 					done
 					[ -z "$_wv6" ] && _wv6=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+
+					# 464xlat's clat device (proto=464xlat) reports neither an
+					# ipv4-address nor an ipv6-address at all over ubus -- its
+					# whole job is kernel-level NAT46 translation, not holding
+					# a routable address of its own -- so it fell through the
+					# empty-address filter below and never showed up here at
+					# all, on an interface that exists specifically to carry
+					# IPv4. netifd's own 464xlat handler already publishes the
+					# address the kernel actually SNATs from (RFC 7335's
+					# default 192.0.0.1) as firewall data for firewall3/4 to
+					# consume; reusing that as this interface's effective
+					# IPv4 identity is accurate, not a guess -- it is
+					# genuinely the address every outbound v4 packet here
+					# gets translated from before the kernel turns it into
+					# IPv6 for the wire.
+					if [ -z "$_wv4" ] && [ -z "$_wv6" ]; then
+						_wsnat=""; _wsnattgt=""
+						eval "$(printf '%s' "$_wst" | jsonfilter \
+							-e '_wsnat=@.data.firewall[0].snat_ip' \
+							-e '_wsnattgt=@.data.firewall[0].target' 2>/dev/null)" 2>/dev/null
+						[ "$_wsnattgt" = "SNAT" ] && [ -n "$_wsnat" ] && _wv4="$_wsnat"
+					fi
 
 					# Alias detection. uci device='@wan' means this interface is
 					# a second protocol riding the same link rather than a link
