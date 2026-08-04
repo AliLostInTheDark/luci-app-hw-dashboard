@@ -1202,7 +1202,9 @@ return view.extend({
             // Wish Network Technology" (CN) -- a substring match on
             // "wishnet" hits both and would badge a Chinese network with
             // an Indian ISP's logo.
-            'AS45775': { color: '#DA252B', label: 'WN', name: 'Wish Net', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' }
+            'AS45775': { color: '#DA252B', label: 'WN', name: 'Wish Net', domain: 'wishnet.in', logo: L.resource('hwdash-icons/wishnet.png') + '?v=2' },
+            'AS56209': { color: '#003979', label: 'AL', name: 'Airlink Teleservices', logo: L.resource('hwdash-icons/airlink.png') + '?v=1' },
+            'AS18207': { color: '#ed2d3e', label: 'YB', name: 'YOU Broadband', logo: L.resource('hwdash-icons/youbroadband.png') + '?v=1' }
         };
         var ispBadge = function(ispFull, ifaceName) {
             var raw = ispFull || '';
