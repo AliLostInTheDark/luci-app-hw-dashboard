@@ -393,18 +393,30 @@ discover_ifaces() {
 		[ "$_up" = "1" ] || [ "$_up" = "true" ] || continue
 		[ -z "$_dev" ] && continue
 
-		_routes=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].route[*].target" -e "@.interface[$_i].route[*].mask" 2>/dev/null)
+		# Exact-match against each route's own target, not a substring test
+		# against target+mask mashed together. That earlier version broke on
+		# a 464xlat "wan" interface: its route table legitimately carries
+		# both a /128 IPv6 host route to the PLAT endpoint (target something
+		# like "2409:4091:6002:1801::" -- a real address that just happens
+		# to end in "::" as the normal zero-compression abbreviation, not a
+		# default route at all) AND the actual IPv4 default route
+		# ("0.0.0.0"/0) that makes it what it is. A *::* substring match
+		# fires on that host route and calls the whole interface family=6,
+		# handing it an IPv6 ping target it can never answer even though the
+		# interface exists specifically to carry IPv4. Checking each target
+		# for being exactly "::" or exactly "0.0.0.0" -- never a substring
+		# of a longer address -- is immune to this: only a genuine default
+		# route target ever equals one of those two literal strings.
+		_targets=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].route[*].target" 2>/dev/null)
 		_family=""
-		# "::" checked first, unambiguously: an IPv6 default route's mask is
-		# prefix length 0, printed as a bare "0" -- which the v4 catch-all
-		# below also matches, so a v6-only interface (target "::" twice, no
-		# "0.0.0.0" anywhere) was losing to *0* on mask alone and coming out
-		# family=4. "::" never appears in a decimal address or mask, so it
-		# is a safe interface for v6 to win outright when present.
-		case "$_routes" in
-			*::*) _family="6" ;;
-			*0.0.0.0*|*0*) _family="4" ;;
-		esac
+		while IFS= read -r _rttgt; do
+			case "$_rttgt" in
+				::) _family="6"; break ;;
+				0.0.0.0) _family="4"; break ;;
+			esac
+		done <<EOF
+$_targets
+EOF
 		if [ "$_is_lan" = "1" ] && [ -n "$_ip4" ]; then
 			_family="4"
 		fi
@@ -434,6 +446,21 @@ discover_ifaces() {
 		# without a second lookup.
 		_gw="-"
 		[ "$_is_lan" = "1" ] && _gw=$(discover_gateway "$_family")
+		# A blank _srcip (no address on this family yet -- exactly the
+		# 464xlat clat case: the interface has neither an ipv4-address nor
+		# an ipv6-address over ubus at all) can't survive as a middle field
+		# in a space-joined line: read's default whitespace splitting
+		# collapses consecutive spaces into one separator, so an empty
+		# field contributes zero tokens rather than an empty one, and every
+		# field after it silently shifts left by one. That is not a
+		# hypothetical -- it produced a real, live failure: a 464xlat WAN's
+		# _mark, _family, _tgt and _btgt each took on the next field's
+		# value, so `ping -"$_family"` ran as `ping -1.1.1.1`, an invalid
+		# flag that fails silently (stderr is discarded) with zero probe
+		# output, forever "down". The "-" placeholder already used for
+		# _mark/_gw exists for exactly this reason; _srcip just never had
+		# one before now.
+		_srcip=${_srcip:--}
 		if [ "$_is_lan" = "1" ]; then
 			# Held back until the whole dump has been walked -- see above.
 			_lan_deferred="$_lan_deferred$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
@@ -1215,7 +1242,18 @@ process_iface() {
 	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7; _gw=$8
 	[ -n "$_gw" ] && [ "$_gw" != "-" ] && process_ap_gateway "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_gw"
 	_stats_file="$RINGDIR/${_ifn}.stats"
-	if [ -z "$_srcip" ]; then
+	# Gated on the device, not the source address. A 464xlat clat device
+	# (l3_device like "464-wan") reports neither an ipv4-address nor an
+	# ipv6-address over ubus at all -- its whole job is kernel-level NAT46
+	# translation, not holding a routable address of its own -- yet it is
+	# fully pingable via device binding (confirmed live: `ping -I 464-wan`
+	# works). do_ping/bind_arg already prefer binding by device over source
+	# address whenever a device is known, so gating on srcip here was
+	# refusing to even try on exactly the interfaces where device-binding is
+	# not just available but the *only* way in. _dev is unconditionally
+	# non-empty for anything that reached this point -- discover_ifaces
+	# already skips any interface without one.
+	if [ -z "$_dev" ]; then
 		_out=""
 	else
 		_out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn" "$_tgt" "$_btgt")
@@ -1576,6 +1614,10 @@ while :; do
 	if [ -n "$IFACE_LIST" ]; then
 		while read -r _ifn _dev _srcip _mark _family _tgt _btgt _gw; do
 			[ -z "$_ifn" ] && continue
+			# Undo the "-" placeholder discover_ifaces substitutes so this
+			# line can be space-joined without an empty field shifting
+			# every field after it -- see the comment there.
+			[ "$_srcip" = "-" ] && _srcip=""
 			process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_tgt" "$_btgt" "$_gw" &
 			_pids="$_pids $!"
 		done <<EOF
