@@ -2633,6 +2633,12 @@ return view.extend({
                 }
                 if (res.cached) {
                     content.appendChild(E('div', { style: 'font-size:0.75em; opacity:0.55; margin-top:4px;' }, '↻ Showing cached result · Background re-probe in progress'));
+                    // The re-probe writes its result to the NAT cache that
+                    // wan_ips reads. wan_ips polls every 30s, so without these
+                    // the chip would sit on the stale verdict for up to half a
+                    // minute after the probe already finished.
+                    setTimeout(wanIpTick, 3000);
+                    setTimeout(wanIpTick, 9000);
                 }
                 wanIpTick();
             }).catch(function(err) {
@@ -2645,8 +2651,13 @@ return view.extend({
         var wanIpTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('wan_ips') !== -1) return Promise.resolve();
-            if (self.wanIpBusy) return Promise.resolve();
+            // Stale-reset like infoBusy/pingBusy/wanQBusy: a plain boolean
+            // wedges this card forever if the promise ever settles outside
+            // the paths that clear it.
+            var _winow = Date.now();
+            if (self.wanIpBusy && (_winow - (self.wanIpBusyAt || 0)) < 10000) return Promise.resolve();
             self.wanIpBusy = true;
+            self.wanIpBusyAt = _winow;
             return callHwWanIps().then(function(res) {
                 self.wanIpBusy = false;
                 var wans = (res && res.wans) || [];
@@ -3026,8 +3037,10 @@ return view.extend({
         var wifiStaTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('wifi_clients') !== -1) return Promise.resolve();
-            if (self.staBusy) return Promise.resolve();
+            var _stnow = Date.now();
+            if (self.staBusy && (_stnow - (self.staBusyAt || 0)) < 10000) return Promise.resolve();
             self.staBusy = true;
+            self.staBusyAt = _stnow;
             return callHwWifiClients().then(function(res) {
                 self.staBusy = false;
                 renderWifiSta(res || {});
@@ -3201,8 +3214,10 @@ return view.extend({
         var apStatsTick = function() {
             if (document.hidden) return Promise.resolve();
             if (self.hiddenCards && self.hiddenCards.indexOf('ap_stats') !== -1) return Promise.resolve();
-            if (self.apStatsBusy) return Promise.resolve();
+            var _apnow = Date.now();
+            if (self.apStatsBusy && (_apnow - (self.apStatsBusyAt || 0)) < 10000) return Promise.resolve();
             self.apStatsBusy = true;
+            self.apStatsBusyAt = _apnow;
             return callHwApStats().then(function(res) {
                 self.apStatsBusy = false;
                 renderApStats(res || {});
@@ -3457,10 +3472,24 @@ return view.extend({
                 applyCardVisibility();
             }).catch(function() {}).then(function() { self.pingBusy = false; });
         };
+        // Every card info feeds. Unlike the other ticks, info is not one card's
+        // fetch -- it is the whole hardware readout -- so it may only be skipped
+        // when there is nothing left on screen that it produces. At 253ms of
+        // router CPU per call it is by far the most expensive tick to run for
+        // nobody's benefit.
+        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'offload',
+            'aql', 'irq', 'events', 'storage', 'ext', 'ports', 'pcie', 'thermal', 'wifi', 'alerts'];
         // Registered further down by the phased dispatcher, not here -- see the
         // comment next to it for why all three ticks share one poll entry.
         var infoTick = function() {
             if (document.hidden) return Promise.resolve();
+            if (self.hiddenCards && self.hiddenCards.length) {
+                var _anyVisible = false;
+                for (var _ic = 0; _ic < INFO_FED_CARDS.length; _ic++) {
+                    if (self.hiddenCards.indexOf(INFO_FED_CARDS[_ic]) === -1) { _anyVisible = true; break; }
+                }
+                if (!_anyVisible) return Promise.resolve();
+            }
             var _inow = Date.now();
             if (self.infoBusy && (_inow - (self.infoBusyAt || 0)) < 10000) return Promise.resolve();
             self.infoBusy = true;
@@ -5719,18 +5748,29 @@ return view.extend({
         //
         // Phasing them here means at most two ever coincide, never three, and
         // a page load spreads out as info now, wanQuality at +1s, ping at +2s.
-        // Cadence is unchanged: ping and wanQuality still every 2s, info still
-        // every 3s.
+        //
+        // The modulus of every offset tick is chosen to be a multiple of 3, so
+        // it can never land on an info tick. A mod-5 offset cannot do this: it
+        // walks all three residues mod 3, so it collided with info one time in
+        // three no matter which offset was picked -- which is how the "never
+        // three" claim above quietly stopped being true once these two were
+        // added. 6 and 30 are both multiples of 3, so t%6==1 and t%30==5 are
+        // permanently 1 and 2 mod 3 respectively. Two concurrent shell
+        // invocations is now a guarantee rather than an aspiration.
+        //
+        // wan_ips runs at 30s, not 5s: it reports interface addresses and NAT
+        // classification, which change on the order of hours, yet it costs
+        // 230ms of router CPU per call -- second only to info. A NAT test
+        // refreshes it directly on completion (see runNatTest), so the chip
+        // still updates instantly; nothing else it shows can go stale in 30s.
         var hwTick = 0;
         poll.add(function() {
             hwTick++;
             if (hwTick % 2 === 1) wanQTick();
             else pingTick();
             if (hwTick % 3 === 0) infoTick();
-            // Offset by 1 so the station dump never lands on the same tick as
-            // info, which is the expensive one.
-            if (hwTick % 5 === 1) wifiStaTick();
-            if (hwTick % 5 === 3) wanIpTick();
+            if (hwTick % 6 === 1) wifiStaTick();
+            if (hwTick % 30 === 5) wanIpTick();
             return Promise.resolve();
         }, 1);
         return container;
