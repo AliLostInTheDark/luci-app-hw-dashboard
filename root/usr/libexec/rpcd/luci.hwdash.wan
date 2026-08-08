@@ -1,0 +1,338 @@
+#!/bin/sh
+
+. /usr/share/hwdash/rpcd-common.sh
+
+
+case "$1" in
+	list)
+		echo '{ "wan_quality": { }, "ap_stats": { } }'
+		;;
+	call)
+		case "$2" in
+			wan_quality)
+				# Standalone, lightweight reader for the WAN Quality card --
+				# split out from `info` so the frontend can poll it every 2s
+				# (matching the Ping Latency card's cadence) without paying
+				# for the much heavier full info payload that often. Never
+				# pings anything itself: the hwdash-wanmon background
+				# collector does that on its own independent interval; this
+				# call just reads whatever it last wrote.
+				WAN_QUALITY="null"
+				_wm_dir=/tmp/hwdash_wanmon
+				if [ -d "$_wm_dir" ]; then
+					_wm_tracked="$_wm_dir/.tracked"
+					_wm_tr=""
+					[ -f "$_wm_tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_tracked" 2>/dev/null)
+					_wm_items=""
+					_wm_first=1
+					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
+					for _wm_ring in "$_wm_dir"/*.stats; do
+						[ -f "$_wm_ring" ] || continue
+						_wm_ifn=${_wm_ring##*/}; _wm_ifn=${_wm_ifn%.stats}
+						# Emit every interface the collector has seen, including one
+						# currently down. The collector adds explicit timeout samples
+						# while it is absent, so this is a real Offline state rather
+						# than a stale row left behind by a vanished interface.
+						case " $_wm_tr " in *" $_wm_ifn "*) ;; *) continue ;; esac
+						_wm_isp=""
+						if [ -f "$_wm_dir/$_wm_ifn.isp" ]; then
+							read -r _wm_isp < "$_wm_dir/$_wm_ifn.isp" 2>/dev/null
+						fi
+						if [ -z "$_wm_isp" ]; then
+							case "$_wm_ifn" in
+								*6) [ -f "$_wm_dir/${_wm_ifn%6}.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn%6}.isp" 2>/dev/null ;;
+								*)  [ -f "$_wm_dir/${_wm_ifn}6.isp" ] && read -r _wm_isp < "$_wm_dir/${_wm_ifn}6.isp" 2>/dev/null ;;
+							esac
+						fi
+						# Builtin read, not grep|awk. This runs once per tracked
+						# interface on a method the dashboard polls every two
+						# seconds, so the pipeline cost two forks per interface
+						# per poll -- around 14k forks an hour on a four-WAN
+						# router -- to search a file with one line per alias.
+						_wm_alias=""
+						if [ -f "$_wm_dir/.aliases" ]; then
+							while read -r _al_child _al_parent; do
+								if [ "$_al_child" = "$_wm_ifn" ]; then
+									_wm_alias=$_al_parent
+									break
+								fi
+							done < "$_wm_dir/.aliases"
+						fi
+						json_esc "$_wm_isp"; _wm_ispj=$JSV
+						json_esc "$_wm_ifn"; _wm_ifnj=$JSV
+						json_esc "$_wm_alias"; _wm_aliasj=$JSV
+
+						# The collector rewrites this file in place every two
+						# seconds. A reader can land on either its zero-length or
+						# partially written state, so only accept all six fields
+						# and retry once. This avoids UI flicker without adding a
+						# filesystem rename to every collector tick.
+						_wm_try=0
+						while :; do
+							_wm_total=0; _wm_success=0; _wm_status="unknown"
+							_wm_streak_start=$_wm_uptime_now
+							_wm_lastgood_ms="x"; _wm_consec_miss=0
+							if read -r _wm_total _wm_success _wm_status _wm_streak_start _wm_lastgood_ms _wm_consec_miss < "$_wm_ring" 2>/dev/null && \
+								[ -n "$_wm_total" ] && [ -n "$_wm_success" ] && [ -n "$_wm_status" ] && \
+								[ -n "$_wm_streak_start" ] && [ -n "$_wm_lastgood_ms" ] && [ -n "$_wm_consec_miss" ]; then
+								break
+							fi
+							_wm_try=$((_wm_try + 1))
+							[ "$_wm_try" -ge 2 ] && break
+						done
+						# Guard every field the arithmetic below consumes: a
+						# short read (truncated mid-line) assigns what it got
+						# and leaves the rest empty.
+						case "$_wm_total" in ''|*[!0-9]*) _wm_total=0 ;; esac
+						case "$_wm_success" in ''|*[!0-9]*) _wm_success=0 ;; esac
+						case "$_wm_streak_start" in ''|*[!0-9]*) _wm_streak_start=$_wm_uptime_now ;; esac
+						case "$_wm_status" in up|down) ;; *) _wm_status="unknown" ;; esac
+						# Availability uses the collector's rolling 24-hour bucket
+						# summary, not the daemon's all-time sample count.
+						_wm_day_total=0; _wm_day_success=0
+						read -r _wm_day_total _wm_day_success < "$_wm_dir/$_wm_ifn.daystats" 2>/dev/null
+						case "$_wm_day_total" in ''|*[!0-9]*) _wm_day_total=0 ;; esac
+						case "$_wm_day_success" in ''|*[!0-9]*) _wm_day_success=0 ;; esac
+						[ "$_wm_day_total" -gt 0 ] && { _wm_total=$_wm_day_total; _wm_success=$_wm_day_success; }
+
+						_wm_uptime=0
+						_wm_downtime=0
+						if [ "${_wm_total:-0}" -gt 0 ]; then
+							_u100=$(( _wm_success * 10000 / _wm_total ))
+							_d100=$(( 10000 - _u100 ))
+							_wm_uptime=$(printf '%d.%02d' $((_u100 / 100)) $((_u100 % 100)))
+							_wm_downtime=$(printf '%d.%02d' $((_d100 / 100)) $((_d100 % 100)))
+						fi
+						# cur_ms: show lastgood_ms when link is up (always a
+						# number with new format), null only when genuinely down.
+						_wm_cur=null
+						if [ "$_wm_status" = "up" ]; then
+							case "$_wm_lastgood_ms" in ''|x|*[!0-9]*) ;; *) _wm_cur="$_wm_lastgood_ms" ;; esac
+						fi
+
+						_wm_streak=$((_wm_uptime_now - _wm_streak_start))
+						[ "$_wm_streak" -lt 0 ] && _wm_streak=0
+
+						# Why it is down, as classified by the collector (which
+						# is where the netifd state is already being read). Only
+						# meaningful while down, so it is not carried otherwise
+						# -- a leftover explanation next to a healthy link would
+						# read as a fault.
+						_wm_rcode=""; _wm_reason=""
+						if [ "$_wm_status" = "down" ] && [ -f "$_wm_dir/$_wm_ifn.reason" ]; then
+							_wm_rts=""
+							read -r _wm_rts _wm_rcode _wm_reason < "$_wm_dir/$_wm_ifn.reason" 2>/dev/null
+						fi
+						json_esc "$_wm_rcode"; _wm_rcodej=$JSV
+						json_esc "$_wm_reason"; _wm_reasonj=$JSV
+
+						# Throughput, already worked out by the collector from
+						# the kernel's byte counters -- two builtin reads here,
+						# no fork, on a method polled every two seconds.
+						_wm_rxbps=0; _wm_txbps=0; _wm_rdev=""
+						if [ -f "$_wm_dir/$_wm_ifn.rate" ]; then
+							_wm_r1=""; _wm_r2=""; _wm_r3=""
+							read -r _wm_r1 _wm_r2 _wm_r3 _wm_rxbps _wm_txbps _wm_rdev < "$_wm_dir/$_wm_ifn.rate" 2>/dev/null
+						fi
+						case "$_wm_rxbps" in ''|*[!0-9]*) _wm_rxbps=0 ;; esac
+						case "$_wm_txbps" in ''|*[!0-9]*) _wm_txbps=0 ;; esac
+						case "$_wm_rdev" in -) _wm_rdev="" ;; esac
+						json_esc "$_wm_rdev"; _wm_rdevj=$JSV
+
+						[ $_wm_first -eq 0 ] && _wm_items="$_wm_items,"
+						_wm_items="$_wm_items{\"iface\":\"$_wm_ifnj\",\"alias_of\":\"$_wm_aliasj\",\"isp\":\"$_wm_ispj\",\"status\":\"$_wm_status\",\"uptime_pct\":$_wm_uptime,\"downtime_pct\":$_wm_downtime,\"cur_ms\":$_wm_cur,\"since_change_s\":$_wm_streak,\"down_code\":\"$_wm_rcodej\",\"down_reason\":\"$_wm_reasonj\",\"rx_bps\":$_wm_rxbps,\"tx_bps\":$_wm_txbps,\"rate_dev\":\"$_wm_rdevj\"}"
+						_wm_first=0
+					done
+					[ -n "$_wm_items" ] && WAN_QUALITY="[$_wm_items]"
+				fi
+				# Written by the collector when LAN is the only uplink. Lets the
+				# card retitle itself rather than labelling a LAN bridge "WAN".
+				WM_APMODE=false
+				[ -f "$_wm_dir/.apmode" ] && WM_APMODE=true
+				echo "{\"wan_quality\":$WAN_QUALITY,\"ap_mode\":$WM_APMODE}"
+				;;
+			ap_stats)
+				# Standalone reader for the dedicated AP Mode card. Only ever
+				# does real work on an access point -- .apmode absent means
+				# an instant, cheap "nothing to report" for every ordinary
+				# router, which is the overwhelming majority of callers.
+				WM_APMODE=false
+				_wm_dir=/tmp/hwdash_wanmon
+				AP_STATS="null"
+				if [ -f "$_wm_dir/.apmode" ]; then
+					WM_APMODE=true
+					_wm_tr=""
+					[ -f "$_wm_dir/.tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_dir/.tracked" 2>/dev/null)
+					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
+					# One uci snapshot for the whole call, not a lookup per
+					# interface -- same reasoning as wan_ips' own _wi_uci.
+					_ap_uci=$(uci -q show network 2>/dev/null)
+					_ap_items=""
+					_ap_first=1
+					for _gw_ring in "$_wm_dir"/*.gwstats; do
+						[ -f "$_gw_ring" ] || continue
+						_ap_ifn=${_gw_ring##*/}; _ap_ifn=${_ap_ifn%.gwstats}
+						# Only an interface .gwstats' own collector still tracks --
+						# same membership guard wan_quality uses against .stats.
+						case " $_wm_tr " in *" $_ap_ifn "*) ;; *) continue ;; esac
+						_ap_family=4
+						case "$_ap_ifn" in *6) _ap_family=6 ;; esac
+
+						_ap_gw=""
+						[ -f "$_wm_dir/$_ap_ifn.gw" ] && read -r _ap_gw < "$_wm_dir/$_ap_ifn.gw" 2>/dev/null
+						[ "$_ap_gw" = "-" ] && _ap_gw=""
+
+						# The AP's own address on this interface -- what an
+						# admin actually types into a browser to reach this
+						# box, as distinct from the upstream gateway above.
+						# One ubus call per AP interface (at most one or two
+						# per box), not worth caching -- ap_stats itself is
+						# already gated to do nothing at all off an AP.
+						_ap_st=$(ubus call network.interface."$_ap_ifn" status 2>/dev/null)
+						_ap_dev=""
+						_ap_mgmt=""
+						if [ -n "$_ap_st" ]; then
+							_ap_dev=$(printf '%s' "$_ap_st" | jsonfilter -e '@.l3_device' 2>/dev/null)
+							if [ "$_ap_family" = "6" ]; then
+								_ap_mgmt=$(printf '%s' "$_ap_st" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+							else
+								_ap_mgmt=$(printf '%s' "$_ap_st" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+							fi
+						fi
+
+						# VLAN(s) this interface's device carries. A plain
+						# "base.NNN" device name (the classic 8021q naming
+						# OpenWrt still uses for VLAN-tagged WAN links) is
+						# the cheap, common case; a vlan-filtering bridge
+						# (br-lan with a DSA switch) needs its bridge-vlan
+						# sections checked instead, since the bridge device
+						# itself never carries a VLAN suffix in its name.
+						_ap_vlans=""
+						case "$_ap_dev" in
+							*.[0-9]*)
+								_ap_vs=${_ap_dev##*.}
+								case "$_ap_vs" in ''|*[!0-9]*) ;; *) _ap_vlans=$_ap_vs ;; esac
+								;;
+						esac
+						if [ -n "$_ap_dev" ]; then
+							_bv_i=0
+							while [ "$_bv_i" -lt 64 ]; do
+								case "$_ap_uci" in
+									*"network.@bridge-vlan[$_bv_i].device='$_ap_dev'"*)
+										_bv_v=$(printf '%s\n' "$_ap_uci" | sed -n "s/^network\.@bridge-vlan\[$_bv_i\]\.vlan='\([^']*\)'\$/\1/p")
+										if [ -n "$_bv_v" ]; then
+											case " $_ap_vlans " in *" $_bv_v "*) ;; *) _ap_vlans="$_ap_vlans $_bv_v" ;; esac
+										fi
+										;;
+								esac
+								_bv_i=$((_bv_i + 1))
+							done
+						fi
+						_ap_vlans=${_ap_vlans# }
+						json_esc "$_ap_mgmt"; _ap_mgmtj=$JSV
+						json_esc "$_ap_vlans"; _ap_vlansj=$JSV
+
+						# Retry-once-on-partial-read, same reason as wan_quality:
+						# the collector rewrites this file in place every tick.
+						_ap_try=0
+						while :; do
+							_ap_total=0; _ap_success=0; _ap_status="unknown"
+							_ap_streak_start=$_wm_uptime_now
+							_ap_lastgood_ms="x"; _ap_consec_miss=0
+							if read -r _ap_total _ap_success _ap_status _ap_streak_start _ap_lastgood_ms _ap_consec_miss < "$_gw_ring" 2>/dev/null && \
+								[ -n "$_ap_total" ] && [ -n "$_ap_success" ] && [ -n "$_ap_status" ] && \
+								[ -n "$_ap_streak_start" ] && [ -n "$_ap_lastgood_ms" ] && [ -n "$_ap_consec_miss" ]; then
+								break
+							fi
+							_ap_try=$((_ap_try + 1))
+							[ "$_ap_try" -ge 2 ] && break
+						done
+						case "$_ap_total" in ''|*[!0-9]*) _ap_total=0 ;; esac
+						case "$_ap_success" in ''|*[!0-9]*) _ap_success=0 ;; esac
+						case "$_ap_streak_start" in ''|*[!0-9]*) _ap_streak_start=$_wm_uptime_now ;; esac
+						case "$_ap_status" in up|down) ;; *) _ap_status="unknown" ;; esac
+
+						_ap_day_total=0; _ap_day_success=0
+						read -r _ap_day_total _ap_day_success < "$_wm_dir/$_ap_ifn.gwdaystats" 2>/dev/null
+						case "$_ap_day_total" in ''|*[!0-9]*) _ap_day_total=0 ;; esac
+						case "$_ap_day_success" in ''|*[!0-9]*) _ap_day_success=0 ;; esac
+						[ "$_ap_day_total" -gt 0 ] && { _ap_total=$_ap_day_total; _ap_success=$_ap_day_success; }
+
+						_ap_uptime=0; _ap_downtime=0
+						if [ "${_ap_total:-0}" -gt 0 ]; then
+							_ap_u100=$(( _ap_success * 10000 / _ap_total ))
+							_ap_d100=$(( 10000 - _ap_u100 ))
+							_ap_uptime=$(printf '%d.%02d' $((_ap_u100 / 100)) $((_ap_u100 % 100)))
+							_ap_downtime=$(printf '%d.%02d' $((_ap_d100 / 100)) $((_ap_d100 % 100)))
+						fi
+
+						_ap_gwms=null
+						if [ "$_ap_status" = "up" ]; then
+							case "$_ap_lastgood_ms" in ''|x|*[!0-9]*) ;; *) _ap_gwms="$_ap_lastgood_ms" ;; esac
+						fi
+
+						_ap_streak=$((_wm_uptime_now - _ap_streak_start))
+						[ "$_ap_streak" -lt 0 ] && _ap_streak=0
+
+						# Why it's down: prefer the gateway-specific reason, fall
+						# back to the interface's own .reason (netifd withdrawing
+						# the route is the same root cause for both streams).
+						_ap_rcode=""; _ap_reason=""
+						if [ "$_ap_status" = "down" ]; then
+							if [ -f "$_wm_dir/$_ap_ifn.gwreason" ]; then
+								read -r _ap_rts _ap_rcode _ap_reason < "$_wm_dir/$_ap_ifn.gwreason" 2>/dev/null
+							elif [ -f "$_wm_dir/$_ap_ifn.reason" ]; then
+								read -r _ap_rts _ap_rcode _ap_reason < "$_wm_dir/$_ap_ifn.reason" 2>/dev/null
+							fi
+						fi
+						json_esc "$_ap_rcode"; _ap_rcodej=$JSV
+						json_esc "$_ap_reason"; _ap_reasonj=$JSV
+
+						# Secondary/informational internet-ping stream: the
+						# interface's ordinary .stats file, read but never used
+						# to drive status/uptime above.
+						_ap_istatus="unknown"; _ap_ims=null
+						if [ -f "$_wm_dir/$_ap_ifn.stats" ]; then
+							_ap_itot=0; _ap_isucc=0; _ap_ilg="x"; _ap_icm=0; _ap_iss=$_wm_uptime_now
+							read -r _ap_itot _ap_isucc _ap_istatus _ap_iss _ap_ilg _ap_icm < "$_wm_dir/$_ap_ifn.stats" 2>/dev/null
+							case "$_ap_istatus" in up|down) ;; *) _ap_istatus="unknown" ;; esac
+							if [ "$_ap_istatus" = "up" ]; then
+								case "$_ap_ilg" in ''|x|*[!0-9]*) ;; *) _ap_ims="$_ap_ilg" ;; esac
+							fi
+						fi
+
+						_ap_isp=""
+						if [ -f "$_wm_dir/$_ap_ifn.isp" ]; then
+							read -r _ap_isp < "$_wm_dir/$_ap_ifn.isp" 2>/dev/null
+						fi
+						if [ -z "$_ap_isp" ]; then
+							case "$_ap_ifn" in
+								*6) [ -f "$_wm_dir/${_ap_ifn%6}.isp" ] && read -r _ap_isp < "$_wm_dir/${_ap_ifn%6}.isp" 2>/dev/null ;;
+								*)  [ -f "$_wm_dir/${_ap_ifn}6.isp" ] && read -r _ap_isp < "$_wm_dir/${_ap_ifn}6.isp" 2>/dev/null ;;
+							esac
+						fi
+						json_esc "$_ap_isp"; _ap_ispj=$JSV
+						json_esc "$_ap_ifn"; _ap_ifnj=$JSV
+						json_esc "$_ap_gw"; _ap_gwj=$JSV
+
+						_ap_rxbps=0; _ap_txbps=0; _ap_rdev=""
+						if [ -f "$_wm_dir/$_ap_ifn.rate" ]; then
+							_ap_r1=""; _ap_r2=""; _ap_r3=""
+							read -r _ap_r1 _ap_r2 _ap_r3 _ap_rxbps _ap_txbps _ap_rdev < "$_wm_dir/$_ap_ifn.rate" 2>/dev/null
+						fi
+						case "$_ap_rxbps" in ''|*[!0-9]*) _ap_rxbps=0 ;; esac
+						case "$_ap_txbps" in ''|*[!0-9]*) _ap_txbps=0 ;; esac
+						case "$_ap_rdev" in -) _ap_rdev="" ;; esac
+						json_esc "$_ap_rdev"; _ap_rdevj=$JSV
+
+						[ $_ap_first -eq 0 ] && _ap_items="$_ap_items,"
+						_ap_items="$_ap_items{\"iface\":\"$_ap_ifnj\",\"family\":$_ap_family,\"gateway\":\"$_ap_gwj\",\"management_ip\":\"$_ap_mgmtj\",\"vlan\":\"$_ap_vlansj\",\"status\":\"$_ap_status\",\"uptime_pct\":$_ap_uptime,\"downtime_pct\":$_ap_downtime,\"gw_ms\":$_ap_gwms,\"since_change_s\":$_ap_streak,\"down_code\":\"$_ap_rcodej\",\"down_reason\":\"$_ap_reasonj\",\"inet_status\":\"$_ap_istatus\",\"inet_ms\":$_ap_ims,\"isp\":\"$_ap_ispj\",\"rx_bps\":$_ap_rxbps,\"tx_bps\":$_ap_txbps,\"rate_dev\":\"$_ap_rdevj\"}"
+						_ap_first=0
+					done
+					[ -n "$_ap_items" ] && AP_STATS="[$_ap_items]"
+				fi
+				echo "{\"ap_mode\":$WM_APMODE,\"ap_stats\":$AP_STATS}"
+				;;
+		esac
+		;;
+esac

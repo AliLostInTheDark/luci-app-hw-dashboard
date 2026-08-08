@@ -10,66 +10,66 @@ var callHwInfo = rpc.declare({
     expect: {}
 });
 var callHwPing = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ping',
     method: 'ping',
     params: ['targets'],
     expect: {}
 });
 var callHwGetWanQuality = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.wan',
     method: 'wan_quality',
     expect: {}
 });
 var callHwApStats = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.wan',
     method: 'ap_stats',
     expect: {}
 });
 var callHwGetConfig = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'get_config',
     expect: {}
 });
 var callHwSetConfig = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'set_config',
     params: ['config'],
     expect: {}
 });
 var callHwGetCpuPerf = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'get_cpu_perf',
     expect: {}
 });
 var callHwSetCpuPerf = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'set_cpu_perf',
     params: ['perf'],
     expect: {}
 });
 var callHwGetAql = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'get_aql',
     expect: {}
 });
 var callHwSetAql = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'set_aql',
     params: ['aql'],
     expect: {}
 });
 var callHwWifiClients = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.wifi',
     method: 'wifi_clients',
     expect: {}
 });
 var callHwWanIps = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.wanip',
     method: 'wan_ips',
     expect: {}
 });
 var callHwNatTest = rpc.declare({
-    object: 'luci.hwdash',
+    object: 'luci.hwdash.ctl',
     method: 'nat_test',
     params: ['iface', 'force'],
     timeout: 25000,
@@ -2556,7 +2556,7 @@ return view.extend({
             var localIp = result ? result.address : (wInfo ? (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—')) : '—');
             var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—');
             // The servers the backend actually queries, in the order it tries
-            // them (see _nat_probe in luci.hwdash).
+            // them (see _nat_probe in luci.hwdash.ctl).
             var serverUsed = 'stun.miwifi.com:3478, then stun.cloudflare.com:3478';
 
             return E('div', { style: 'padding:12px; border:1px solid ' + col + '55; border-radius:8px; background:' + col + '12; display:flex; flex-direction:column; gap:6px;' }, [
@@ -5474,7 +5474,7 @@ return view.extend({
         // both cards was ~10% just from the recurring rpcd invocations
         // alone, which is the actual "gets stuck"/CPU complaint -- 2s
         // roughly halves that while still feeling close to real-time. The
-        // rpcd side (luci.hwdash `wan_quality`) is a small, dedicated, pure file
+        // rpcd side (luci.hwdash.wan) is a small, dedicated, pure file
         // reader, so polling it 3x more often costs almost nothing extra.
         var wanQTick = function() {
             if (document.hidden) return Promise.resolve();

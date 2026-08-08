@@ -1,0 +1,222 @@
+#!/bin/sh
+
+. /usr/share/hwdash/rpcd-common.sh
+
+
+case "$1" in
+	list)
+		echo '{ "wan_ips": { } }'
+		;;
+	call)
+		case "$2" in
+			wan_ips)
+				# Addressing and connection type per WAN.
+				#
+				# The interesting part is not the address itself but what it
+				# implies. The collector already resolves the real egress
+				# address (it has to, to identify the ISP at all), so pairing
+				# it with the interface address classifies the link for free:
+				# equal means the link terminates on a public address,
+				# different means something NATs in front of it, and an
+				# interface address in 100.64.0.0/10 (RFC 6598) names that
+				# something as the carrier.
+				HWDASH_NOW=$(date +%s 2>/dev/null)
+				WI_DIR=/tmp/hwdash_wanmon
+				WI_STUN=0
+				_has_stunclient && WI_STUN=1
+				# Same persist_dir the collector and nat_test use, read once
+				# for the whole call. Lets a NAT result saved before a power
+				# outage reappear on this card on its own -- without this, it
+				# stayed invisible until the user re-ran the on-demand test,
+				# even though the answer was sitting right there on disk.
+				PERSISTDIR_V=""; PERSISTDIR=""
+				[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+				[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
+				WI_ITEMS=""; WI_FIRST=1
+				# Use the collector's tracked list rather than every interface
+				# ubus knows about: it is the same set the WAN Uptime card
+				# shows, so the two cards can never disagree about what counts
+				# as a WAN, and it keeps modem-management interfaces (a static
+				# RFC1918 address to an ONT) out of a card about internet
+				# connections.
+				_wi_ifaces=""
+				[ -f "$WI_DIR/.tracked" ] && _wi_ifaces=$(tr '\n' ' ' < "$WI_DIR/.tracked" 2>/dev/null)
+				# One uci snapshot for the whole call, not a lookup per
+				# interface. It is needed because netifd resolves an alias away
+				# before status reports it: wan6 configured as device '@wan'
+				# comes back with device 'pppoe-wan', identical to a plain
+				# interface sitting on that device, so the "@" only survives in
+				# uci and nowhere else.
+				_wi_uci=$(uci -q show network 2>/dev/null)
+				for _wif in $_wi_ifaces; do
+					# LAN/LAN6 reach .tracked only on an access point, where
+					# they are the promoted uplink -- but NAT testing has
+					# nothing to test there (no WAN, no NAT), and it now has
+					# its own dedicated AP Mode card. Filtered out by name
+					# here rather than relying on .tracked's own membership.
+					case "$_wif" in loopback|lan|lan6) continue ;; esac
+					_wst=$(ubus call "network.interface.$_wif" status 2>/dev/null)
+					[ -z "$_wst" ] && continue
+					# Only interfaces that actually carry a default route are
+					# WANs; without this every bridge and VLAN shows up.
+					_wup=""; _wproto=""; _wdev=""; _wpar=""; _wv4=""; _wm4=""; _wv6=""
+					eval "$(printf '%s' "$_wst" | jsonfilter \
+						-e '_wup=@.up' -e '_wproto=@.proto' -e '_wdev=@.l3_device' \
+						-e '_wpar=@.device' \
+						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' 2>/dev/null)" 2>/dev/null
+
+					_wv6_all=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null)
+					for _a6 in $_wv6_all; do
+						case "$_a6" in
+							fe80:*|FE80:*|fc*|FC*|fd*|FD*|127.*|::1) ;;
+							*:*) _wv6="$_a6"; break ;;
+						esac
+					done
+					[ -z "$_wv6" ] && _wv6=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+
+					# 464xlat's clat device (proto=464xlat) reports neither an
+					# ipv4-address nor an ipv6-address at all over ubus -- its
+					# whole job is kernel-level NAT46 translation, not holding
+					# a routable address of its own -- so it fell through the
+					# empty-address filter below and never showed up here at
+					# all, on an interface that exists specifically to carry
+					# IPv4. netifd's own 464xlat handler already publishes the
+					# address the kernel actually SNATs from (RFC 7335's
+					# default 192.0.0.1) as firewall data for firewall3/4 to
+					# consume; reusing that as this interface's effective
+					# IPv4 identity is accurate, not a guess -- it is
+					# genuinely the address every outbound v4 packet here
+					# gets translated from before the kernel turns it into
+					# IPv6 for the wire.
+					if [ -z "$_wv4" ] && [ -z "$_wv6" ]; then
+						_wsnat=""; _wsnattgt=""
+						eval "$(printf '%s' "$_wst" | jsonfilter \
+							-e '_wsnat=@.data.firewall[0].snat_ip' \
+							-e '_wsnattgt=@.data.firewall[0].target' 2>/dev/null)" 2>/dev/null
+						[ "$_wsnattgt" = "SNAT" ] && [ -n "$_wsnat" ] && _wv4="$_wsnat"
+					fi
+
+					# Alias detection. uci device='@wan' means this interface is
+					# a second protocol riding the same link rather than a link
+					# of its own -- which is why a v6 sibling shows the same
+					# egress and the same outage as its parent.
+					_walias=""
+					case "$_wi_uci" in
+						*"network.$_wif.device='@"*)
+							_walias=${_wi_uci#*network.$_wif.device=\'@}
+							_walias=${_walias%%\'*}
+							;;
+					esac
+					[ -z "$_wv4" ] && [ -z "$_wv6" ] && continue
+
+					# Delegated IPv6 Prefix detection (PR #24469 multi-prefix support & strict alias isolation)
+					_wpfx=""
+					_wpfxlen=""
+					_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
+					_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
+					if [ -z "$_p_addrs" ]; then
+						_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
+						_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
+					fi
+					# 1. If empty and this interface is an alias child (device='@parent'), check parent status
+					if [ -z "$_p_addrs" ] && [ -n "$_walias" ]; then
+						_ast=$(ubus call "network.interface.$_walias" status 2>/dev/null)
+						if [ -n "$_ast" ]; then
+							_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
+							_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
+							if [ -z "$_p_addrs" ]; then
+								_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
+								_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
+							fi
+						fi
+					fi
+					if [ -n "$_p_addrs" ]; then
+						set -- $_p_addrs
+						_wpfx=$1
+						set -- $_p_masks
+						_wpfxlen=$1
+					fi
+
+					_wpub=""
+					[ -f "$WI_DIR/$_wif.pubip" ] && read -r _wpub < "$WI_DIR/$_wif.pubip" 2>/dev/null
+					# Full NAT behaviour is optional and on-demand, and IPv4 only --
+					# see the matching comment in the nat_test handler for why.
+					# Reuse a recent result only while it belongs to the current
+					# WAN address.
+					_wi_n4s=""; _wi_n4m=""; _wi_n4f=""; _wi_n4a=0
+					_wi_nat_cache="$NAT_CACHE_DIR/nat.$_wif"
+					# Cheap on every call once seeded: after the first poll of
+					# a fresh boot this file exists (or persist_dir has
+					# nothing for this WAN either), and every call after that
+					# is a single [ ! -f ] that short-circuits immediately.
+					if [ "$WI_STUN" = "1" ] && [ ! -f "$_wi_nat_cache" ] && [ -n "$PERSISTDIR" ] \
+						&& [ -f "$PERSISTDIR/nat/$_wif" ] && _persist_mount_ok "$PERSISTDIR"; then
+						cat "$PERSISTDIR/nat/$_wif" > "$_wi_nat_cache" 2>/dev/null
+					fi
+					if [ "$WI_STUN" = "1" ] && [ -f "$_wi_nat_cache" ]; then
+						# A stale "6 ..." line from before this was IPv4-only
+						# simply never matches the case below and ages out of
+						# the cache file on its own next time nat_test writes it.
+						while read -r _wi_nf _wi_na _wi_ns _wi_nm _wi_nfi _wi_nt _wi_np _wextra; do
+							case "$_wi_nt" in ''|*[!0-9]*) continue ;; esac
+							case "$_wi_nf:$_wi_na" in
+								4:"$_wv4") [ -n "$_wv4" ] && { _wi_n4s=$_wi_ns; _wi_n4m=$_wi_nm; _wi_n4f=$_wi_nfi; _wi_n4a=$((HWDASH_NOW - _wi_nt)); } ;;
+							esac
+						done < "$_wi_nat_cache"
+					fi
+
+					# Classify the IPv4 side.
+					_wclass="unknown"
+					case "$_wv4" in
+						'') _wclass="none" ;;
+						0.*) _wclass="thisnet" ;;
+						10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) _wclass="private" ;;
+						127.*) _wclass="loopback" ;;
+						169.254.*) _wclass="linklocal" ;;
+						192.0.0.*) _wclass="protocol" ;;
+						192.0.2.*|198.51.100.*|203.0.113.*) _wclass="testnet" ;;
+						198.1[89].*) _wclass="benchmark" ;;
+						100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) _wclass="cgnat" ;;
+						22[4-9].*|23[0-9].*) _wclass="multicast" ;;
+						24[0-9].*|25[0-5].*) _wclass="reserved" ;;
+						*) _wclass="public" ;;
+					esac
+					# A public-looking interface address that still differs from
+					# the observed egress means another NAT in the path.
+					if [ "$_wclass" = "public" ] && [ -n "$_wpub" ] && [ "$_wpub" != "$_wv4" ]; then
+						_wclass="natted"
+					fi
+					if [ "$_wclass" = "none" ] && [ -n "$_wv6" ]; then
+						_wclass="v6only"
+					fi
+					_wmon_st="up"
+					[ -f "$WI_DIR/$_wif.stats" ] && read -r _ _ _wmon_st _ < "$WI_DIR/$_wif.stats" 2>/dev/null
+					if [ "$_wmon_st" = "down" ]; then
+						if [ -z "$_wv4" ] && [ -n "$_wv6" ]; then
+							_wclass="v6only"
+						else
+							_wclass="unreachable"
+						fi
+					fi
+
+					# Static vs dynamic is a property of how the address was
+					# obtained, which only the protocol knows.
+					case "$_wproto" in
+						static) _wassign="static" ;;
+						dhcp|dhcpv6|pppoe|pppoa|ppp|l2tp|pptp|wwan|qmi|ncm|mbim) _wassign="dynamic" ;;
+						'') _wassign="unknown" ;;
+						*) _wassign="dynamic" ;;
+					esac
+
+					json_esc "$_wproto"; _wprotoj=$JSV
+					[ $WI_FIRST -eq 0 ] && WI_ITEMS="$WI_ITEMS,"
+					json_esc "$_wpar"; _wparj=$JSV
+					json_esc "$_walias"; _waliasj=$JSV
+					WI_ITEMS="$WI_ITEMS{\"iface\":\"$_wif\",\"device\":\"$_wdev\",\"parent\":\"$_wparj\",\"alias_of\":\"$_waliasj\",\"proto\":\"$_wprotoj\",\"up\":${_wup:-false},\"class\":\"$_wclass\",\"assign\":\"$_wassign\",\"ip4\":\"$_wv4\",\"mask4\":\"${_wm4:-0}\",\"pub4\":\"$_wpub\",\"ip6\":\"$_wv6\",\"prefix6\":\"$_wpfx\",\"prefix6_len\":\"${_wpfxlen:-0}\",\"nat4_state\":\"$_wi_n4s\",\"nat4_mapping\":\"$_wi_n4m\",\"nat4_filtering\":\"$_wi_n4f\",\"nat4_age\":$_wi_n4a}"
+					WI_FIRST=0
+				done
+				echo "{\"stunclient\":$WI_STUN,\"wans\":[$WI_ITEMS]}"
+				;;
+		esac
+		;;
+esac

@@ -197,7 +197,7 @@ Open the gear icon (top right) to show/hide individual cards, show/hide individu
 
 ## How it works
 
-**Backend** — a single POSIX shell `rpcd` call object (`luci.hwdash`) serving the full hardware readout in one round-trip, plus dedicated ping, NAT-type/STUN probe, and settings methods. Slow-changing data (WiFi capabilities, SoC identity, storage layout) is cached with short-lived TTLs so the per-poll process count stays low on embedded hardware. NAT-type results are cached in RAM tmpfs, never written to flash.
+**Backend** — POSIX shell `rpcd` call objects: `luci.hwdash` serves the full hardware readout in one round-trip, alongside `luci.hwdash.ping`, `.wan`, `.wanip`, `.wifi` and `.ctl`. They are separate objects because rpcd's shell plugin re-execs and re-parses the whole script on *every* call, so one monolithic object made each of the ~46 calls per 30s pay to parse all 4161 lines — splitting them means a call parses only what it needs. Shared helpers live in `/usr/share/hwdash/`. Slow-changing data (WiFi capabilities, SoC identity, storage layout) is cached with short-lived TTLs so the per-poll process count stays low on embedded hardware. NAT-type results are cached in RAM tmpfs, never written to flash.
 
 **WAN Uptime Status** runs as its own always-on `procd` service (`hwdash-wanmon`) independent of the on-demand `rpcd` calls, since per-link history needs to persist whether or not the dashboard is open. On `mwan3` routers it reuses `mwan3`'s own `LD_PRELOAD` fwmark wrapper to reach the correct WAN; on everything else it binds directly to the right device or address per protocol family.
 
