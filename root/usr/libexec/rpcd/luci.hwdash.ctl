@@ -89,8 +89,8 @@ _sync_persist_dir() {
 # A full RFC 5780 probe can take several seconds and sends packets to alternate
 # STUN server addresses, so it must never run as part of the dashboard poll.
 # It is available only when the optional stuntman-client package is installed.
-NAT_STUN_SERVER=stun.miwifi.com
-NAT_STUN_PORT=3478
+# The server list is not configurable here -- _nat_probe carries its own,
+# per family, because the two families need different ones.
 
 _nat_code() {
 	case "$1" in
@@ -118,11 +118,6 @@ _nat_level() {
 		address_dependent|address_port_dependent) printf '%s' strict ;;
 		*) printf '%s' unknown ;;
 	esac
-}
-
-_nat_run() {
-	_nat_out=$1; shift
-	"$@" > "$_nat_out" 2>&1
 }
 
 _get_stunclient() {
@@ -410,13 +405,24 @@ case "$1" in
 				# A NAT type test is explicit, user-triggered probing -- not
 				# something that silently redetects itself the way a DNS or
 				# ethtool cache does -- so the result is worth carrying across
-				# a reboot if the user has opted into persist_dir. Seeded only
-				# when tmpfs has nothing yet (a fresh boot); every call after
-				# that hits the cheap [ -f ] check and moves on.
+				# a reboot if the user has opted into persist_dir.
+				#
+				# PERSISTDIR is resolved unconditionally, because it gates the
+				# persist WRITES further down as well as the seed read here.
+				# It used to be resolved inside the "tmpfs is empty" branch
+				# below, which meant it was only ever set on the one call per
+				# boot that found no cache file -- so on every other call it
+				# was empty and both `[ -n "$PERSISTDIR" ]` write guards
+				# silently did nothing. A probe result therefore reached
+				# persistent storage only if it happened to run on that first
+				# post-boot call, and a re-probe (address changed, or a forced
+				# retest) never updated the stored copy at all.
+				PERSISTDIR_V=""; PERSISTDIR=""
+				[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
+				[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
+				# Seeded only when tmpfs has nothing yet (a fresh boot); every
+				# call after that hits the cheap [ -s ] check and moves on.
 				if [ ! -s "$_nat_cache" ]; then
-					PERSISTDIR_V=""; PERSISTDIR=""
-					[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
-					[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
 					if [ -n "$PERSISTDIR" ] && [ -f "$PERSISTDIR/nat/$_nat_if" ] && _persist_mount_ok "$PERSISTDIR"; then
 						cat "$PERSISTDIR/nat/$_nat_if" > "$_nat_cache" 2>/dev/null
 					fi
