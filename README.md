@@ -46,11 +46,31 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 
 ### Pre-built package (recommended)
 
-Grab the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page:
+**First, install the signing key — once per router.** Every release is signed, and with the key in place `apk` accepts the package normally: no `--allow-untrusted`, and uploading the file on LuCI's **System → Software** page just works.
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-<version>.apk
+wget -O /etc/apk/keys/luci-app-hw-dashboard.pem https://raw.githubusercontent.com/AliLostInTheDark/luci-app-hw-dashboard/main/keys/luci-app-hw-dashboard.pem
 ```
+
+Then grab the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it — by dropping it on the Software page, or:
+
+```sh
+apk add ./luci-app-hw-dashboard-<version>.apk
+```
+
+<details>
+<summary>What that key is, and what trusting it means</summary>
+
+`keys/luci-app-hw-dashboard.pem` is the **public** half of the EC keypair this project's firmware build signs with; the private half never leaves the build machine. Verify it before trusting it if you like — its SHA-256 is `09069032 22035518 95a5ab10 96e7abee 6a005144 8c423fd4 8315d15f e17b0e0c`.
+
+Installing it into `/etc/apk/keys/` tells `apk` to accept any package signed by that key, which is the same trust model every OpenWrt package feed uses. It does not grant access to anything else, and removing the file revokes it.
+
+Signature checking is genuinely enforced, not decorative: a package with a single flipped byte is rejected with `file integrity error` rather than installed.
+
+If you flashed a firmware image built from the same tree, you already have this key as `/etc/apk/keys/public-key.pem` and can skip this step — a second copy under a different filename is harmless, since `apk` matches on the signature rather than the filename.
+
+Still want the old behaviour? `apk add --allow-untrusted ./luci-app-hw-dashboard-<version>.apk` continues to work and skips verification entirely.
+</details>
 
 Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
 
