@@ -703,6 +703,15 @@ TARGETS6_LIST="$DEFAULT_TARGETS6"
 # so a settings change can be detected without re-resolving every tick.
 RAW_TGT4=""
 RAW_TGT6=""
+# Uptime second at which an incomplete resolution should be retried, empty when
+# the lists above are fully resolved. procd starts this collector as soon as
+# the network is configured, which is long before it is usable -- measured on
+# one router, this daemon came up at T+21s and the box's only resolver at
+# T+159s -- so the very first resolution attempt failing is the normal case,
+# not an edge one, and without a retry it would be the only attempt for the
+# entire life of the daemon.
+TGT_RETRY_AT=""
+TGT_RETRY_INTERVAL=300
 
 # Turn a user-entered target into something ping can use every two seconds
 # without a DNS lookup each time. A hostname is resolved once here by reading
@@ -715,7 +724,18 @@ resolve_target() {
 		case "$_t" in
 			*[a-zA-Z]*)
 				_ip=$(lookup_host "$_t" "$_fam" cfg)
-				[ -n "$_ip" ] && _res="$_res $_ip" || _res="$_res $_t"
+				# A name that would not resolve is dropped, never passed
+				# through as-is. Handing the raw name to ping looks harmless
+				# -- ping resolves it, after all -- but ping re-resolves on
+				# every single probe, which is once every two seconds per
+				# interface, through the system resolver. That is precisely
+				# the resolver this package goes to some length to keep its
+				# own lookups away from, and a filtering one logs every
+				# query: observed on a live router as 245k lookups for one
+				# hostname in 18 hours, 62% of all DNS traffic on the box,
+				# from a single failed resolution at boot. The caller
+				# substitutes the built-in address list and retries later.
+				[ -n "$_ip" ] && _res="$_res $_ip"
 				;;
 			*) _res="$_res $_t" ;;
 		esac
@@ -727,20 +747,46 @@ resolve_target() {
 # "use the built-in spread". Returns 0 only when something actually changed,
 # so the caller knows whether the cached per-interface targets are stale.
 apply_targets() {
-	[ "$1" = "$RAW_TGT4" ] && [ "$2" = "$RAW_TGT6" ] && return 1
-	RAW_TGT4=$1; RAW_TGT6=$2
+	_at4=$1; _at6=$2
+	if [ "$_at4" = "$RAW_TGT4" ] && [ "$_at6" = "$RAW_TGT6" ]; then
+		# Same raw config as last time. Normally nothing to do -- but if that
+		# attempt could not resolve every name, retry once the interval has
+		# elapsed rather than living with the shortfall forever.
+		[ -z "$TGT_RETRY_AT" ] && return 1
+		read -r _at_now _ < /proc/uptime
+		[ "${_at_now%%.*}" -lt "$TGT_RETRY_AT" ] && return 1
+	fi
+	RAW_TGT4=$_at4; RAW_TGT6=$_at6
+	_at_old4=$TARGETS4_LIST; _at_old6=$TARGETS6_LIST
+	_at_short=0
 	if [ -n "$RAW_TGT4" ]; then
 		_r=$(resolve_target "$RAW_TGT4" 4)
 		TARGETS4_LIST=${_r:-$DEFAULT_TARGETS4}
+		set -- $RAW_TGT4; _at_want=$#
+		set -- $_r; [ $# -lt "$_at_want" ] && _at_short=1
 	else
 		TARGETS4_LIST="$DEFAULT_TARGETS4"
 	fi
 	if [ -n "$RAW_TGT6" ]; then
 		_r=$(resolve_target "$RAW_TGT6" 6)
 		TARGETS6_LIST=${_r:-$DEFAULT_TARGETS6}
+		set -- $RAW_TGT6; _at_want=$#
+		set -- $_r; [ $# -lt "$_at_want" ] && _at_short=1
 	else
 		TARGETS6_LIST="$DEFAULT_TARGETS6"
 	fi
+	# resolve_target runs in a command substitution, so it cannot hand back a
+	# failure flag through a variable -- the token count is the signal: fewer
+	# addresses out than names in means at least one did not resolve.
+	if [ "$_at_short" = "1" ]; then
+		read -r _at_now _ < /proc/uptime
+		TGT_RETRY_AT=$(( ${_at_now%%.*} + TGT_RETRY_INTERVAL ))
+	else
+		TGT_RETRY_AT=""
+	fi
+	# Only claim a change when the effective lists really moved, so a retry
+	# that resolves to the same thing does not force a pointless rediscovery.
+	[ "$TARGETS4_LIST" = "$_at_old4" ] && [ "$TARGETS6_LIST" = "$_at_old6" ] && return 1
 	return 0
 }
 
