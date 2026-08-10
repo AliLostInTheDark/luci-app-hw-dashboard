@@ -109,6 +109,40 @@ asn_txt() {
 	done
 }
 
+# Pick one origin AS out of a Cymru origin lookup.
+#
+# An address can be covered by more than one announcement -- an operator's own
+# /24 sitting inside an upstream's shorter prefix is the ordinary shape -- and
+# Cymru answers with one TXT record per covering prefix. Reading the fields out
+# of every record at once turned a two-record reply into a two-LINE "ASN", and
+# the AS-name lookup built from it then asked for "AS132540\n9498.asn.cymru.com",
+# which cannot resolve. The v4 path returned silently on the empty name and the
+# card read "Unknown ISP" for good; the v6 path rejected the value as
+# non-numeric and gave up just as quietly. Reported from the field against
+# Netplus (AS132540), whose address sits inside a second, larger block.
+#
+# The most specific prefix is the one traffic is actually routed to, so it
+# names the operator the subscriber really buys service from. Falling back to
+# the first record keeps a reply whose prefix field is unparseable usable.
+asn_pick() {
+	grep text "$1" 2>/dev/null | sed 's/.*= "//;s/".*//' | awk -F'|' '
+		NR == 1 { best = $1 }
+		{
+			p = $2
+			sub(/.*\//, "", p)
+			gsub(/[^0-9]/, "", p)
+			if (p != "" && p + 0 > len) { len = p + 0; best = $1 }
+		}
+		END { gsub(/[^0-9]/, "", best); print best }'
+}
+
+# The operator name from an AS<n>.asn.cymru.com reply. One record is expected,
+# but only ever read the first, so a duplicate answer cannot concatenate two
+# names into one string the same way the origin lookup did above.
+asn_org() {
+	grep text "$1" 2>/dev/null | head -n 1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-
+}
+
 # Resolve a hostname to a single address, honouring the same bypass.
 #
 # The WAN probe targets themselves are IP literals in the normal case, so they
@@ -1001,10 +1035,10 @@ resolve_isp() {
 		[ -z "$_rev6" ] && return
 		_nsf="$RINGDIR/.probe.${_ifn}.ns"
 		asn_txt "${_rev6}.origin6.asn.cymru.com" "$_nsf"
-		_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+		_asn=$(asn_pick "$_nsf")
 		case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
 		asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-		_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+		_org=$(asn_org "$_nsf")
 		rm -f "$_nsf"
 		_org=${_org# }
 		[ -z "$_org" ] && return
@@ -1073,7 +1107,7 @@ resolve_isp() {
 	fi
 	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
 	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
-	_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+	_asn=$(asn_pick "$_nsf")
 	if [ -z "$_asn" ]; then
 		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
 		case "$_lower_ifn" in
@@ -1098,7 +1132,7 @@ resolve_isp() {
 		return
 	fi
 	asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-	_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+	_org=$(asn_org "$_nsf")
 	rm -f "$_nsf"
 	_org=${_org# }
 	[ -z "$_org" ] && return
