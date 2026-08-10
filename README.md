@@ -44,12 +44,22 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 
 ## Installation
 
-### Pre-built package (recommended)
+### One line, key and package together (recommended)
 
-**First, install the signing key — once per router.** Every release is signed, and with the key in place `apk` accepts the package normally: no `--allow-untrusted`, and uploading the file on LuCI's **System → Software** page just works.
+Installs the signing key, then fetches and installs the current release. Nothing to download by hand:
 
 ```sh
-wget -O /etc/apk/keys/luci-app-hw-dashboard.pem https://raw.githubusercontent.com/AliLostInTheDark/luci-app-hw-dashboard/main/keys/luci-app-hw-dashboard.pem
+wget -qO /etc/apk/keys/luci-app-hw-dashboard.pem https://raw.githubusercontent.com/AliLostInTheDark/luci-app-hw-dashboard/main/keys/luci-app-hw-dashboard.pem && wget -qO /tmp/hwdash.apk "$(wget -qO- https://api.github.com/repos/AliLostInTheDark/luci-app-hw-dashboard/releases/latest | sed -n 's/.*"browser_download_url": *"\([^"]*\.apk\)".*/\1/p' | head -1)" && apk add /tmp/hwdash.apk && rm -f /tmp/hwdash.apk
+```
+
+Run the same line again whenever you want to upgrade — the version is resolved from the Releases API each time, not baked into the URL, so it does not go stale. Each step is chained with `&&`, so a failed download can never leave you installing a truncated file.
+
+### Manually, or from the LuCI Software page
+
+**Install the signing key first — once per router.** Every release is signed, and with the key in place `apk` accepts the package normally: no `--allow-untrusted`, and uploading the file on LuCI's **System → Software** page just works.
+
+```sh
+wget -qO /etc/apk/keys/luci-app-hw-dashboard.pem https://raw.githubusercontent.com/AliLostInTheDark/luci-app-hw-dashboard/main/keys/luci-app-hw-dashboard.pem
 ```
 
 Then grab the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page and install it — by dropping it on the Software page, or:
