@@ -1142,6 +1142,7 @@ return view.extend({
             gtpl: 'gtpl.net',
             railtel: 'railwire.co.in', railwire: 'railwire.co.in',
             hathway: 'hathway.com',
+            netplus: 'netplusbroadband.com',
             comcast: 'xfinity.com', xfinity: 'xfinity.com',
             verizon: 'verizon.com',
             't-mobile': 't-mobile.com',
@@ -1163,7 +1164,8 @@ return view.extend({
             gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=2',
             railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
             railwire: L.resource('hwdash-icons/railwire.png') + '?v=2',
-            excitel: L.resource('hwdash-icons/excitel.png') + '?v=1'
+            excitel: L.resource('hwdash-icons/excitel.png') + '?v=1',
+            netplus: L.resource('hwdash-icons/netplus.svg') + '?v=4'
         };
         // Friendly display names. The registry string is accurate but written
         // for network operators, not people: "AIRTELBROADBAND-AS-AP - Bharti
@@ -1184,6 +1186,7 @@ return view.extend({
             gtpl: 'GTPL Hathway',
             railtel: 'RailWire', railwire: 'RailWire',
             hathway: 'Hathway',
+            netplus: 'Netplus Broadband',
             excitel: 'Excitel', tikona: 'Tikona',
             comcast: 'Comcast Xfinity', xfinity: 'Comcast Xfinity',
             verizon: 'Verizon', 't-mobile': 'T-Mobile',
@@ -1220,7 +1223,7 @@ return view.extend({
                 if (lowerIface.indexOf('jio') !== -1 || lowerIface.indexOf('reliance') !== -1) {
                     org = 'Reliance Jio Infocomm'; asn = 'AS55836';
                 } else if (lowerIface.indexOf('netplus') !== -1) {
-                    org = 'Netplus Broadband'; asn = 'AS132540';
+                    org = 'Netplus Broadband'; asn = 'AS133661';
                 } else if (lowerIface.indexOf('airtel') !== -1 || lowerIface.indexOf('bharti') !== -1) {
                     org = 'Bharti Airtel Ltd.'; asn = 'AS24560';
                 } else if (lowerIface.indexOf('bsnl') !== -1) {
@@ -1239,7 +1242,10 @@ return view.extend({
             // only recognisable token for the ones where the brand lives solely
             // in the handle. The full string is always the true answer, and the
             // ASN it came from is shown right beneath it.
-            var full = (org || '').trim() || 'Unknown ISP';
+            // An empty org string with a recognised ASN (e.g. a bare "AS133661"
+            // with no registry text resolved yet) should still show the pinned
+            // operator name rather than falling through to "Unknown ISP".
+            var full = (org || '').trim() || (ISP_BY_ASN[asn] && ISP_BY_ASN[asn].name) || 'Unknown ISP';
             // Prefer a readable operator name where we know one; otherwise the
             // registry string stands as-is, which is always correct if ugly.
             var name = full;
@@ -1261,6 +1267,7 @@ return view.extend({
             else if (isp.indexOf('bsnl') !== -1) { color = '#004C97'; label = 'BSNL'; }
             else if (isp.indexOf('excitel') !== -1) { color = '#F26522'; label = 'E'; }
             else if (isp.indexOf('gtpl') !== -1) { color = '#1B75BC'; label = 'GTPL'; }
+            else if (isp.indexOf('netplus') !== -1) { color = '#da252b'; label = 'NP'; }
             else if (isp.indexOf('railtel') !== -1 || isp.indexOf('railwire') !== -1) { color = '#00AEEF'; label = 'RW'; }
             else if (isp.indexOf('wish net private') !== -1) { color = '#DA252B'; label = 'WN'; }
             else if (isp.indexOf('hathway') !== -1) { color = '#E31E24'; label = 'HW'; }

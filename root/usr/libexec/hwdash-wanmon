@@ -955,10 +955,10 @@ resolve_isp() {
 		[ -z "$_rev6" ] && return
 		_nsf="$RINGDIR/.probe.${_ifn}.ns"
 		asn_txt "${_rev6}.origin6.asn.cymru.com" "$_nsf"
-		_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+		_asn=$(grep text "$_nsf" 2>/dev/null | head -1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
 		case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
 		asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-		_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+		_org=$(grep text "$_nsf" 2>/dev/null | head -1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
 		rm -f "$_nsf"
 		_org=${_org# }
 		[ -z "$_org" ] && return
@@ -1006,7 +1006,7 @@ resolve_isp() {
 		case "$_lower_ifn" in
 			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
 			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
 			*bsnl*)            _syn="AS9829 | BSNL" ;;
 			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
 			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
@@ -1027,13 +1027,13 @@ resolve_isp() {
 	fi
 	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
 	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
-	_asn=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
+	_asn=$(grep text "$_nsf" 2>/dev/null | head -1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f1 | tr -d ' ')
 	if [ -z "$_asn" ]; then
 		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
 		case "$_lower_ifn" in
 			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
 			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
 			*bsnl*)            _syn="AS9829 | BSNL" ;;
 			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
 			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
@@ -1052,7 +1052,7 @@ resolve_isp() {
 		return
 	fi
 	asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-	_org=$(grep text "$_nsf" 2>/dev/null | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
+	_org=$(grep text "$_nsf" 2>/dev/null | head -1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-)
 	rm -f "$_nsf"
 	_org=${_org# }
 	[ -z "$_org" ] && return
