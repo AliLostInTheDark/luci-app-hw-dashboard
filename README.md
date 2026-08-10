@@ -46,27 +46,42 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 
 ### Pre-built package (recommended)
 
-Grab the latest `.apk` from the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page:
+Grab the latest `.tar.gz` from the [Releases](https://github.com/hsingh-24/luci-app-hw-dashboard/releases) page and extract it directly onto the router:
 
 ```sh
-apk add --allow-untrusted luci-app-hw-dashboard-<version>.apk
+cd /tmp
+wget -O hwdash.tar.gz https://github.com/hsingh-24/luci-app-hw-dashboard/releases/download/v1.2.5-r3/luci-app-hw-dashboard_1.2.5-r3.tar.gz
+tar -xzf hwdash.tar.gz -C /
+chmod +x /etc/init.d/hwdash-wanmon /etc/init.d/hwdash-aql /etc/hotplug.d/iface/99-hwdash-wanmon /usr/libexec/hwdash-wanmon /usr/libexec/rpcd/luci.hwdash /usr/libexec/rpcd/luci.hwdash_wifi_cap.awk
+/etc/init.d/hwdash-wanmon enable
+/etc/init.d/hwdash-wanmon start
+/etc/init.d/rpcd restart
+rm -f /tmp/luci-indexcache*
+/etc/init.d/uhttpd restart
 ```
 
-Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
+Depends on `ethtool-full` for per-port PHY details, and `curl` — install these first if not already present:
+```sh
+apk add ethtool-full curl
+```
+
+Reload LuCI and open **Status → Hardware Dashboard**.
 
 Optional packages unlock extra detail where present, and are omitted gracefully where not: `stuntman-client` (NAT Type Test), `lscpu` (CPU core names on ARM), `dmidecode` (memory speed), `smartmontools` (NVMe/SATA SMART health).
 
+> [!NOTE]
+> This fork doesn't currently publish a signed `.apk` — building one requires the `apk-tools` toolchain rather than a hand-assembled archive, which produces a package `apk add` rejects with an `unexpected end of file` checksum error. The tarball above installs to the exact same paths a package would and is the tested method for this release.
+
 > [!TIP]
-> Installing a newer release over an existing one clears all cached hardware data automatically, so stale readings from a previous version are never served.
+> Re-running the tarball extraction over an existing install is safe — files are simply overwritten in place.
 
 ### From source
 
 ```sh
-git clone https://github.com/AliLostInTheDark/luci-app-hw-dashboard.git package/luci/luci-app-hw-dashboard
+git clone https://github.com/hsingh-24/luci-app-hw-dashboard.git package/luci/luci-app-hw-dashboard
 make menuconfig   # LuCI → Applications → luci-app-hw-dashboard
 make package/luci/luci-app-hw-dashboard/compile V=s
 ```
-
 ## Supported devices
 
 Runs on any OpenWrt device. Developed and validated against:
