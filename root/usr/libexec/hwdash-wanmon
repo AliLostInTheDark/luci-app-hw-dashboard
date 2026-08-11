@@ -1086,12 +1086,11 @@ resolve_isp() {
 		case "$_lower_ifn" in
 			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
 			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
 			*bsnl*)            _syn="AS9829 | BSNL" ;;
 			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
 			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
-			*gtpl*)            _syn="AS45820 | GTPL Broadband" ;;
-			*vodafone*|*vi*)   _syn="AS11101 | Vi India" ;;
+			*vodafone*|*idea*) _syn="AS55410 | Vodafone Idea" ;;
 			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
 			*verizon*)         _syn="AS701 | Verizon" ;;
 			*att*)             _syn="AS7018 | AT&T" ;;
@@ -1113,12 +1112,11 @@ resolve_isp() {
 		case "$_lower_ifn" in
 			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
 			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS132540 | Netplus Broadband" ;;
+			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
 			*bsnl*)            _syn="AS9829 | BSNL" ;;
 			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
 			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
-			*gtpl*)            _syn="AS45820 | GTPL Broadband" ;;
-			*vodafone*|*vi*)   _syn="AS11101 | Vi India" ;;
+			*vodafone*|*idea*) _syn="AS55410 | Vodafone Idea" ;;
 			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
 			*verizon*)         _syn="AS701 | Verizon" ;;
 			*att*)             _syn="AS7018 | AT&T" ;;
