@@ -1935,6 +1935,39 @@ return view.extend({
                 cpuPerfBody.textContent = 'Failed to read CPU performance state.';
             });
         };
+        // Every card degrades gracefully without these, so this is a list of
+        // what more you could see -- not a warning, and not a nag. The one
+        // package whose absence actually blocks a control the user can see and
+        // click (stuntman-client, behind TEST NAT TYPE) says so on the card
+        // itself; the rest just quietly show less, which is impossible to
+        // discover from the dashboard alone.
+        // dmidecode is x86-only. It stays out of the combined command on
+        // purpose: apk resolves the whole argument list or nothing, so one
+        // unavailable name makes the line install none of the others -- on ARM
+        // it fails outright with "unable to select packages", which is most
+        // OpenWrt hardware.
+        var OPT_PKGS = [
+            ['stuntman-client', 'NAT Type Test — the STUN probe behind the TEST NAT TYPE button', 0],
+            ['ethtool-full', 'Per-port negotiated flow control and EEE state in Ports Topology', 0],
+            ['smartmontools', 'NVMe/SATA SMART health: wear, TBW, spare, power-on hours', 0],
+            ['lscpu', 'CPU core name on ARM (e.g. Cortex-A73) — the only source for it', 0],
+            ['dmidecode', 'Memory speed in the Memory card — x86 only, not built for ARM', 1]
+        ];
+        var optRows = OPT_PKGS.map(function(p) {
+            return E('div', { style: 'display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 0.85em;' }, [
+                E('code', { style: 'flex: 0 0 auto; font-weight: 700; min-width: 130px;' }, p[0]),
+                E('span', { style: 'opacity: 0.75;' }, p[1])
+            ]);
+        });
+        var optCmd = 'apk add ' + OPT_PKGS.filter(function(p) { return !p[2]; })
+            .map(function(p) { return p[0]; }).join(' ');
+        optRows.push(E('div', { style: 'margin-top: 10px; font-size: 0.8em; opacity: 0.7;' }, 'Install the ones available on every target:'));
+        optRows.push(E('pre', {
+            style: 'margin: 4px 0 0 0; padding: 8px 10px; border-radius: 6px; background: rgba(128,128,128,0.12); font-size: 0.8em; overflow-x: auto; white-space: pre; user-select: all; cursor: text;'
+        }, optCmd));
+        settingsPanel.appendChild(cbiSection('Optional Packages',
+            'Everything here is optional. The dashboard works without them and says so where data is missing — installing one just adds detail to a card.',
+            optRows));
         settingsPanel.appendChild(cbiSection('Diagnostics', null, [
             E('button', {
                 type: 'button',

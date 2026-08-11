@@ -84,7 +84,27 @@ Still want the old behaviour? `apk add --allow-untrusted ./luci-app-hw-dashboard
 
 Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
 
-Optional packages unlock extra detail where present, and are omitted gracefully where not: `stuntman-client` (NAT Type Test), `lscpu` (CPU core names on ARM), `dmidecode` (memory speed), `smartmontools` (NVMe/SATA SMART health).
+### Optional packages
+
+None of these are required — every card degrades gracefully and says so where data is missing. Each one just adds detail:
+
+| Package | What it adds |
+|---|---|
+| `stuntman-client` | **NAT Type Test** — the STUN probe behind the TEST NAT TYPE button |
+| `ethtool-full` | Per-port negotiated flow control and EEE state in Ports Topology |
+| `smartmontools` | NVMe/SATA SMART health: wear, TBW, spare, power-on hours |
+| `lscpu` | CPU core name on ARM (e.g. `Cortex-A73`) — the only source for it |
+| `dmidecode` | Memory speed in the Memory card — **x86 only**, not built for ARM |
+
+Install the ones available on every target:
+
+```sh
+apk add stuntman-client ethtool-full smartmontools lscpu
+```
+
+`dmidecode` is deliberately left out of that line: `apk` resolves the whole argument list or nothing, so including a name that doesn't exist for your architecture installs *none* of the others. On x86, add it separately with `apk add dmidecode`.
+
+The same list, with the same command, is shown under **⚙ Settings → Optional Packages** on the dashboard itself, so you don't have to come back here for it.
 
 > [!TIP]
 > Installing a newer release over an existing one clears all cached hardware data automatically, so stale readings from a previous version are never served.
