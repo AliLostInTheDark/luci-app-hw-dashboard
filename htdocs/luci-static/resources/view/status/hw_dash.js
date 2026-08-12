@@ -440,9 +440,8 @@ return view.extend({
                             var grandSent = 0, grandReceived = 0, grandTimeouts = 0, grandSum = 0, grandMin = null, grandMax = null;
                             P.keys.forEach(function(k) {
                                 var d = allHist[k].allData;
-                                var sent = d.length;
+                                var polls = d.length;
                                 var received = 0;
-                                var timeouts = 0;
                                 var sum = 0, min = null, max = null;
                                 d.forEach(function(v) {
                                     if (v !== null && v !== undefined) {
@@ -450,15 +449,20 @@ return view.extend({
                                         sum += v;
                                         if (min === null || v < min) min = v;
                                         if (max === null || v > max) max = v;
-                                    } else if (v === null) {
-                                        timeouts++;
                                     }
                                 });
+                                // Packet counts where the backend supplied them,
+                                // matching the table exactly; the poll-level count
+                                // remains only as the fallback for a collector too
+                                // old to report sent/recv.
+                                var sent = allHist[k].totSent || polls;
+                                var recvPkts = allHist[k].totSent ? (allHist[k].totRecv || 0) : received;
+                                var timeouts = Math.max(0, sent - recvPkts);
                                 var lossPct = sent > 0 ? (timeouts / sent * 100).toFixed(1) : '0.0';
                                 var avg = received > 0 ? (sum / received).toFixed(1) : '';
-                                lines.push(['"' + allHist[k].label + '"', sent, received, timeouts, lossPct + '%', min !== null ? min.toFixed(1) : '', max !== null ? max.toFixed(1) : '', avg].join(','));
+                                lines.push(['"' + allHist[k].label + '"', sent, recvPkts, timeouts, lossPct + '%', min !== null ? min.toFixed(1) : '', max !== null ? max.toFixed(1) : '', avg].join(','));
                                 grandSent += sent;
-                                grandReceived += received;
+                                grandReceived += recvPkts;
                                 grandTimeouts += timeouts;
                                 grandSum += sum;
                                 if (min !== null && (grandMin === null || min < grandMin)) grandMin = min;
@@ -661,7 +665,23 @@ return view.extend({
                             }
                         }
                     }
-                    if (!anyOk) return;
+                    // A series with no successful sample at all still has to say
+                    // so. Returning here skipped the timeout dashes, the hollow
+                    // timeout markers and the terminal dot alike, so a target
+                    // that was down for the whole window drew literally nothing
+                    // -- indistinguishable from a target that had never been
+                    // configured, in exactly the case the operator most needs
+                    // the graph to speak. A flat dashed line along the floor
+                    // reads as "measured, and dead" rather than "no data".
+                    if (!anyOk) {
+                        if (opts.spikeNulls && n > 1) {
+                            var deadY = yFor(ylo).toFixed(1);
+                            svg += '<polyline fill="none" stroke="#ff5252" stroke-width="1.5" stroke-dasharray="4,3" stroke-opacity="0.75" points="' +
+                                xAt(0).toFixed(1) + ',' + deadY + ' ' + xAt(n - 1).toFixed(1) + ',' + deadY + '" />';
+                            svg += '<circle cx="' + xAt(n - 1).toFixed(1) + '" cy="' + deadY + '" r="2.5" fill="#ff5252" />';
+                        }
+                        return;
+                    }
                     for (i = 0; i < n; i++) {
                         if (ys[i] !== null) continue;
                         var pj = i - 1; while (pj >= 0 && ys[pj] === null) pj--;
@@ -2933,9 +2953,21 @@ return view.extend({
                             el.style.display = '';
                             return;
                         }
-                        if (!state || state === 'unavailable' || state === 'unknown') {
+                        // Carrier-grade translation is a property of the address,
+                        // not of the measurement, so it is settled before the
+                        // measurement is consulted. Deciding it afterwards meant a
+                        // CG-NAT link whose probe had failed or never run showed
+                        // "NOT TESTED" on the chip while the dialog beside it
+                        // reported "STRICT · CG-NAT" -- two conclusions from one
+                        // set of facts, on the same row.
+                        //
+                        // A probe that ran and could not classify is also no
+                        // longer described as one that never ran: "unavailable"
+                        // and "unknown" now carry their own wording from
+                        // natVerdict, which is the same text the dialog uses.
+                        if (!state && w.class !== 'cgnat') {
                             setText(el, 'NAT TYPE · NOT TESTED');
-                            el.title = 'No STUN NAT test has been performed for this interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviours.';
+                            el.title = 'No STUN test has been performed for this interface. Select TEST NAT TYPE to measure the mapping and filtering behaviour of this link (RFC 4787).';
                             el.style.color = mcol;
                             el.style.background = mcol + '15';
                             el.style.border = '1px solid ' + mcol + '44';
@@ -3400,6 +3432,14 @@ return view.extend({
                     // identical in the sample stream -- both are null -- but only
                     // one of them actually put a packet on the wire.
                     h.unresolved = !!t.unresolved;
+                    // Lifetime ICMP packet totals, never reset (h.acc is cleared
+                    // every ten samples when a bucket closes). The CSV export
+                    // used to derive loss by counting empty polls, while the
+                    // table counted packets -- so the same window was reported
+                    // two different ways under one name. These give the export
+                    // the same packet-level basis the table uses.
+                    h.totSent = (h.totSent || 0) + ps;
+                    h.totRecv = (h.totRecv || 0) + pr;
                     h.data.push(v);
                     h.allData.push(v);
                     // A backend without sent/recv (older package) reports 0/0,
@@ -5798,7 +5838,16 @@ return view.extend({
                     ]);
 
                     var latVal = E('span', { style: 'font-size: 0.88em; font-weight: 700; color: #00bcd4; font-family: monospace; line-height: 1; white-space: nowrap;' });
-                    var latLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'LATENCY');
+                    // Qualified on hover: the backend publishes the last
+                    // successful measurement while the link is up, so during the
+                    // debounce window that precedes a declared outage this figure
+                    // is the most recent good reading rather than a live one.
+                    // Stating that is more honest than relabelling the column or
+                    // blanking a number that is still the best available.
+                    var latLbl = E('span', {
+                        style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;',
+                        title: 'Round-trip delay of the most recent successful probe (RFC 2681). While a link is failing but not yet declared down, this remains the last good measurement.'
+                    }, 'LATENCY');
                     var latBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
                         E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [latVal]),
                         latLbl
