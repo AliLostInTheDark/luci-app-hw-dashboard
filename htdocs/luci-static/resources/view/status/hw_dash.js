@@ -2695,7 +2695,20 @@ return view.extend({
             callHwNatTest(iface, 1).then(function(res) {
                 content.innerHTML = '';
                 if (!res || !res.available) {
-                    content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' }, 'stuntman-client is not installed or could not be started.'));
+                    // The backend distinguishes its refusals (invalid_interface,
+                    // stunclient_not_installed, ...) and this branch used to
+                    // discard res.error and blame the missing package for every
+                    // one of them -- including cases where it was installed and
+                    // the request was simply not valid.
+                    var NAT_UNAVAIL = {
+                        stunclient_not_installed: 'The optional stuntman-client package is not installed, so no STUN probe can be performed.',
+                        invalid_interface: 'The requested interface name is not valid.',
+                        not_a_tracked_wan: 'This interface is not tracked as a WAN link, so it is not eligible for testing.',
+                        interface_unavailable: 'The interface did not report a status and may be down.'
+                    };
+                    var uk = res && res.error;
+                    content.appendChild(E('div', { style: 'font-size:0.8em; color:' + sevColor('bad') + ';' },
+                        (uk && NAT_UNAVAIL[uk]) || 'The NAT type test is unavailable on this interface.'));
                     return;
                 }
                 if (res.error) {
@@ -3006,7 +3019,13 @@ return view.extend({
                     setText(e.note, n);
                     e.note.style.display = n ? '' : 'none';
                 });
-            }).catch(function() { self.wanIpBusy = false; });
+            }).catch(function(err) {
+                // Logged rather than discarded. A silent catch here left the card
+                // showing its previous render indefinitely with nothing, in the
+                // UI or the console, to say the data had stopped arriving.
+                console.error('wan_ips RPC error:', err);
+                self.wanIpBusy = false;
+            });
         };
         // --- Wi-Fi clients -------------------------------------------------
         // Polled on its own 5s tick rather than folded into info: the backend
@@ -3372,6 +3391,11 @@ return view.extend({
                         h.label = (cn0 || t.host) + ' (v' + t.fam + ')';
                     }
                     var v = typeof t.ms === 'number' ? t.ms : null;
+                    // Carried through so the table can separate "the name would
+                    // not resolve" from "the host did not answer". They look
+                    // identical in the sample stream -- both are null -- but only
+                    // one of them actually put a packet on the wire.
+                    h.unresolved = !!t.unresolved;
                     h.data.push(v);
                     h.allData.push(v);
                     // A backend without sent/recv (older package) reports 0/0,
@@ -3554,6 +3578,22 @@ return view.extend({
                         var ipTxt = isIpLit ? t.host : (t.ip || '—');
                         row.cells.ip.textContent = ipTxt;
                         row.cells.ip.title = ipTxt;
+                        // An unresolved name is reported as such rather than as a
+                        // timeout. Previously both rendered "TO" with 100% loss,
+                        // so a mistyped hostname was indistinguishable from a
+                        // genuine outage -- and the loss figure was fiction,
+                        // since no packet had been transmitted to lose.
+                        if (t.unresolved) {
+                            row.cells.cur.textContent = 'DNS';
+                            row.cells.cur.style.color = '#ff9800';
+                            row.cells.cur.title = 'The host name could not be resolved; no ICMP packet was transmitted.';
+                            ['min', 'avg', 'p95', 'max', 'jit', 'loss'].forEach(function(c) {
+                                row.cells[c].textContent = '—';
+                                row.cells[c].style.color = '';
+                            });
+                            return;
+                        }
+                        row.cells.cur.title = '';
                         row.cells.cur.textContent = last === null ? 'TO' : fmt(last);
                         row.cells.cur.style.color = last === null ? '#ff5252' : pingStatColor(last);
                         row.cells.min.textContent = fmt(vals.length ? vals[0] : null);
@@ -3575,7 +3615,12 @@ return view.extend({
                     pingCard.style.display = 'flex';
                 }
                 applyCardVisibility();
-            }).catch(function() {}).then(function() { self.pingBusy = false; });
+            }).catch(function(err) {
+                // See the matching note on wanIpTick: an empty catch meant a
+                // failing backend was indistinguishable from a quiet network,
+                // and the graph kept drawing the last good samples.
+                console.error('ping RPC error:', err);
+            }).then(function() { self.pingBusy = false; });
         };
         // Every card info feeds. Unlike the other ticks, info is not one card's
         // fetch -- it is the whole hardware readout -- so it may only be skipped

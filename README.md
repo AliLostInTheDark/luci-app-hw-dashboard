@@ -33,7 +33,7 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 | **Storage** | NAND/UBI wear & ECC trend, SquashFS + overlay breakdown, real disk I/O throughput, NVMe/SATA SMART health |
 | **Topology** | PCIe, USB and Ethernet link state — negotiated speed/width shown next to the hardware's rated maximum |
 | **WiFi** | Per-band PHY details (channel, TX power, NSS, bitrate, noise floor) straight from `iwinfo`/`iw` |
-| **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess — plus a bufferbloat grade |
+| **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess |
 | **WAN Uptime Status** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3`, carrier-grade NAT, or 464xlat/NAT64 tunnels |
 | **NAT Type Test** | On-demand STUN probe (RFC 3489/5780) reporting NAT behavior, filtering, and public egress address — dual-stack, and isolated per protocol family |
 | **AP Mode** | Dedicated card for access points behind a router — pings the real upstream gateway rather than assuming a WAN that doesn't exist |
@@ -184,7 +184,7 @@ Whether the packet fast path is actually active — nftables flowtable state, ha
 <details>
 <summary><b>Ping Latency</b></summary>
 
-Realtime graph of router-side latency to configurable targets (defaults: `dns.google`, `one.one.one.one`, `google.com`, `youtube.com`), dual-stack by default. A per-target table adds **cur / min / avg / p95 / max / jitter / loss** — loss is counted from individual ICMP packets received, not from polls that came back empty, so a single dropped packet on an otherwise healthy link no longer reads as either "fine" or "down" incorrectly. A bufferbloat grade (A+–F) compares latency under load against idle, reusing the existing WAN throughput samples.
+Realtime graph of router-side latency to configurable targets (defaults: `dns.google`, `one.one.one.one`, `google.com`, `youtube.com`), dual-stack by default. A per-target table adds **cur / min / avg / p95 / max / jitter / loss** — loss is counted from individual ICMP packets received, not from polls that came back empty, so a single dropped packet on an otherwise healthy link no longer reads as either "fine" or "down" incorrectly. Round-trip delay follows RFC 2681, packet loss RFC 7680, and the percentile columns use nearest-rank ranking (RFC 2330) rather than interpolation.
 </details>
 
 <details>
