@@ -3471,7 +3471,14 @@ return view.extend({
                         pingGraphWrapper.innerHTML = '';
                         pingGraphWrapper.appendChild(self.pingPanel.el);
                         var tblWrap = E('div', { style: 'overflow-x: auto; margin-top: 10px;' });
-                        var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
+                        // nowrap matters once the headers carry their units: at
+                        // 375px the expanded captions wrapped onto three lines
+                        // each, taking the header row from 21px to 49px and
+                        // squeezing "95th %ile (ms)" into 43px. The table already
+                        // lives in an overflow-x wrapper, so letting it grow
+                        // (620px -> 870px) costs nothing and the page body still
+                        // does not scroll horizontally. Measured at 375px.
+                        var thStyle = 'text-align: right; padding: 3px 8px; opacity: 0.55; font-weight: 600; white-space: nowrap; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.2));';
                         var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
                         var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em;' });
                         tbl.appendChild(E('tr', {}, [
