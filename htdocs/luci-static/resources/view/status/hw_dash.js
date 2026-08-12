@@ -3543,6 +3543,22 @@ return view.extend({
                         });
                     }
                     var curSeries = self.pingPanel.currentSeries() || {};
+                    // Statistics are taken from the RAW samples spanning the
+                    // selected range, never from the plotted series.
+                    //
+                    // Above the raw view each plotted point is the mean of
+                    // several polls, and a mean is exactly the wrong input for
+                    // these columns: averaging is what destroys the tail that
+                    // Maximum and the 95th percentile exist to expose. A 400 ms
+                    // spike among nine 12 ms samples surfaced as a 51 ms
+                    // "Maximum", and Minimum was likewise the lowest bucket mean
+                    // rather than the lowest delay actually measured.
+                    //
+                    // allData keeps every sample, so the range is simply its
+                    // tail: pts points x step seconds, divided by the sample
+                    // interval, gives the number of raw samples on screen.
+                    var curView = PING_VIEWS[self.pingPanel.currentView()] || null;
+                    var rawSpan = curView ? Math.round(curView.pts * curView.step / PING_TICK_S) : PING_WINDOW;
                     keys.forEach(function(k) {
                         var t = hist[k];
                         var row = pt.rows[k];
@@ -3550,11 +3566,15 @@ return view.extend({
                         row.tr.style.opacity = t.hidden ? '0.35' : '';
                         var sr = curSeries[k] || [];
                         var vals = [], lostSamples = 0, totSamples = 0, lostPkts = 0, sentPkts = 0;
+                        // Loss still comes off the plotted buckets: they carry the
+                        // per-bucket packet counters, and summing them over the
+                        // range is lossless -- unlike the delay values.
                         sr.forEach(function(p) {
-                            if (p.v !== null) vals.push(p.v);
                             lostSamples += p.lostN; totSamples += p.cnt;
                             sentPkts += p.psent || 0; lostPkts += p.plost || 0;
                         });
+                        var rawTail = (t.allData || []).slice(-rawSpan);
+                        rawTail.forEach(function(v) { if (v !== null) vals.push(v); });
                         vals.sort(function(a, b) { return a - b; });
                         var sum = 0;
                         vals.forEach(function(v) { sum += v; });
@@ -3565,8 +3585,12 @@ return view.extend({
                         // not delay variation at all -- a route change either side
                         // of a two-minute outage contributed one enormous spurious
                         // term that swamped the mean.
+                        // Over the same range as its neighbours. This read the
+                        // fixed 120-sample buffer whatever range was selected, so
+                        // with a long range chosen the row reported jitter for the
+                        // last few minutes beside delays covering hours.
                         var jit = null, jn = 0, prevV = null;
-                        t.data.forEach(function(v) {
+                        rawTail.forEach(function(v) {
                             if (v === null) { prevV = null; return; }
                             if (prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
                             prevV = v;
