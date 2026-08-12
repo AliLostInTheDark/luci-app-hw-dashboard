@@ -1386,7 +1386,7 @@ process_iface() {
 		# netifd already records genuine interface events itself.
 		case "$_status" in
 			up|down) log_transition "$_ifn" "$_new_status" \
-				"The link is active on interface $_dev, but the target ${_tgt:-ICMP host} is unreachable." ;;
+				"The interface $_dev reports a carrier, but the probe target ${_tgt:-the ICMP host} did not respond." ;;
 		esac
 		_status="$_new_status"
 		_streak_start=$_now
@@ -1402,7 +1402,7 @@ process_iface() {
 	# because the answer is already in hand.
 	if [ "$_status" = "down" ]; then
 		printf '%d unreachable %s\n' "$_now" \
-			"The link is active on interface $_dev, but the target ${_tgt:-ICMP host} is unreachable." \
+			"The interface $_dev reports a carrier, but the probe target ${_tgt:-the ICMP host} did not respond." \
 			> "$RINGDIR/${_ifn}.reason"
 	elif [ -f "$RINGDIR/${_ifn}.reason" ]; then
 		rm -f "$RINGDIR/${_ifn}.reason" 2>/dev/null
@@ -1453,7 +1453,7 @@ wan_down_reason() {
 		_r_car=""
 		read -r _r_car < "/sys/class/net/$_r_nd/carrier" 2>/dev/null
 		if [ "$_r_car" = "0" ]; then
-			echo "nocarrier Physical link down on interface $_r_nd. The Ethernet cable is unplugged or the upstream device is powered off."
+			echo "nocarrier The physical link on interface $_r_nd is down. The cable is disconnected, or the upstream device is powered off."
 			return
 		fi
 		break
@@ -1463,7 +1463,7 @@ wan_down_reason() {
 		0|false) echo "admin The interface is administratively disabled and configured not to start automatically."; return ;;
 	esac
 	case "$_r_avail" in
-		0|false) echo "nodevice The physical device (${_r_dev:-unknown}) is not present. The port or hardware module is missing."; return ;;
+		0|false) echo "nodevice The physical device${_r_dev:+ ($_r_dev)} is not present. The port or hardware module is missing."; return ;;
 	esac
 
 	# netifd's own error stack, when it has one, beats anything inferred.
@@ -1497,7 +1497,7 @@ wan_down_reason() {
 			OPTION_ERROR|INVALID_PROTO|INVALID_OPTIONS)
 			                  echo "netifd Interface configuration parameters were rejected." ;;
 			SETUP_FAILED|CONFIGURE_FAILED|INITIALIZE_FAILED)
-			                  echo "netifd Interface initialization failed." ;;
+			                  echo "netifd Interface initialisation failed." ;;
 			NO_APN|NO_REGISTRATION|NETWORK_REGISTRATION_FAILED)
 			                  echo "netifd Cellular network registration failed." ;;
 			PIN_FAILED|PIN_NOT_SPECIFIED|MM_PINCODE_REQUIRED|MM_PINCODE_WRONG|PUK_NEEDED)
@@ -1508,7 +1508,7 @@ wan_down_reason() {
 	fi
 
 	case "$_r_pending" in
-		1|true) echo "pending Connection negotiation is in progress." ; return ;;
+		1|true) echo "pending The connection is currently being negotiated." ; return ;;
 	esac
 
 	if [ "$_r_up" = "1" ] || [ "$_r_up" = "true" ]; then
@@ -1541,7 +1541,7 @@ wan_down_reason() {
 		echo "noroute The interface is up with an assigned IP address, but no default route is provided by the upstream gateway."
 		return
 	fi
-	echo "stopped The interface has been stopped by the network manager (netifd)."
+	echo "stopped The interface has been stopped by the network configuration daemon."
 }
 
 # Record an actual outage sample for an interface netifd has taken down.

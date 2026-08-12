@@ -562,7 +562,7 @@ return view.extend({
                         var extra = E('span', { style: 'opacity: 0.5; font-size: 0.9em;' });
                         var root = E('span', {
                             style: 'display: inline-flex; align-items: center; gap: 5px; font-size: 0.82em; cursor: pointer; user-select: none;',
-                            title: 'Click to hide/show',
+                            title: 'Select to show or hide this series',
                             click: function() {
                                 t.hidden = !t.hidden;
                                 if (P.hist) update(P.hist);
@@ -975,7 +975,7 @@ return view.extend({
         var pingCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
             E('div', { style: 'width: 100%; margin-bottom: 20px;' }, [pingHead]),
             pingGraphNode,
-            E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Add targets via \u2699 Settings (top right), or /etc/hwdash-ping.targets on the router')
+            E('div', { style: 'text-align: center; font-size: 0.72em; opacity: 0.45; margin-top: 8px;' }, 'Additional probe targets may be configured under Settings, or in /etc/hwdash-ping.targets on the router.')
         ]);
         var wanQualityTitle = E('h3', {}, 'WAN Uptime Status');
         var wanQualityCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
@@ -1448,7 +1448,7 @@ return view.extend({
             });
         };
         settingsPanel.appendChild(cbiSection('Visible Cards',
-            'Cards unticked here are hidden from the dashboard.', cardChecks));
+            'Cards not selected here are hidden from the dashboard.', cardChecks));
         var wanIfaceSection = cbiSection('WAN Uptime Status Interfaces',
             'Which WAN interfaces the uptime, NAT type and alert cards report on.',
             E('div', { id: 'hw-wanq-checks', class: 'hw-check-grid' }));
@@ -1531,7 +1531,7 @@ return view.extend({
                 // down and look like a fault in the dashboard.
                 if (fam === 6 && self.hasV6 === false) {
                     kids.push(E('div', { style: 'font-size: 0.76em; color: #ffb300; margin-top: 4px; line-height: 1.35;' },
-                        'No IPv6 WAN detected on this router. These targets cannot be reached and will report as down.'));
+                        'No IPv6 WAN interface was detected on this router. These targets are unreachable and will be reported as such.'));
                 }
                 rows.forEach(function(r) { kids.push(r); });
                 return E('div', { style: 'flex: 1 1 240px; min-width: 0; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; padding: 10px 12px;' }, kids);
@@ -1539,14 +1539,14 @@ return view.extend({
             targetList.appendChild(E('div', { style: 'display: flex; gap: 12px; flex-wrap: wrap;' }, [famBox(4), famBox(6)]));
         };
         renderTargetList();
-        var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'host or IP (e.g. quad9.net)', style: 'width: 220px; max-width: 60%;' });
+        var tgtInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'Host name or IP address (for example, quad9.net)', style: 'width: 220px; max-width: 60%;' });
         // A literal IP has no domain to fall back on for a name -- a game
         // server is commonly reachable only by IP and has no PTR record
         // either, so both the RPC's reverse-DNS attempt and the raw address
         // itself leave the card unable to say what the target actually is.
         // This is purely a client-side label: never sent to or interpreted
         // by the backend, just carried along in the same settings blob.
-        var tgtNameInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'Name (optional, e.g. Valorant EU)', style: 'width: 220px; max-width: 60%;' });
+        var tgtNameInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'Name (optional, for example Branch Office Router)', style: 'width: 220px; max-width: 60%;' });
         var tgtFam = E('select', { class: 'cbi-input-select' }, [
             E('option', { value: '4' }, 'IPv4'),
             E('option', { value: '6' }, 'IPv6'),
@@ -1571,12 +1571,12 @@ return view.extend({
             renderTargetList();
         };
         settingsPanel.appendChild(cbiSection('Ping Targets',
-            'Hosts probed by the Ping Latency card, split by address family.',
+            'The hosts probed by the Ping Latency card, grouped by address family.',
             [
                 targetList,
                 E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
                     tgtInput, tgtNameInput, tgtFam,
-                    E('button', { type: 'button', class: 'cbi-button cbi-button-add', click: addTarget }, 'Add'),
+                    E('button', { type: 'button', class: 'cbi-button cbi-button-add', click: addTarget }, 'Add Target'),
                     E('button', {
                         type: 'button',
                         class: 'cbi-button cbi-button-reset',
@@ -2533,12 +2533,12 @@ return view.extend({
             cgnat:     { label: 'CG-NAT',            sev: 'warn', note: 'Carrier-Grade Network Address Translation (RFC 6598). Ingress traffic is restricted by the service provider; port forwarding and unsolicited inbound connections are unsupported.' },
             natted:    { label: 'Translated Public Address', sev: 'warn', note: 'The assigned interface address deviates from the observed Internet egress address, indicating active translation by an upstream routing device.' },
             private:   { label: 'Behind upstream NAT',   sev: 'warn', note: 'Private Address Space (RFC 1918). Non-routable on the public Internet; Network Address Translation (NAT) is actively performed by an upstream gateway.' },
-            loopback:  { label: 'Localhost (Loopback)', sev: 'mute', note: 'Loopback Address Space (RFC 1122). A virtual interface utilized for routing traffic strictly back to the local host system.' },
-            thisnet:   { label: 'Current Network',   sev: 'mute', note: '"This Network" Address Space (RFC 1122). Exclusively utilized for local broadcast communications or during initial dynamic address assignment (DHCP discovery).' },
-            protocol:  { label: 'Protocol Assignment', sev: 'warn', note: 'IETF Protocol Assignments (RFC 6890). Designated for specialized networking protocols, frequently deployed for Dual-Stack Lite (DS-Lite) IPv4-in-IPv6 tunneling.' },
+            loopback:  { label: 'Localhost (Loopback)', sev: 'mute', note: 'Loopback Address Space (RFC 1122). A virtual interface utilised for routing traffic strictly back to the local host system.' },
+            thisnet:   { label: 'Current Network',   sev: 'mute', note: '"This Network" Address Space (RFC 1122). Exclusively utilised for local broadcast communications or during initial dynamic address assignment (DHCP discovery).' },
+            protocol:  { label: 'Protocol Assignment', sev: 'warn', note: 'IETF Protocol Assignments (RFC 6890). Designated for specialised networking protocols, frequently deployed for Dual-Stack Lite (DS-Lite) IPv4-in-IPv6 tunneling.' },
             benchmark: { label: 'ISP Private Routing', sev: 'warn', note: 'Benchmarking Address Space (RFC 2544). Officially reserved for network performance testing, yet frequently repurposed by service providers for internal private routing.' },
             testnet:   { label: 'TEST-NET (Doc Only)', sev: 'mute', note: 'TEST-NET Documentation Address Space (RFC 5737). Strictly reserved for utilization within technical documentation and example configurations.' },
-            multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address Space (RFC 1112). Reserved for one-to-many communication flows, predominantly utilized by routing protocols and IPTV distributions.' },
+            multicast: { label: 'Multicast Network',   sev: 'mute', note: 'Multicast Address Space (RFC 1112). Reserved for one-to-many communication flows, predominantly utilised by routing protocols and IPTV distributions.' },
             reserved:  { label: 'Reserved Address',  sev: 'bad',  note: 'Reserved Address Space (RFC 1112). Explicitly restricted from deployment within active public routing tables.' },
             v6only:    { label: 'Public IPv6',       sev: 'good', note: 'Globally Routable IPv6 Address Space (RFC 4291). Provides direct, end-to-end Internet reachability without intermediary address translation.' },
             linklocal: { label: 'Link-local only',   sev: 'bad',  note: 'Link-Local Address Space (RFC 3927). Valid exclusively for communication within the local network segment; signifies the absence of a globally routable prefix.' },
@@ -2553,13 +2553,13 @@ return view.extend({
         // it has no class for, and so does this.
         var PROTO_I18N = {
             '464xlat': '464XLAT (CLAT)',
-            '6in4':    'IPv6-in-IPv4 (RFC4213)',
+            '6in4':    'IPv6-in-IPv4 (RFC 4213)',
             '6rd':     'IPv6-over-IPv4 (6rd)',
             '6to4':    'IPv6-over-IPv4 (6to4)',
             dhcp:      'DHCP client',
             dhcpv6:    'DHCPv6 client',
-            dslite:    'Dual-Stack Lite (RFC6333)',
-            ipip6:     'IPv4 over IPv6 (RFC2473-IPIPv6)',
+            dslite:    'Dual-Stack Lite (RFC 6333)',
+            ipip6:     'IPv4 over IPv6 (RFC 2473)',
             l2tp:      'L2TP',
             map:       'MAP / LW4over6',
             none:      'Unmanaged',
@@ -2592,8 +2592,12 @@ return view.extend({
         // RFC 5780 describes mapping and filtering, whereas console UIs use
         // broad Open/Moderate/Strict labels. Keep both: the compact chip is
         // quick to scan, and the test dialog exposes the precise behaviour.
+        // Mapping and filtering classes exactly as RFC 4787 §4.1 and §5 name
+        // them. "Direct" is not an RFC 4787 class -- it is stunclient's term for
+        // the absence of translation altogether -- so it is labelled for what it
+        // is rather than dressed up as a fourth behaviour.
         var NAT_TERM = {
-            direct: 'Direct Mapping',
+            direct: 'No Translation',
             endpoint_independent: 'Endpoint-Independent',
             address_dependent: 'Address-Dependent',
             address_port_dependent: 'Address and Port-Dependent',
@@ -2609,26 +2613,26 @@ return view.extend({
         // tunnel's parent IPv4 address for exactly this test.
         var natVerdict = function(state, mapping, filtering, wanClass) {
             if (wanClass === 'cgnat')
-                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (CG-NAT) prevents unsolicited inbound IPv4 connections (RFC 6598).' };
-            if (!state) return { short: 'NAT TYPE · NOT TESTED', level: 'unknown', note: 'Run an on-demand STUN test to measure NAT mapping and filtering behaviors.' };
-            if (state === 'unavailable') return { short: 'UNAVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding test.' };
-            if (state === 'unknown') return { short: 'UNKNOWN', level: 'unknown', note: 'The STUN server did not provide enough RFC 5780 behavioral data.' };
+                return { short: 'STRICT · CG-NAT', level: 'strict', note: 'Carrier-Grade Network Address Translation (RFC 6598). The service provider translates this address upstream, so unsolicited inbound IPv4 connections cannot be delivered.' };
+            if (!state) return { short: 'NAT TYPE · NOT TESTED', level: 'unknown', note: 'No measurement has been performed. Run an on-demand STUN test (RFC 5780) to determine the mapping and filtering behaviour of this link.' };
+            if (state === 'unavailable') return { short: 'NOT AVAILABLE', level: 'unavailable', note: 'The STUN server did not complete a binding request (RFC 8489, Section 3), so no behaviour could be determined.' };
+            if (state === 'unknown') return { short: 'NOT DETERMINED', level: 'unknown', note: 'The STUN server returned an incomplete result. The behaviour discovery procedure defined in RFC 5780 requires responses that this server did not supply.' };
             if (state === 'open' && mapping === 'direct')
-                return { short: 'OPEN · DIRECT', level: 'open', note: 'Direct IP routing is available without address translation.' };
+                return { short: 'OPEN · NO TRANSLATION', level: 'open', note: 'No address translation is present on this link. Traffic is routed directly, providing end-to-end reachability (RFC 4787, Section 4.1).' };
             if (state === 'open')
-                return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping and filtering were detected (RFC 3489 / RFC 4787).' };
+                return { short: 'OPEN · FULL CONE', level: 'open', note: 'Endpoint-independent mapping with endpoint-independent filtering (RFC 4787, Sections 4.1 and 5). Historically termed a full-cone NAT under RFC 3489, which RFC 4787 supersedes.' };
             if (state === 'moderate' && filtering === 'address_port_dependent')
-                return { short: 'MODERATE · PORT RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with address and port-dependent filtering (RFC 3489 / RFC 4787).' };
+                return { short: 'MODERATE · PORT RESTRICTED', level: 'moderate', note: 'Endpoint-independent mapping with address-and-port-dependent filtering (RFC 4787, Sections 4.1 and 5). Historically termed a port-restricted cone NAT under RFC 3489.' };
             if (state === 'moderate')
-                return { short: 'MODERATE · RESTRICTED CONE', level: 'moderate', note: 'Endpoint-independent mapping with address-dependent filtering (RFC 3489 / RFC 4787).' };
-            return { short: 'STRICT · SYMMETRIC', level: 'strict', note: 'Destination-dependent NAT mapping was detected (RFC 3489 / RFC 4787 / RFC 5382).' };
+                return { short: 'MODERATE · RESTRICTED CONE', level: 'moderate', note: 'Endpoint-independent mapping with address-dependent filtering (RFC 4787, Sections 4.1 and 5). Historically termed a restricted-cone NAT under RFC 3489.' };
+            return { short: 'STRICT · SYMMETRIC', level: 'strict', note: 'Address-and-port-dependent mapping (RFC 4787, Section 4.1). A distinct external port is allocated per destination, which prevents inbound connection establishment; the equivalent TCP requirements are given in RFC 5382.' };
         };
         var natColor = function(level) {
             return sevColor(level === 'open' ? 'good' : level === 'moderate' ? 'warn' : level === 'strict' || level === 'unavailable' ? 'bad' : 'mute');
         };
         var natDialogRow = function(title, result, wanClass, wInfo) {
             var verdict = result ? natVerdict(result.state, result.mapping, result.filtering, wanClass) :
-                { short: 'NOT AVAILABLE', level: 'unknown', note: 'IPv4 address is not configured.' };
+                { short: 'NOT AVAILABLE', level: 'unknown', note: 'An IPv4 address is not configured on this interface.' };
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
@@ -2685,7 +2689,7 @@ return view.extend({
             // Letting the modal do the sizing gives the same ~566px on desktop
             // and a clean fit on a phone.
             var content = E('div', { style: 'width:100%; display:flex; flex-direction:column; gap:12px;' }, [
-                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Testing ' + iface.toUpperCase() + ' with official STUN server probes (RFC 3489 / RFC 5780 / RFC 6598). It measures IPv4 NAT mapping and filtering behavior.'),
+                E('div', { style: 'font-size:0.8em; line-height:1.45; opacity:0.85;' }, 'Interface ' + iface.toUpperCase() + ' is being probed using the STUN behaviour discovery procedure (RFC 5780), which determines the IPv4 mapping and filtering behaviour of the address translation on this link as classified by RFC 4787.'),
                 E('div', { style: 'font-size:0.8em; color:' + sevColor('info') + ';' }, 'Running NAT type test…')
             ]);
             ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
@@ -2720,7 +2724,7 @@ return view.extend({
                 // neither this interface nor its tunnel parent has an IPv4
                 // address of any kind.
                 if (res.v4) {
-                    content.appendChild(natDialogRow('IPv4 NAT Behavior', res.v4, wanClass, wInfo));
+                    content.appendChild(natDialogRow('IPv4 NAT Behaviour (RFC 4787)', res.v4, wanClass, wInfo));
                 } else {
                     content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.75;' }, 'No IPv4 address is available on this interface, or its tunnel parent, to test.'));
                 }
@@ -2919,7 +2923,7 @@ return view.extend({
                         }
                         var mcol = sevColor('mute');
                         if (!self.stunClientAvailable) {
-                            setText(el, 'NAT TYPE · UNTESTED');
+                            setText(el, 'NAT TYPE · NOT TESTED');
                             el.title = 'Install stuntman-client from Fantastic Feeds to enable on-demand STUN NAT type testing.';
                             el.style.color = mcol;
                             el.style.background = mcol + '15';
@@ -2931,7 +2935,7 @@ return view.extend({
                         }
                         if (!state || state === 'unavailable' || state === 'unknown') {
                             setText(el, 'NAT TYPE · NOT TESTED');
-                            el.title = 'No STUN NAT test has been performed for this interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviors.';
+                            el.title = 'No STUN NAT test has been performed for this interface. Click \'TEST NAT TYPE\' to measure mapping and filtering behaviours.';
                             el.style.color = mcol;
                             el.style.background = mcol + '15';
                             el.style.border = '1px solid ' + mcol + '44';
@@ -3229,7 +3233,7 @@ return view.extend({
                 ]);
 
                 var rateVal = E('span', { style: 'font-size: 0.82em; font-weight: 700; font-family: monospace; line-height: 1.25; white-space: pre;' });
-                var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
+                var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP RATE');
                 var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
                     E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [rateVal]),
                     rateLbl
@@ -3267,7 +3271,7 @@ return view.extend({
                 var statusColor = r.status === 'up' ? '#4caf50' : r.status === 'down' ? '#f44336' : '#9e9e9e';
                 e.statusDot.style.background = statusColor;
                 e.statusVal.style.color = statusColor;
-                e.statusVal.textContent = r.status === 'up' ? 'ONLINE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
+                e.statusVal.textContent = r.status === 'up' ? 'ACTIVE' : r.status === 'down' ? 'OFFLINE' : 'UNKNOWN';
                 e.statusLbl.textContent = (r.status === 'down' ? 'DOWN ' : '') + fmtDurationFull(r.since_change_s);
 
                 var ib = ispBadge(r.isp, r.iface);
@@ -3471,13 +3475,22 @@ return view.extend({
                         var divS = 'border-left: 1px solid var(--border-color, rgba(128,128,128,0.3));';
                         var tbl = E('table', { style: 'width: 100%; min-width: 620px; border-collapse: collapse; font-size: 0.78em;' });
                         tbl.appendChild(E('tr', {}, [
-                            E('th', { style: thStyle + 'text-align: left; width: 1%; white-space: nowrap;' }, 'Protocol'),
+                            // Title case throughout, units in the header so the
+                            // cells stay numeric, and a definition on hover for
+                            // every abbreviated column. "Protocol" named a column
+                            // whose contents are IPv4/IPv6 -- the settings panel
+                            // already calls that the address family, so it does
+                            // here too.
+                            E('th', { style: thStyle + 'text-align: left; width: 1%; white-space: nowrap;', title: 'Internet Protocol version used for this probe' }, 'Family'),
                             E('th', { style: thStyle + 'text-align: left; white-space: nowrap;' + divS }, 'Target'),
                             E('th', { style: thStyle + 'text-align: left; white-space: nowrap;' + divS }, 'IP Address'),
-                            E('th', { style: thStyle }, 'cur'), E('th', { style: thStyle }, 'min'),
-                            E('th', { style: thStyle }, 'avg'), E('th', { style: thStyle }, 'p95'),
-                            E('th', { style: thStyle }, 'max'), E('th', { style: thStyle }, 'jitter'),
-                            E('th', { style: thStyle }, 'loss')
+                            E('th', { style: thStyle, title: 'Most recent round-trip delay (RFC 2681)' }, 'Current (ms)'),
+                            E('th', { style: thStyle, title: 'Lowest round-trip delay observed in the selected range' }, 'Minimum (ms)'),
+                            E('th', { style: thStyle, title: 'Arithmetic mean round-trip delay over the selected range' }, 'Mean (ms)'),
+                            E('th', { style: thStyle, title: '95th percentile round-trip delay, nearest-rank (RFC 2330). Requires at least 20 samples.' }, '95th %ile (ms)'),
+                            E('th', { style: thStyle, title: 'Highest round-trip delay observed in the selected range' }, 'Maximum (ms)'),
+                            E('th', { style: thStyle, title: 'Mean absolute difference between consecutive round-trip samples (cf. RFC 3393)' }, 'Jitter (ms)'),
+                            E('th', { style: thStyle, title: 'Proportion of ICMP echo requests transmitted for which no reply was received (RFC 7680)' }, 'Packet Loss')
                         ]));
                         tblWrap.appendChild(tbl);
                         pingTableWrapper.innerHTML = '';
@@ -5775,7 +5788,7 @@ return view.extend({
                     ]);
 
                     var rateVal = E('span', { style: 'font-size: 0.82em; font-weight: 700; font-family: monospace; line-height: 1.25; white-space: nowrap;' });
-                    var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP');
+                    var rateLbl = E('span', { style: 'font-size: 0.58em; opacity: 0.8; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap;' }, 'DOWN / UP RATE');
                     var rateBlock = E('div', { style: 'display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; gap: 4px; text-align: center; height: 100%;' }, [
                         E('div', { style: 'display: flex; align-items: center; justify-content: center; flex: 1; min-height: 26px;' }, [rateVal]),
                         rateLbl
