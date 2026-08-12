@@ -275,14 +275,50 @@ return view.extend({
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
         var PING_WINDOW = 120;
         var PING_AGG_KEEP = 1080;
-        var PING_VIEWS = {
-            '2m':  { raw: true,  pts: 120, label: '−2 min',  step: 1 },
-            '5m':  { group: 1,   pts: 30,  label: '−5 min',  step: 10 },
-            '10m': { group: 1,   pts: 60,  label: '−10 min', step: 10 },
-            '15m': { group: 1,   pts: 90,  label: '−15 min', step: 10 },
-            '1h':  { group: 3,   pts: 120, label: '−1 h',    step: 30 },
-            '3h':  { group: 9,   pts: 120, label: '−3 h',    step: 90 }
+        // Seconds between two consecutive ping samples. The dispatcher gives
+        // pingTick every other tick of a 1s poll (see the `hwTick % 2` split
+        // where poll.add is registered), so one sample lands every 2s.
+        //
+        // Every range on this graph used to be declared with `step: 1`, i.e. one
+        // second per point, and the button and axis captions were written by hand
+        // to match that assumption. They were wrong by exactly this factor: the
+        // "2m" range held 120 samples two seconds apart, so it actually showed
+        // four minutes, and "3h" showed six. Spans and captions are now derived
+        // from this constant, so retuning the cadence -- which is what introduced
+        // the drift in the first place -- can no longer make the axis lie.
+        var PING_TICK_S = 2;
+        var fmtSpanLabel = function(secs, prefix) {
+            var m = secs / 60;
+            if (m < 60) return prefix + Math.round(m) + ' min';
+            var h = m / 60;
+            // One decimal only when the hour count is not whole, so 2h reads
+            // "2 h" rather than "2.0 h".
+            return prefix + (Math.round(h * 10) % 10 === 0 ? Math.round(h) : (Math.round(h * 10) / 10)) + ' h';
         };
+        var fmtSpanKey = function(secs) {
+            var m = Math.round(secs / 60);
+            return m < 60 ? m + 'm' : (Math.round(m / 6) / 10 % 1 === 0 ? Math.round(m / 60) : (Math.round(m / 6) / 10)) + 'h';
+        };
+        // pollsPerPoint: how many 2s samples each plotted point represents.
+        // raw = one point per sample; group = the aggregation bucket index.
+        var PING_VIEW_DEFS = [
+            { raw: true, pts: 120, pollsPerPoint: 1 },
+            { group: 1,  pts: 30,  pollsPerPoint: 10 },
+            { group: 1,  pts: 60,  pollsPerPoint: 10 },
+            { group: 1,  pts: 90,  pollsPerPoint: 10 },
+            { group: 3,  pts: 120, pollsPerPoint: 30 },
+            { group: 9,  pts: 120, pollsPerPoint: 90 }
+        ];
+        var PING_VIEWS = (function() {
+            var out = {};
+            PING_VIEW_DEFS.forEach(function(d) {
+                var stepSecs = d.pollsPerPoint * PING_TICK_S;
+                var v = { pts: d.pts, step: stepSecs, label: fmtSpanLabel(d.pts * stepSecs, '−') };
+                if (d.raw) v.raw = true; else v.group = d.group;
+                out[fmtSpanKey(d.pts * stepSecs)] = v;
+            });
+            return out;
+        })();
         var TEMP_WINDOW = 200;
         var TEMP_AGG_KEEP = 360;
         var TEMP_VIEWS = {
@@ -292,9 +328,20 @@ return view.extend({
             '1h':  { group: 1,  pts: 120, label: '−1 h',    step: 30 },
             '3h':  { group: 3,  pts: 120, label: '−3 h',    step: 90 }
         };
+        // Nearest-rank percentile (RFC 2330 §11 sample statistics): the index is
+        // ceil(n*p)-1, not floor(n*p). The two agree only when n*p is not a whole
+        // number; when it is, floor lands one sample too high -- and n*p IS whole
+        // in the steady state, since the raw window holds exactly 120 samples and
+        // 120*0.95 = 114. Below 21 samples floor(n*0.95) collapses to n-1, which
+        // is the maximum, so p95 and max printed the same figure for the first
+        // ~40s of every session.
+        //
+        // PING_PCT_MIN_N: a percentile over a handful of samples is not a
+        // percentile. Report nothing until there are enough to rank meaningfully.
+        var PING_PCT_MIN_N = 20;
         var pingPct = function(sorted, p) {
-            if (!sorted.length) return null;
-            return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+            if (!sorted.length || sorted.length < PING_PCT_MIN_N) return null;
+            return sorted[Math.max(0, Math.ceil(sorted.length * p) - 1)];
         };
         // psent/plost carry REAL ICMP packet counts alongside the poll-level
         // lostN/cnt. The graph keeps using lostN/cnt (a loss tick means a poll
@@ -2585,7 +2632,7 @@ return view.extend({
             var col = natColor(verdict.level);
             var mapping = result ? (NAT_TERM[result.mapping] || NAT_TERM.unknown) : '—';
             var filtering = result ? (NAT_TERM[result.filtering] || NAT_TERM.unknown) : '—';
-            var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanIpCache) ? self._wanIpCache[wInfo.alias_of || wInfo.parent] : null;
+            var parentInfo = (wInfo && (wInfo.alias_of || wInfo.parent) && self._wanData) ? self._wanData[wInfo.alias_of || wInfo.parent] : null;
             var localIp = result ? result.address : (wInfo ? (wInfo.ip4 || (parentInfo ? parentInfo.ip4 : '—')) : '—');
             var pubIp = (result && result.pub && result.pub !== '—' && result.pub !== 'unknown') ? result.pub : ((wInfo && wInfo.pub4) || (parentInfo && parentInfo.pub4) || '—');
             // The servers the backend actually queries, in the order it tries
@@ -2644,7 +2691,7 @@ return view.extend({
             ui.showModal('NAT Type Test · ' + iface.toUpperCase(), [content, E('div', { class: 'right' }, [
                 E('button', { class: 'btn', click: ui.hideModal }, 'Close')
             ])]);
-            var wInfo = (self._wanIpCache && self._wanIpCache[iface]) ? self._wanIpCache[iface] : null;
+            var wInfo = (self._wanData && self._wanData[iface]) ? self._wanData[iface] : null;
             callHwNatTest(iface, 1).then(function(res) {
                 content.innerHTML = '';
                 if (!res || !res.available) {
@@ -2664,15 +2711,19 @@ return view.extend({
                 } else {
                     content.appendChild(E('div', { style: 'font-size:0.8em; opacity:0.75;' }, 'No IPv4 address is available on this interface, or its tunnel parent, to test.'));
                 }
-                if (res.cached) {
-                    content.appendChild(E('div', { style: 'font-size:0.75em; opacity:0.55; margin-top:4px;' }, '↻ Showing cached result · Background re-probe in progress'));
-                    // The re-probe writes its result to the NAT cache that
-                    // wan_ips reads. wan_ips polls every 30s, so without these
-                    // the chip would sit on the stale verdict for up to half a
-                    // minute after the probe already finished.
-                    setTimeout(wanIpTick, 3000);
-                    setTimeout(wanIpTick, 9000);
-                }
+                // No cached-result branch here on purpose. This call passes
+                // force=1, and the backend's cache-first path is gated on
+                // force being unset -- so `res.cached` can never be true and
+                // everything that used to hang off it, including a pair of
+                // delayed re-ticks added to refresh the chip after a background
+                // re-probe, was unreachable code resting on a false assumption.
+                //
+                // force=1 is the right call for this button: it is labelled
+                // TEST NAT TYPE and is only ever reached by an explicit click,
+                // so it should measure rather than recite. The RAM cache still
+                // earns its keep by feeding the row's chip through wan_ips
+                // without probing; this refreshes that chip once the fresh
+                // verdict has been written.
                 wanIpTick();
             }).catch(function(err) {
                 console.error('NAT test RPC error:', err);
@@ -2729,6 +2780,15 @@ return view.extend({
                 var box = document.getElementById('hw-wanip');
                 if (!box) return;
                 if (!self._wanIpCache) self._wanIpCache = {};
+                // The WAN payload, keyed by interface -- kept separately from
+                // _wanIpCache, which syncRows owns and fills with per-row DOM
+                // handles ({el, ifn, kv4, ...}), NOT interface data. Reading
+                // .ip4/.pub4/.alias_of/.nat4_* off the row cache returned
+                // undefined every time, which silently disabled parent-address
+                // inheritance and hid the TEST NAT TYPE button on precisely the
+                // alias and tunnel WANs the backend resolves a parent IPv4 for.
+                self._wanData = {};
+                wans.forEach(function(w) { self._wanData[w.iface] = w; });
                 syncRows(box, self._wanIpCache, wans, function(w) { return w.iface; }, function() {
                     // Each chip owns a hue from the identity family, tinted from
                     // its own colour rather than a shared grey, so the kind of
@@ -2881,7 +2941,7 @@ return view.extend({
                     // IPv4 only -- native IPv6 has no real NAT to report (see
                     // the backend's nat_test handler), so a WAN with no IPv4
                     // of its own or a parent's simply gets no chip at all.
-                    var parentW = (w.alias_of || w.parent) ? self._wanIpCache[w.alias_of || w.parent] : null;
+                    var parentW = (w.alias_of || w.parent) ? self._wanData[w.alias_of || w.parent] : null;
                     var st4 = w.nat4_state || (parentW ? parentW.nat4_state : null);
                     var map4 = w.nat4_mapping || (parentW ? parentW.nat4_mapping : null);
                     var filt4 = w.nat4_filtering || (parentW ? parentW.nat4_filtering : null);
@@ -3354,7 +3414,11 @@ return view.extend({
                     if (!self.pingPanel) {
                         self.pingPanel = createGraphPanel({
                             views: PING_VIEWS,
-                            defaultView: '2m',
+                            // Derived, not spelled out: the keys are computed
+                            // from the sample cadence, so naming one here would
+                            // reintroduce exactly the drift this replaced. The
+                            // first entry is the raw (unaggregated) view.
+                            defaultView: Object.keys(PING_VIEWS)[0],
                             unit: ' ms',
                             csvName: 'ping',
                             height: 250,
@@ -3450,10 +3514,18 @@ return view.extend({
                         vals.sort(function(a, b) { return a - b; });
                         var sum = 0;
                         vals.forEach(function(v) { sum += v; });
+                        // Mean absolute difference between CONSECUTIVE round-trip
+                        // samples (cf. RFC 3393 instantaneous packet delay
+                        // variation). prevV is cleared on a timeout: RFC 3393
+                        // pairs adjacent packets, so differencing across a gap is
+                        // not delay variation at all -- a route change either side
+                        // of a two-minute outage contributed one enormous spurious
+                        // term that swamped the mean.
                         var jit = null, jn = 0, prevV = null;
                         t.data.forEach(function(v) {
-                            if (v !== null && prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
-                            if (v !== null) prevV = v;
+                            if (v === null) { prevV = null; return; }
+                            if (prevV !== null) { jit = (jit || 0) + Math.abs(v - prevV); jn++; }
+                            prevV = v;
                         });
                         var last = t.data.length ? t.data[t.data.length - 1] : null;
                         var fmt = function(v) { return v === null || v === undefined ? '—' : v.toFixed(1); };
@@ -5747,11 +5819,23 @@ return view.extend({
                         entry.ifaceAsn.textContent = ifnLabel + ' • WAN Link';
                     }
 
-                    entry.uptime.textContent = r.uptime_pct.toFixed(2) + '%';
-                    entry.uptime.style.color = r.uptime_pct >= 99.9 ? '#4caf50' : r.uptime_pct >= 99.0 ? '#8bc34a' : r.uptime_pct >= 95.0 ? '#ffb300' : '#f44336';
+                    // Guarded and clamped. These ran .toFixed(2) on the raw field:
+                    // one row from an older collector without uptime_pct threw
+                    // inside patchFn, which aborts syncRows for the whole list and
+                    // silently freezes every row below it at its previous values.
+                    // The clamp is belt-and-braces against the backend (which now
+                    // clamps too) so a bad ring file can never colour a negative
+                    // downtime green via the "> 0.0" test.
+                    var upPct = (typeof r.uptime_pct === 'number' && isFinite(r.uptime_pct))
+                        ? Math.min(100, Math.max(0, r.uptime_pct)) : null;
+                    var dnPct = (typeof r.downtime_pct === 'number' && isFinite(r.downtime_pct))
+                        ? Math.min(100, Math.max(0, r.downtime_pct)) : null;
 
-                    entry.downtime.textContent = r.downtime_pct.toFixed(2) + '%';
-                    entry.downtime.style.color = r.downtime_pct > 5.0 ? '#f44336' : r.downtime_pct > 1.0 ? '#ff9800' : r.downtime_pct > 0.0 ? '#ffb300' : '#4caf50';
+                    entry.uptime.textContent = upPct === null ? '—' : upPct.toFixed(2) + '%';
+                    entry.uptime.style.color = upPct === null ? '' : upPct >= 99.9 ? '#4caf50' : upPct >= 99.0 ? '#8bc34a' : upPct >= 95.0 ? '#ffb300' : '#f44336';
+
+                    entry.downtime.textContent = dnPct === null ? '—' : dnPct.toFixed(2) + '%';
+                    entry.downtime.style.color = dnPct === null ? '' : dnPct > 5.0 ? '#f44336' : dnPct > 1.0 ? '#ff9800' : dnPct > 0.0 ? '#ffb300' : '#4caf50';
 
                     var latColor = '#4caf50';
                     if (r.cur_ms != null) {

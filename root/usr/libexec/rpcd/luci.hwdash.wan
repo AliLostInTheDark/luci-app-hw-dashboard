@@ -99,6 +99,13 @@ case "$1" in
 						_wm_downtime=0
 						if [ "${_wm_total:-0}" -gt 0 ]; then
 							_u100=$(( _wm_success * 10000 / _wm_total ))
+							# Clamp before deriving downtime. A bucket rollover or a
+							# partially-written ring file can leave success > total,
+							# which printed "105.00%" uptime and a NEGATIVE downtime --
+							# and the card's "> 0.0" colour test then painted that
+							# negative figure green, i.e. a fault rendered as healthy.
+							[ "$_u100" -gt 10000 ] && _u100=10000
+							[ "$_u100" -lt 0 ] && _u100=0
 							_d100=$(( 10000 - _u100 ))
 							_wm_uptime=$(printf '%d.%02d' $((_u100 / 100)) $((_u100 % 100)))
 							_wm_downtime=$(printf '%d.%02d' $((_d100 / 100)) $((_d100 % 100)))
@@ -261,6 +268,9 @@ case "$1" in
 						_ap_uptime=0; _ap_downtime=0
 						if [ "${_ap_total:-0}" -gt 0 ]; then
 							_ap_u100=$(( _ap_success * 10000 / _ap_total ))
+							# Same clamp as the WAN path above, for the same reason.
+							[ "$_ap_u100" -gt 10000 ] && _ap_u100=10000
+							[ "$_ap_u100" -lt 0 ] && _ap_u100=0
 							_ap_d100=$(( 10000 - _ap_u100 ))
 							_ap_uptime=$(printf '%d.%02d' $((_ap_u100 / 100)) $((_ap_u100 % 100)))
 							_ap_downtime=$(printf '%d.%02d' $((_ap_d100 / 100)) $((_ap_d100 % 100)))
