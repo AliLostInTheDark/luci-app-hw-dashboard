@@ -1287,7 +1287,7 @@ return view.extend({
                 if (lowerIface.indexOf('jio') !== -1 || lowerIface.indexOf('reliance') !== -1) {
                     org = 'Reliance Jio Infocomm'; asn = 'AS55836';
                 } else if (lowerIface.indexOf('netplus') !== -1) {
-                    org = 'Netplus Broadband'; asn = 'AS132540';
+                    org = 'Netplus Broadband'; asn = 'AS133661';
                 } else if (lowerIface.indexOf('airtel') !== -1 || lowerIface.indexOf('bharti') !== -1) {
                     org = 'Bharti Airtel Ltd.'; asn = 'AS24560';
                 } else if (lowerIface.indexOf('bsnl') !== -1) {
@@ -1295,7 +1295,13 @@ return view.extend({
                 } else if (lowerIface.indexOf('railwire') !== -1 || lowerIface.indexOf('railtel') !== -1) {
                     org = 'RailWire'; asn = 'AS24186';
                 } else if (lowerIface.indexOf('excitel') !== -1) {
-                    org = 'Excitel Broadband'; asn = 'AS134889';
+                    // No ASN asserted: AS134889 is INTERNETOFFICE PRIVATE
+                    // LIMITED, not Excitel, and the correct number could not be
+                    // confirmed. The logo, domain and display name for this
+                    // operator are keyed by name rather than by ASN, so nothing
+                    // is lost by leaving it unstated -- and a blank is honest
+                    // where a wrong number is not.
+                    org = 'Excitel Broadband'; asn = '';
                 }
             }
             var isp = org.toLowerCase();
