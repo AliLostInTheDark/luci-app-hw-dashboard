@@ -1230,7 +1230,8 @@ return view.extend({
             gtpl: L.resource('hwdash-icons/gtpl.png') + '?v=2',
             railtel: L.resource('hwdash-icons/railwire.png') + '?v=2',
             railwire: L.resource('hwdash-icons/railwire.png') + '?v=2',
-            excitel: L.resource('hwdash-icons/excitel.png') + '?v=1'
+            excitel: L.resource('hwdash-icons/excitel.png') + '?v=1',
+            netplus: L.resource('hwdash-icons/netplus.svg') + '?v=4'
         };
         // Friendly display names. The registry string is accurate but written
         // for network operators, not people: "AIRTELBROADBAND-AS-AP - Bharti
@@ -1252,6 +1253,7 @@ return view.extend({
             railtel: 'RailWire', railwire: 'RailWire',
             hathway: 'Hathway',
             excitel: 'Excitel', tikona: 'Tikona',
+            netplus: 'Netplus Broadband',
             comcast: 'Comcast Xfinity', xfinity: 'Comcast Xfinity',
             verizon: 'Verizon', 't-mobile': 'T-Mobile',
             spectrum: 'Spectrum', cox: 'Cox Communications',
