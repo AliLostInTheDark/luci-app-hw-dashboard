@@ -3440,6 +3440,11 @@ return view.extend({
                     // identical in the sample stream -- both are null -- but only
                     // one of them actually put a packet on the wire.
                     h.unresolved = !!t.unresolved;
+                    // A backend without sent/recv (older package) reports 0/0,
+                    // which the loss column treats as "no packet data" and
+                    // falls back to the old poll-level estimate.
+                    var ps = typeof t.sent === 'number' ? t.sent : 0;
+                    var pr = typeof t.recv === 'number' ? t.recv : 0;
                     // Lifetime ICMP packet totals, never reset (h.acc is cleared
                     // every ten samples when a bucket closes). The CSV export
                     // used to derive loss by counting empty polls, while the
@@ -3450,11 +3455,7 @@ return view.extend({
                     h.totRecv = (h.totRecv || 0) + pr;
                     h.data.push(v);
                     h.allData.push(v);
-                    // A backend without sent/recv (older package) reports 0/0,
-                    // which the loss column treats as "no packet data" and
-                    // falls back to the old poll-level estimate.
-                    var ps = typeof t.sent === 'number' ? t.sent : 0;
-                    var pr = typeof t.recv === 'number' ? t.recv : 0;
+                    if (h.allData.length > 10800) h.allData.shift();
                     h.pdata.push({ s: ps, r: pr });
                     if (h.data.length > PING_WINDOW) h.data.shift();
                     if (h.pdata.length > PING_WINDOW) h.pdata.shift();
@@ -3482,6 +3483,7 @@ return view.extend({
                     g6.data.push(null);
                     g6.allData.push(null);
                     if (g6.data.length > PING_WINDOW) g6.data.shift();
+                    if (g6.allData.length > 10800) g6.allData.shift();
                 } else if (hist['__gw6na'] && (res.gateway6 || isGwDisabled(6))) {
                     delete hist['__gw6na'];
                 }
@@ -6027,7 +6029,10 @@ return view.extend({
         // refreshes it directly on completion (see runNatTest), so the chip
         // still updates instantly; nothing else it shows can go stale in 30s.
         var hwTick = 0;
-        poll.add(function() {
+        if (self.pollFn) {
+            poll.remove(self.pollFn);
+        }
+        self.pollFn = function() {
             hwTick++;
             if (hwTick % 2 === 1) wanQTick();
             else pingTick();
@@ -6035,7 +6040,8 @@ return view.extend({
             if (hwTick % 6 === 1) wifiStaTick();
             if (hwTick % 30 === 5) wanIpTick();
             return Promise.resolve();
-        }, 1);
+        };
+        poll.add(self.pollFn, 1);
         return container;
     },
     handleSaveApply: null,

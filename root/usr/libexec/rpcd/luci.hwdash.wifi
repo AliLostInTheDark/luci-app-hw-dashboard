@@ -65,6 +65,13 @@ case "$1" in
 						_ifn=${_nd##*/}
 						read_file _wphy "$_nd/phy80211/name" ""
 						_frag=$(iw dev "$_ifn" station dump 2>/dev/null | awk -v ifn="$_ifn" -v phy="$_wphy" -v names="$_macname" '
+	BEGIN {
+		mac = ""
+		n = 0
+		sig = 0; sigavg = 0; inact = 0; conn = 0; rxb = 0; txb = 0; rxp = 0
+		txp = 0; txr = 0; txf = 0; rxrate = 0; txrate = 0
+		rxinfo = ""; txinfo = ""; auth = 0
+	}
 	function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
 	# names is " mac=name mac=name ...", so a leading space anchors the key and
 	# stops one MAC matching inside another.

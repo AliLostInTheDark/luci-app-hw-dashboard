@@ -4,18 +4,15 @@ PKG_NAME:=luci-app-hw-dashboard
 LUCI_TITLE:=Hardware Dashboard
 LUCI_DEPENDS:=+luci-base +curl
 LUCI_PKGARCH:=all
+PKG_ARCH:=all
 PKG_VERSION:=1.2.5
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
-
-include $(TOPDIR)/feeds/luci/luci.mk
 
 define Package/luci-app-hw-dashboard/conffiles
 /etc/config/hwdash
 endef
-
-# call BuildPackage - OpenWrt buildroot signature
 
 define Package/luci-app-hw-dashboard/postinst
 #!/bin/sh
@@ -31,7 +28,7 @@ define Package/luci-app-hw-dashboard/postinst
 		cat /tmp/hwdash/ecc.baseline > /etc/hwdash/ecc.baseline 2>/dev/null
 	}
 	rm -rf /tmp/hwdash*
-	/etc/init.d/rpcd restart 2>/dev/null
+	/etc/init.d/rpcd reload 2>/dev/null
 	[ -x /etc/init.d/hwdash-wanmon ] && {
 		/etc/init.d/hwdash-wanmon enable 2>/dev/null
 		/etc/init.d/hwdash-wanmon restart 2>/dev/null
@@ -44,3 +41,7 @@ define Package/luci-app-hw-dashboard/postinst
 	exit 0
 }
 endef
+
+include $(TOPDIR)/feeds/luci/luci.mk
+
+# call BuildPackage - OpenWrt buildroot signature

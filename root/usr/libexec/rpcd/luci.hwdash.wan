@@ -221,19 +221,40 @@ case "$1" in
 								case "$_ap_vs" in ''|*[!0-9]*) ;; *) _ap_vlans=$_ap_vs ;; esac
 								;;
 						esac
-						if [ -n "$_ap_dev" ]; then
-							_bv_i=0
-							while [ "$_bv_i" -lt 64 ]; do
-								case "$_ap_uci" in
-									*"network.@bridge-vlan[$_bv_i].device='$_ap_dev'"*)
-										_bv_v=$(printf '%s\n' "$_ap_uci" | sed -n "s/^network\.@bridge-vlan\[$_bv_i\]\.vlan='\([^']*\)'\$/\1/p")
-										if [ -n "$_bv_v" ]; then
-											case " $_ap_vlans " in *" $_bv_v "*) ;; *) _ap_vlans="$_ap_vlans $_bv_v" ;; esac
+						if [ -n "$_ap_dev" ] && [ -n "$_ap_uci" ]; then
+							_cur_dev=""; _cur_vlan=""; _cur_idx=""
+							while read -r _bv_l; do
+								case "$_bv_l" in
+									"network.@bridge-vlan["*)
+										_bv_rest=${_bv_l#network.@bridge-vlan[}
+										_idx=${_bv_rest%%]*}
+										_prop=${_bv_rest#*].}
+										if [ "$_idx" != "$_cur_idx" ]; then
+											if [ "$_cur_dev" = "$_ap_dev" ] && [ -n "$_cur_vlan" ]; then
+												case " $_ap_vlans " in *" $_cur_vlan "*) ;; *) _ap_vlans="$_ap_vlans $_cur_vlan" ;; esac
+											fi
+											_cur_idx="$_idx"
+											_cur_dev=""
+											_cur_vlan=""
 										fi
+										case "$_prop" in
+											device=*)
+												_v=${_prop#*\'}
+												_cur_dev=${_v%\'*}
+												;;
+											vlan=*)
+												_v=${_prop#*\'}
+												_cur_vlan=${_v%\'*}
+												;;
+										esac
 										;;
 								esac
-								_bv_i=$((_bv_i + 1))
-							done
+							done <<EOF_BV
+$_ap_uci
+EOF_BV
+							if [ "$_cur_dev" = "$_ap_dev" ] && [ -n "$_cur_vlan" ]; then
+								case " $_ap_vlans " in *" $_cur_vlan "*) ;; *) _ap_vlans="$_ap_vlans $_cur_vlan" ;; esac
+							fi
 						fi
 						_ap_vlans=${_ap_vlans# }
 						json_esc "$_ap_mgmt"; _ap_mgmtj=$JSV

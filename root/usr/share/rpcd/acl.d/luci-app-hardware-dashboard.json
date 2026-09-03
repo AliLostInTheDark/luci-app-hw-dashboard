@@ -10,7 +10,9 @@
 				"luci.hwdash.wifi": [ "wifi_clients" ],
 				"luci.hwdash.ctl": [ "get_config", "get_cpu_perf", "get_aql", "nat_test" ]
 			},
-			"cgi-io": [ "exec" ]
+			"file": {
+				"/proc/stat": [ "read" ]
+			}
 		},
 		"write": {
 			"ubus": {

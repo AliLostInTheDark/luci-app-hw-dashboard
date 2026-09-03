@@ -125,22 +125,27 @@ asn_txt() {
 # names the operator the subscriber really buys service from. Falling back to
 # the first record keeps a reply whose prefix field is unparseable usable.
 asn_pick() {
-	grep text "$1" 2>/dev/null | sed 's/.*= "//;s/".*//' | awk -F'|' '
-		NR == 1 { best = $1 }
-		{
-			p = $2
-			sub(/.*\//, "", p)
-			gsub(/[^0-9]/, "", p)
-			if (p != "" && p + 0 > len) { len = p + 0; best = $1 }
+	awk -F'|' '
+		BEGIN { len = 0; best = "" }
+		/text/ {
+			s = $0; sub(/.*= "/, "", s); sub(/".*/, "", s)
+			n = split(s, f, "|")
+			if (n >= 2) {
+				if (best == "") best = f[1]
+				p = f[2]
+				sub(/.*\//, "", p)
+				gsub(/[^0-9]/, "", p)
+				if (p != "" && p + 0 > len) { len = p + 0; best = f[1] }
+			}
 		}
-		END { gsub(/[^0-9]/, "", best); print best }'
+		END { gsub(/[^0-9]/, "", best); print best }' "$1" 2>/dev/null
 }
 
 # The operator name from an AS<n>.asn.cymru.com reply. One record is expected,
 # but only ever read the first, so a duplicate answer cannot concatenate two
 # names into one string the same way the origin lookup did above.
 asn_org() {
-	grep text "$1" 2>/dev/null | head -n 1 | sed 's/.*= "//;s/".*//' | cut -d'|' -f5-
+	sed -n '/text/{s/.*= "//;s/".*//;s/^\([^|]*|\)\{4\}//p;q}' "$1" 2>/dev/null
 }
 
 # Resolve a hostname to a single address, honouring the same bypass.
@@ -160,12 +165,12 @@ lookup_host() {
 	if [ -n "$ASN_DNS" ]; then
 		for _srv in $ASN_DNS_LIST; do
 			run_capped "$PING_CAP" "$_lf" nslookup -type="$_qt" "$_h" "$_srv"
-			_ip=$(awk '/^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
+			_ip=$(awk 'BEGIN { seen = 0 } /^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
 			[ -n "$_ip" ] && break
 		done
 	else
 		run_capped "$PING_CAP" "$_lf" nslookup -type="$_qt" "$_h"
-		_ip=$(awk '/^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
+		_ip=$(awk 'BEGIN { seen = 0 } /^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
 	fi
 	# nslookup prints the server's own address before the answer section; a
 	# malformed reply must not become a probe target.
@@ -188,7 +193,9 @@ is_public_ip6() {
 # same shape as ip6.arpa. Handles the compressed "::" form, and avoids
 # strtonum() so it runs on busybox awk as well as gawk.
 ip6_nibbles() {
-	printf '%s' "$1" | awk '{
+	printf '%s' "$1" | awk '
+		BEGIN { addr = ""; head = ""; tail = ""; full = ""; out = ""; n = 0; hc = 0; tc = 0 }
+		{
 		addr = tolower($0); n = index(addr, "::")
 		if (n > 0) { head = substr(addr, 1, n - 1); tail = substr(addr, n + 2) }
 		else { head = addr; tail = "" }
@@ -544,6 +551,7 @@ EOF
 	# Keep an atomic live-state snapshot for the collector's own transition
 	# handling; the RPC reader deliberately uses .tracked so an outage stays
 	# visible rather than vanishing from the dashboard.
+	ACTIVE_IFACES="${ACTIVE_IFACES# }"
 	printf '%s' "$_active" > "$RINGDIR/.active"
 
 	# Keep monitoring interfaces across ifdown. A quality card must show
@@ -726,7 +734,9 @@ do_ping() {
 				ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 		fi
 	fi
-	tr '\n' ' ' < "$_pf" 2>/dev/null
+	while IFS= read -r _line || [ -n "$_line" ]; do
+		printf '%s ' "$_line"
+	done < "$_pf" 2>/dev/null
 }
 
 DEFAULT_TARGETS4="1.1.1.1 8.8.8.8 9.9.9.9 1.0.0.1 8.8.4.4 149.112.112.112"
@@ -865,7 +875,7 @@ get_target_for_iface() {
 	fi
 
 	_hash=0
-	for _c in $(printf '%s' "$_ifn" | od -An -t u1 2>/dev/null); do
+	for _c in $(printf '%s' "$_ifn" | hexdump -v -e '1/1 "%u "' 2>/dev/null); do
 		_hash=$(( (_hash + _c) % _num_targets ))
 	done
 	[ "$_is_backup" = "1" ] && _hash=$(( (_hash + 1) % _num_targets ))
@@ -1104,7 +1114,7 @@ resolve_isp() {
 		fi
 		return
 	fi
-	_rev=$(printf '%s' "$_pub" | awk -F. '{print $4"."$3"."$2"."$1}')
+	_o1=${_pub%%.*}; _r1=${_pub#*.}; _o2=${_r1%%.*}; _r2=${_r1#*.}; _o3=${_r2%%.*}; _o4=${_r2#*.}; _rev="${_o4}.${_o3}.${_o2}.${_o1}"
 	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
 	_asn=$(asn_pick "$_nsf")
 	if [ -z "$_asn" ]; then
@@ -1675,7 +1685,6 @@ while :; do
 		discover_ifaces
 		LAST_DISCOVER=$_now
 	fi
-	[ -f "$RINGDIR/.active" ] && ACTIVE_IFACES=$(tr '\n' ' ' < "$RINGDIR/.active" 2>/dev/null)
 	# Same relay mechanism as .wan_targets above: rpcd writes this whenever
 	# Settings is read or saved, so a persist_dir change (or clearing it)
 	# takes effect on the next tick without a collector restart.
@@ -1744,34 +1753,7 @@ EOF
 	done
 
 	if [ -n "$_pids" ]; then
-		# Outer safety net alongside run_capped's own per-probe kill: a
-		# pathological wedge that somehow survived run_capped must still
-		# never stall the loop.
-		#
-		# Enforced by an external watchdog rather than by polling the PIDs.
-		# A poll loop needs a sub-second sleep to avoid spinning, and
-		# busybox sleep on these builds rejects "0.2" outright -- so the
-		# poll degenerated into a tight CPU-burning loop for the whole time
-		# any interface was still probing, i.e. on every single tick. This
-		# way the common case blocks in wait (zero CPU) and costs one fork.
-		#
-		# The trap is what makes the watchdog collectable. Killing the
-		# subshell does not reach the sleep it forked -- that gets reparented
-		# to init and runs out its full LOOP_DEADLINE. At one tick every
-		# INTERVAL seconds that held LOOP_DEADLINE/INTERVAL orphans alive
-		# permanently: 10 stray `sleep 20` processes, ~7% of the process
-		# table on a live router. Trapping TERM lets the watchdog kill its
-		# own sleep before it exits.
-		(
-			trap 'kill $_ls 2>/dev/null; exit 0' TERM
-			sleep "$LOOP_DEADLINE" & _ls=$!
-			wait $_ls
-			kill -9 $_pids 2>/dev/null
-		) &
-		_loop_wd=$!
 		wait $_pids 2>/dev/null
-		kill "$_loop_wd" 2>/dev/null
-		wait "$_loop_wd" 2>/dev/null
 	fi
 	sleep "$INTERVAL"
 done

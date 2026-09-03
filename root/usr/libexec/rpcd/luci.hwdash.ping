@@ -40,7 +40,7 @@ _resolve_off_resolver() {
 	[ -z "$HWDASH_DNS" ] && return
 	_rqt=A; [ "$2" = "6" ] && _rqt=AAAA
 	_rres=$(nslookup -type="$_rqt" "$1" "$HWDASH_DNS" 2>/dev/null | \
-		awk '/^Name:/ { s = 1 } s && /^Address/ { print $NF; exit }')
+		awk 'BEGIN { s = 0 } /^Name:/ { s = 1 } s && /^Address/ { print $NF; exit }')
 	case "$_rres" in ''|*[!0-9a-fA-F.:]*) return ;; esac
 	printf '%s' "$_rres"
 }
@@ -413,8 +413,10 @@ EOF
 					json_esc "$_rdns"; _rdj=$JSV
 					# report hosts without the internal %zone suffix
 					json_esc "${_pt_h%%%*}"
+					_unres_j="false"
+					[ "$_unres" = "1" ] && _unres_j="true"
 					[ $_PF -eq 0 ] && PINGS="$PINGS,"
-					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms,\"sent\":$_psnt,\"recv\":$_prcv,\"unresolved\":$([ "$_unres" = "1" ] && echo true || echo false)}"
+					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms,\"sent\":$_psnt,\"recv\":$_prcv,\"unresolved\":$_unres_j}"
 					_PF=0
 					_pi=$((_pi + 1))
 				done <<EOF

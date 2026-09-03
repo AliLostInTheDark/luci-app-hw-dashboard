@@ -98,8 +98,15 @@ case "$1" in
 				LOGICAL_CPUS=$(grep -c '^processor' /proc/cpuinfo)
 				PHYSICAL_CORES=$(cat /sys/devices/system/cpu/cpu*/topology/core_id 2>/dev/null | sort -u | wc -l)
 				[ "${PHYSICAL_CORES:-0}" -eq 0 ] && PHYSICAL_CORES=$LOGICAL_CPUS
-				MAX_FREQ_KHZ=$(cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq 2>/dev/null | sort -nr | head -n 1)
-				[ -z "$MAX_FREQ_KHZ" ] && MAX_FREQ_KHZ=0
+				MAX_FREQ_KHZ=0
+				for _f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+					[ -f "$_f" ] || continue
+					read -r _cur_f < "$_f" 2>/dev/null
+					case "$_cur_f" in
+						''|*[!0-9]*) continue ;;
+					esac
+					[ "$_cur_f" -gt "$MAX_FREQ_KHZ" ] && MAX_FREQ_KHZ=$_cur_f
+				done
 				# Exact physical DRAM from the devicetree memory node(s): reg is
 				# big-endian (addr,size) pairs — 8+8 bytes on arm64 (2/2 cells),
 				# 4+4 on arm32. One od fork, once ever (persisted with identity).
@@ -783,6 +790,7 @@ EOF_DMI
 				_ncpu=${LOGICAL_CPUS:-1}
 				if [ -f /proc/interrupts ]; then
 					IRQS="[$(awk -v ncpu="$_ncpu" '
+						BEGIN { first = 0 }
 						{
 							if ($1 !~ /:$/) next
 							num = substr($1, 1, length($1) - 1)
@@ -1553,9 +1561,20 @@ EOF
 				# the device; explains the enabled-channel set shown per radio.
 				REG_COUNTRY=""; REG_DFS=""
 				if command -v iw >/dev/null; then
-					_reg=$(iw reg get 2>/dev/null | grep -m1 '^country')
-					REG_COUNTRY=$(echo "$_reg" | awk '{print $2}' | tr -d ':')
-					REG_DFS=$(echo "$_reg" | grep -oE 'DFS-[A-Z]+' | head -1 | sed 's/DFS-//')
+					while read -r _w1 _w2 _w3 _; do
+						if [ "$_w1" = "country" ]; then
+							REG_COUNTRY=${_w2%:}
+							case "$_w3" in
+								DFS-*)
+									_tmp=${_w3#DFS-}
+									REG_DFS=${_tmp%%[!A-Z]*}
+									;;
+							esac
+							break
+						fi
+					done <<EOF_REG
+$(iw reg get 2>/dev/null)
+EOF_REG
 				fi
 				_wcd_json=""
 				if command -v wifi-chipset-detect >/dev/null; then
@@ -1639,6 +1658,7 @@ EOF
 						hw_nss=0
 						if [ "$phyname" != "Unknown" ] && command -v iw >/dev/null; then
 							hw_nss=$(iw phy "$phyname" info 2>/dev/null | awk '
+								BEGIN { m = 0 }
 								/MCS rate indexes supported:/ {
 									split($NF, a, "-"); n = int(a[2] / 8) + 1; if (n > m) m = n
 								}
@@ -1652,6 +1672,7 @@ EOF
 						enabled_ch=""
 						if [ -n "$freqlist" ]; then
 							enabled_ch=$(printf '%s\n' "$freqlist" | awk '
+								BEGIN { out = "" }
 								!/restricted/ && /Channel [0-9]+/ {
 									for (i = 1; i <= NF; i++) {
 										if ($i == "Channel") {
@@ -2025,12 +2046,13 @@ $(dmesg 2>/dev/null)
 EOF_DMESG
 					if [ -n "$_sqfs_maj" ] && [ -n "$_sqfs_min" ]; then
 						_sqfs_dev=$(awk -v maj="$_sqfs_maj" -v min="$_sqfs_min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
-						if [ -n "$_sqfs_dev" ] && [ -b "/dev/$_sqfs_dev" ] && command -v od >/dev/null; then
-							_sq_magic=$(od -An -tx1 -j0 -N4 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+						if [ -n "$_sqfs_dev" ] && [ -b "/dev/$_sqfs_dev" ] && command -v hexdump >/dev/null; then
+							_sq_magic=$(hexdump -v -n 4 -e '1/1 "%02x"' "/dev/$_sqfs_dev" 2>/dev/null)
 							if [ "$_sq_magic" = "68737173" ]; then
-								_sq_bsize=$(od -An -tu4 -j12 -N4 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
-								_sq_comp=$(od -An -tu2 -j20 -N2 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
-								_sq_used=$(od -An -tu8 -j40 -N8 "/dev/$_sqfs_dev" 2>/dev/null | tr -d ' \n')
+								_sq_bsize=$(hexdump -v -s 12 -n 4 -e '1/4 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
+								_sq_comp=$(hexdump -v -s 20 -n 2 -e '1/2 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
+								set -- $(hexdump -v -s 40 -n 8 -e '1/1 " %02x"' "/dev/$_sqfs_dev" 2>/dev/null)
+								_sq_used=$(( 0x$1 + (0x$2 << 8) + (0x$3 << 16) + (0x$4 << 24) + (0x$5 << 32) + (0x$6 << 40) + (0x$7 << 48) + (0x$8 << 56) ))
 								case "$_sq_comp" in
 									1) _sq_comp_name="gzip" ;;
 									2) _sq_comp_name="lzma" ;;
@@ -2262,6 +2284,7 @@ EOF_LSCPU
 					# line and reports its ISA through uname instead.
 					if [ -z "$CPU_BOGO" ] || [ -z "$CPU_FEATURES" ] || [ -z "$CPU_ISA" ]; then
 						_cpud=$(awk -F: '
+							BEGIN { b = ""; f = ""; a = ""; m = "" }
 							/^[Bb]ogo[Mm][Ii][Pp][Ss]/ { if (!b) { gsub(/[ \t]/,"",$2); b=$2 } }
 							/^(Features|flags)/        { if (!f) { sub(/^[ \t]+/,"",$2); f=$2 } }
 							/^CPU architecture/        { if (!a) { gsub(/[ \t]/,"",$2); a=$2 } }

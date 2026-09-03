@@ -1,6 +1,12 @@
 BEGIN {
     print "{"
     first_phy = 1
+    phy = ""
+    in_freq = 0
+    in_eht = 0
+    band = ""
+    max_cw = "20 MHz"
+    max_spatial = 1
 }
 /^Wiphy/ {
     if (phy != "") { print_phy() }
