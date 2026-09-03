@@ -40,7 +40,11 @@ case "$1" in
 				# RFC1918 address to an ONT) out of a card about internet
 				# connections.
 				_wi_ifaces=""
-				[ -f "$WI_DIR/.tracked" ] && _wi_ifaces=$(tr '\n' ' ' < "$WI_DIR/.tracked" 2>/dev/null)
+				if [ -f "$WI_DIR/.tracked" ]; then
+					while read -r _wif_l; do
+						[ -n "$_wif_l" ] && _wi_ifaces="$_wi_ifaces $_wif_l"
+					done < "$WI_DIR/.tracked"
+				fi
 				# One uci snapshot for the whole call, not a lookup per
 				# interface. It is needed because netifd resolves an alias away
 				# before status reports it: wan6 configured as device '@wan'
@@ -59,41 +63,38 @@ case "$1" in
 					[ -z "$_wst" ] && continue
 					# Only interfaces that actually carry a default route are
 					# WANs; without this every bridge and VLAN shows up.
-					_wup=""; _wproto=""; _wdev=""; _wpar=""; _wv4=""; _wm4=""; _wv6=""
+					_wup=""; _wproto=""; _wdev=""; _wpar=""; _wv4=""; _wm4=""
+					_wv6_all=""; _wsnat=""; _wsnattgt=""; _p_addr=""; _p_mask=""
+					_pa_addr=""; _pa_mask=""
 					eval "$(printf '%s' "$_wst" | jsonfilter \
-						-e '_wup=@.up' -e '_wproto=@.proto' -e '_wdev=@.l3_device' \
+						-e '_wup=@.up' \
+						-e '_wproto=@.proto' \
+						-e '_wdev=@.l3_device' \
 						-e '_wpar=@.device' \
-						-e '_wv4=@["ipv4-address"][0].address' -e '_wm4=@["ipv4-address"][0].mask' 2>/dev/null)" 2>/dev/null
+						-e '_wv4=@["ipv4-address"][0].address' \
+						-e '_wm4=@["ipv4-address"][0].mask' \
+						-e '_wv6_all=@["ipv6-address"][*].address' \
+						-e '_wsnat=@.data.firewall[0].snat_ip' \
+						-e '_wsnattgt=@.data.firewall[0].target' \
+						-e '_p_addr=@["ipv6-prefix"][0].address' \
+						-e '_p_mask=@["ipv6-prefix"][0].mask' \
+						-e '_pa_addr=@["ipv6-prefix-assignment"][0].address' \
+						-e '_pa_mask=@["ipv6-prefix-assignment"][0].mask' 2>/dev/null)" 2>/dev/null
 
-					_wv6_all=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null)
+					_wv6=""
 					for _a6 in $_wv6_all; do
 						case "$_a6" in
 							fe80:*|FE80:*|fc*|FC*|fd*|FD*|127.*|::1) ;;
 							*:*) _wv6="$_a6"; break ;;
 						esac
 					done
-					[ -z "$_wv6" ] && _wv6=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null)
+					if [ -z "$_wv6" ]; then
+						set -- $_wv6_all
+						_wv6=$1
+					fi
 
-					# 464xlat's clat device (proto=464xlat) reports neither an
-					# ipv4-address nor an ipv6-address at all over ubus -- its
-					# whole job is kernel-level NAT46 translation, not holding
-					# a routable address of its own -- so it fell through the
-					# empty-address filter below and never showed up here at
-					# all, on an interface that exists specifically to carry
-					# IPv4. netifd's own 464xlat handler already publishes the
-					# address the kernel actually SNATs from (RFC 7335's
-					# default 192.0.0.1) as firewall data for firewall3/4 to
-					# consume; reusing that as this interface's effective
-					# IPv4 identity is accurate, not a guess -- it is
-					# genuinely the address every outbound v4 packet here
-					# gets translated from before the kernel turns it into
-					# IPv6 for the wire.
-					if [ -z "$_wv4" ] && [ -z "$_wv6" ]; then
-						_wsnat=""; _wsnattgt=""
-						eval "$(printf '%s' "$_wst" | jsonfilter \
-							-e '_wsnat=@.data.firewall[0].snat_ip' \
-							-e '_wsnattgt=@.data.firewall[0].target' 2>/dev/null)" 2>/dev/null
-						[ "$_wsnattgt" = "SNAT" ] && [ -n "$_wsnat" ] && _wv4="$_wsnat"
+					if [ -z "$_wv4" ] && [ -z "$_wv6" ] && [ "$_wsnattgt" = "SNAT" ] && [ -n "$_wsnat" ]; then
+						_wv4="$_wsnat"
 					fi
 
 					# Alias detection. uci device='@wan' means this interface is
@@ -110,31 +111,19 @@ case "$1" in
 					[ -z "$_wv4" ] && [ -z "$_wv6" ] && continue
 
 					# Delegated IPv6 Prefix detection (PR #24469 multi-prefix support & strict alias isolation)
-					_wpfx=""
-					_wpfxlen=""
-					_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
-					_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
-					if [ -z "$_p_addrs" ]; then
-						_p_addrs=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
-						_p_masks=$(printf '%s' "$_wst" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
-					fi
-					# 1. If empty and this interface is an alias child (device='@parent'), check parent status
-					if [ -z "$_p_addrs" ] && [ -n "$_walias" ]; then
+					_wpfx=${_p_addr:-$_pa_addr}
+					_wpfxlen=${_p_mask:-$_pa_mask}
+					if [ -z "$_wpfx" ] && [ -n "$_walias" ]; then
 						_ast=$(ubus call "network.interface.$_walias" status 2>/dev/null)
 						if [ -n "$_ast" ]; then
-							_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null)
-							_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix"][*].mask' 2>/dev/null)
-							if [ -z "$_p_addrs" ]; then
-								_p_addrs=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].address' 2>/dev/null)
-								_p_masks=$(printf '%s' "$_ast" | jsonfilter -e '@["ipv6-prefix-assignment"][*].mask' 2>/dev/null)
-							fi
+							eval "$(printf '%s' "$_ast" | jsonfilter \
+								-e '_p_addr=@["ipv6-prefix"][0].address' \
+								-e '_p_mask=@["ipv6-prefix"][0].mask' \
+								-e '_pa_addr=@["ipv6-prefix-assignment"][0].address' \
+								-e '_pa_mask=@["ipv6-prefix-assignment"][0].mask' 2>/dev/null)" 2>/dev/null
+							_wpfx=${_p_addr:-$_pa_addr}
+							_wpfxlen=${_p_mask:-$_pa_mask}
 						fi
-					fi
-					if [ -n "$_p_addrs" ]; then
-						set -- $_p_addrs
-						_wpfx=$1
-						set -- $_p_masks
-						_wpfxlen=$1
 					fi
 
 					_wpub=""

@@ -23,6 +23,8 @@
 # single default WAN (no mwan3 at all) has no fwmark to look up and
 # doesn't need the wrapper, so device-bound ping/curl works directly.
 
+trap '_j=$(jobs -p); [ -n "$_j" ] && kill $_j 2>/dev/null; exit 0' TERM INT
+
 RINGDIR=/tmp/hwdash_wanmon
 INTERVAL=2
 # A hotplug event forces immediate discovery on a network transition. This
@@ -1566,15 +1568,19 @@ process_down_iface() {
 	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
 	_total=$((_total + 1))
 	_was_status=$_status
-	if [ "$_status" != "down" ]; then
-		_status="down"
-		_streak_start=$_now
+	_consec_miss=$((_consec_miss + 1))
+	if [ "$_consec_miss" -lt 2 ] && [ "$_status" = "up" ]; then
+		_new_status="up"
+	else
+		_new_status="down"
+		if [ "$_status" != "down" ]; then
+			_streak_start=$_now
+		fi
 	fi
-	# Interface is genuinely down (netifd withdrew its route), so always
-	# count it as a failure -- no debounce needed.
+	_status="$_new_status"
 	printf '%d %d %s %d %s %d\n' \
 		"$_total" "$_success" "$_status" "$_streak_start" \
-		"$_lastgood_ms" "$MISS_THRESHOLD" > "$_stats_file"
+		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
 	record_window_sample "$_ifn" 0
 	# Mirror the same forced-down accounting into .gwstats, but only for an
 	# interface that actually has one -- its presence is what tells us this
@@ -1643,7 +1649,7 @@ process_down_iface() {
 	fi
 	# Logged after the reason is known, so the one line in syslog carries the
 	# cause rather than just the fact.
-	if [ "$_was_status" = "up" ]; then
+	if [ "$_was_status" = "up" ] && [ "$_status" = "down" ]; then
 		_lg_code=""; _lg_text=""
 		read -r _ _lg_code _lg_text < "$_reason_file" 2>/dev/null
 		log_transition "$_ifn" down "$_lg_text"

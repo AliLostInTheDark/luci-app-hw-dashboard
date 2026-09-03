@@ -1294,20 +1294,6 @@ EOF
 				done
 				ETH_LINKS="$ETH_LINKS]"
 
-
-				RX_TOTAL=0
-				TX_TOTAL=0
-				while read -r line; do
-					case "$line" in
-						*:*)
-							rest="${line#*:}"
-							set -- $rest
-							RX_TOTAL=$((RX_TOTAL + ${1:-0}))
-							TX_TOTAL=$((TX_TOTAL + ${9:-0}))
-							;;
-					esac
-				done < /proc/net/dev
-
 				# Correlate raw partitions that back an active loop device (e.g.
 				# x86 images that carve out a raw partition for the f2fs
 				# overlay and loop-mount it directly, with no filesystem of
@@ -1715,12 +1701,7 @@ EOF
 				_cache_write "$WIFI_CACHE" 30 "$WIFI_RADIOS"
 				}
 				if _cache_read "$WIFI_CACHE"; then
-					if command -v wifi-chipset-detect >/dev/null 2>&1 && case "$C_VAL" in *'"wcd_chipset":""'*|*'"wcd_chipset": ""'*) true ;; *) false ;; esac; then
-						rm -f "$WIFI_CACHE" "$WIFI_CACHE.lock" 2>/dev/null
-						_wifi_refresh
-					else
-						WIFI_RADIOS=$C_VAL
-					fi
+					WIFI_RADIOS=$C_VAL
 				elif [ -n "$C_VAL" ]; then
 					WIFI_RADIOS=$C_VAL
 					if ! _cache_read "$WIFI_CACHE.lock"; then
@@ -1812,8 +1793,7 @@ EOF
 				_SI_EXP=0
 				[ -f "$STORAGE_INV_CACHE" ] && . "$STORAGE_INV_CACHE" 2>/dev/null
 				case "$_SI_EXP" in ''|*[!0-9]*) _SI_EXP=0 ;; esac
-				[ "$_SI_EXP" -le "${HWDASH_NOW:-0}" ] && MTD_PARTS=""
-				if [ -z "$MTD_PARTS" ]; then
+				if [ -z "$MTD_PARTS" ] || [ "$_SI_EXP" -le "${HWDASH_NOW:-0}" ]; then
 					_storage_inv_refresh() {
 					# Legacy UBI compat
 					UBI_MAX_EC=0
@@ -1966,13 +1946,15 @@ EOF
 					printf "ECC_BASE_DATE=%s\n" "${ECC_BASE_DATE:-0}"
 				} > "$STORAGE_INV_CACHE.$$" 2>/dev/null && mv "$STORAGE_INV_CACHE.$$" "$STORAGE_INV_CACHE" 2>/dev/null
 					}
-					if ! _cache_read "$STORAGE_INV_CACHE.lock"; then
+					if [ -z "$MTD_PARTS" ]; then
+						_storage_inv_refresh
+					elif ! _cache_read "$STORAGE_INV_CACHE.lock"; then
 						_cache_write "$STORAGE_INV_CACHE.lock" 30 refreshing
 						( _storage_inv_refresh ) >/dev/null 2>&1 &
 					fi
-					UBI_DEVS="[]"
-					MTD_PARTS="[]"
 				fi
+				[ -z "$UBI_DEVS" ] && UBI_DEVS="[]"
+				[ -z "$MTD_PARTS" ] && MTD_PARTS="[]"
 				# eMMC / SD health
 				EMMC_INFO="null"
 				for mmc in /sys/class/block/mmcblk[0-9]*; do
@@ -2031,44 +2013,34 @@ EOF
 				if _cache_read "$_sqfs_cache"; then
 					[ -n "$C_VAL" ] && SQUASHFS_INFO="$C_VAL"
 				else
-					_sqfs_maj=""; _sqfs_min=""
-					while read -r _sl; do
-						case "$_sl" in
-							*"squashfs filesystem"*"on device "*)
-								_sqfs_mm=${_sl##*on device }
-								_sqfs_mm=${_sqfs_mm%.}
-								_sqfs_maj=${_sqfs_mm%%:*}
-								_sqfs_min=${_sqfs_mm#*:}
-								;;
-						esac
-					done <<EOF_DMESG
-$(dmesg 2>/dev/null)
-EOF_DMESG
-					if [ -n "$_sqfs_maj" ] && [ -n "$_sqfs_min" ]; then
-						_sqfs_dev=$(awk -v maj="$_sqfs_maj" -v min="$_sqfs_min" '$1==maj && $2==min {print $3}' /proc/diskstats 2>/dev/null)
-						if [ -n "$_sqfs_dev" ] && [ -b "/dev/$_sqfs_dev" ] && command -v hexdump >/dev/null; then
-							_sq_magic=$(hexdump -v -n 4 -e '1/1 "%02x"' "/dev/$_sqfs_dev" 2>/dev/null)
-							if [ "$_sq_magic" = "68737173" ]; then
-								_sq_bsize=$(hexdump -v -s 12 -n 4 -e '1/4 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
-								_sq_comp=$(hexdump -v -s 20 -n 2 -e '1/2 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
-								set -- $(hexdump -v -s 40 -n 8 -e '1/1 " %02x"' "/dev/$_sqfs_dev" 2>/dev/null)
-								_sq_used=0
-								if [ "$#" -eq 8 ]; then
-									_sq_used=$(( 0x$1 + (0x$2 << 8) + (0x$3 << 16) + (0x$4 << 24) + (0x$5 << 32) + (0x$6 << 40) + (0x$7 << 48) + (0x$8 << 56) ))
-								fi
-								case "$_sq_comp" in
-									1) _sq_comp_name="gzip" ;;
-									2) _sq_comp_name="lzma" ;;
-									3) _sq_comp_name="lzo" ;;
-									4) _sq_comp_name="xz" ;;
-									5) _sq_comp_name="lz4" ;;
-									6) _sq_comp_name="zstd" ;;
-									*) _sq_comp_name="" ;;
-								esac
-								case "$_sq_bsize" in ''|*[!0-9]*) _sq_bsize=0 ;; esac
-								case "$_sq_used" in ''|*[!0-9]*) _sq_used=0 ;; esac
-								SQUASHFS_INFO="{\"dev\":\"$_sqfs_dev\",\"compression\":\"$_sq_comp_name\",\"block_size\":$_sq_bsize,\"bytes_used\":$_sq_used}"
-							fi
+					_sq_mm=$(awk '$5=="/rom" {print $3; exit}' /proc/self/mountinfo 2>/dev/null)
+					_sqfs_dev=""
+					if [ -n "$_sq_mm" ]; then
+						_sqfs_maj=${_sq_mm%%:*}; _sqfs_min=${_sq_mm#*:}
+						_sqfs_dev=$(awk -v maj="$_sqfs_maj" -v min="$_sqfs_min" '$1==maj && $2==min {print $3; exit}' /proc/diskstats 2>/dev/null)
+					fi
+					if [ -z "$_sqfs_dev" ]; then
+						_sqfs_dev=$(awk '$2=="/rom" && $3=="squashfs" {print $1; exit}' /proc/mounts 2>/dev/null)
+						_sqfs_dev=${_sqfs_dev##*/}
+					fi
+					if [ -n "$_sqfs_dev" ] && [ -b "/dev/$_sqfs_dev" ] && command -v hexdump >/dev/null; then
+						set -- $(hexdump -v -n 48 -e '1/1 " %02x"' "/dev/$_sqfs_dev" 2>/dev/null)
+						if [ "$1$2$3$4" = "68737173" ] && [ "$#" -eq 48 ]; then
+							_sq_bsize=$(( 0x$13 + (0x$14 << 8) + (0x$15 << 16) + (0x$16 << 24) ))
+							_sq_comp=$(( 0x$21 + (0x$22 << 8) ))
+							_sq_used=$(( 0x$41 + (0x$42 << 8) + (0x$43 << 16) + (0x$44 << 24) + (0x$45 << 32) + (0x$46 << 40) + (0x$47 << 48) + (0x$48 << 56) ))
+							case "$_sq_comp" in
+								1) _sq_comp_name="gzip" ;;
+								2) _sq_comp_name="lzma" ;;
+								3) _sq_comp_name="lzo" ;;
+								4) _sq_comp_name="xz" ;;
+								5) _sq_comp_name="lz4" ;;
+								6) _sq_comp_name="zstd" ;;
+								*) _sq_comp_name="" ;;
+							esac
+							case "$_sq_bsize" in ''|*[!0-9]*) _sq_bsize=0 ;; esac
+							case "$_sq_used" in ''|*[!0-9]*) _sq_used=0 ;; esac
+							SQUASHFS_INFO="{\"dev\":\"$_sqfs_dev\",\"compression\":\"$_sq_comp_name\",\"block_size\":$_sq_bsize,\"bytes_used\":$_sq_used}"
 						fi
 					fi
 					_cache_write "$_sqfs_cache" 86400 "$SQUASHFS_INFO"

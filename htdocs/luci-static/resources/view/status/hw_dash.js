@@ -736,8 +736,9 @@ return view.extend({
                 topLabel.textContent = yhi + opts.unit;
                 if (opts.legend) syncLegend();
                 if (P.hoverFrac != null) {
-                    if (plot.getBoundingClientRect().width) applyHover(P.hoverFrac);
-                    else window.requestAnimationFrame(function() { if (P.hoverFrac != null) applyHover(P.hoverFrac); });
+                    window.requestAnimationFrame(function() {
+                        if (P.hoverFrac != null && plot && plot.getBoundingClientRect().width) applyHover(P.hoverFrac);
+                    });
                 }
             };
             return { el: el, update: update, currentSeries: function() { return P.series; }, currentView: function() { return P.view; } };
@@ -5193,7 +5194,7 @@ return view.extend({
 
                             if (chStr) cardRows.push(makeWfRow('Current Channel', chStr));
 
-                            if (surveyStr) cardRows.push(makeWfRow('Channel Load', E('span', { style: 'color:' + getDynColor(busyPct) + ';' }, surveyStr)));
+                            if (surveyStr) cardRows.push(makeWfRow('Channel Load', E('span', { class: 'hw-wifi-load-val', 'data-wiface': w.iface, style: 'color:' + getDynColor(busyPct) + ';' }, surveyStr)));
 
                             if (noiseVal < 0) cardRows.push(makeWfRow('Noise Floor', noiseVal + ' dBm'));
 
@@ -5224,7 +5225,7 @@ return view.extend({
                                 ]),
                                 E('div', { class: 'hw-wifi-card-body' }, cardRows)
                             ]));
-                            wifiSigParts.push(w.iface + '|' + chStr + '|' + surveyStr + '|' + noiseVal + '|' + regStr + '|' + cfgMaxBr + '|' + chipMaxBr);
+                            wifiSigParts.push(w.iface + '|' + chStr + '|' + noiseVal + '|' + regStr + '|' + cfgMaxBr + '|' + chipMaxBr);
                         });
                         if (sigGate(self._sig, 'wifi', wifiSigParts.join(';'))) {
                             wfNode.innerHTML = '';
@@ -5246,6 +5247,18 @@ return view.extend({
                                 });
                                 wfNode.appendChild(wRow);
                             }
+                        } else {
+                            res.wifi_radios.forEach(function(w) {
+                                var surv = res.wifi_survey && res.wifi_survey[w.iface];
+                                var busyPct = (surv && surv.active > 0) ? Math.round((surv.busy / surv.active) * 100) : null;
+                                var surveyStr = busyPct != null ? busyPct + '% busy' : '';
+                                if (surveyStr) {
+                                    var el = wfNode.querySelector('.hw-wifi-load-val[data-wiface="' + w.iface + '"]');
+                                    if (el) {
+                                        el.textContent = surveyStr;
+                                        el.style.color = getDynColor(busyPct);
+                                    }
+                                }
                         }
                         wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
                     }
@@ -6033,6 +6046,9 @@ return view.extend({
             poll.remove(self.pollFn);
         }
         self.pollFn = function() {
+            if (document.hidden) {
+                return Promise.resolve();
+            }
             hwTick++;
             if (hwTick % 2 === 1) wanQTick();
             else pingTick();

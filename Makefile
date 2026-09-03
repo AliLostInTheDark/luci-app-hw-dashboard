@@ -6,7 +6,7 @@ LUCI_DEPENDS:=+luci-base +curl
 LUCI_PKGARCH:=all
 PKG_ARCH:=all
 PKG_VERSION:=1.2.6
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
 
@@ -38,6 +38,18 @@ define Package/luci-app-hw-dashboard/postinst
 		/etc/init.d/hwdash-aql start 2>/dev/null
 	}
 	( sleep 3; ubus call luci.hwdash info >/dev/null 2>&1; ubus call luci.hwdash info >/dev/null 2>&1 ) &
+	exit 0
+}
+endef
+
+define Package/luci-app-hw-dashboard/prerm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	/etc/init.d/hwdash-wanmon stop 2>/dev/null
+	/etc/init.d/hwdash-wanmon disable 2>/dev/null
+	/etc/init.d/hwdash-aql stop 2>/dev/null
+	/etc/init.d/hwdash-aql disable 2>/dev/null
+	rm -rf /tmp/hwdash*
 	exit 0
 }
 endef

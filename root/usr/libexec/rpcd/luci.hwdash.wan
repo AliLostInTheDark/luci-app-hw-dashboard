@@ -20,9 +20,12 @@ case "$1" in
 				WAN_QUALITY="null"
 				_wm_dir=/tmp/hwdash_wanmon
 				if [ -d "$_wm_dir" ]; then
-					_wm_tracked="$_wm_dir/.tracked"
 					_wm_tr=""
-					[ -f "$_wm_tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_tracked" 2>/dev/null)
+					if [ -f "$_wm_tracked" ]; then
+						while read -r _tif; do
+							[ -n "$_tif" ] && _wm_tr="$_wm_tr $_tif"
+						done < "$_wm_tracked"
+					fi
 					_wm_items=""
 					_wm_first=1
 					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
@@ -169,7 +172,11 @@ case "$1" in
 				if [ -f "$_wm_dir/.apmode" ]; then
 					WM_APMODE=true
 					_wm_tr=""
-					[ -f "$_wm_dir/.tracked" ] && _wm_tr=$(tr '\n' ' ' < "$_wm_dir/.tracked" 2>/dev/null)
+					if [ -f "$_wm_dir/.tracked" ]; then
+						while read -r _tif; do
+							[ -n "$_tif" ] && _wm_tr="$_wm_tr $_tif"
+						done < "$_wm_dir/.tracked"
+					fi
 					read -r _wm_uptime_now _ < /proc/uptime; _wm_uptime_now=${_wm_uptime_now%%.*}
 					# One uci snapshot for the whole call, not a lookup per
 					# interface -- same reasoning as wan_ips' own _wi_uci.
