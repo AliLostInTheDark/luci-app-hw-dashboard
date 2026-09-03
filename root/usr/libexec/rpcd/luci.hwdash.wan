@@ -222,10 +222,11 @@ case "$1" in
 								;;
 						esac
 						if [ -n "$_ap_dev" ] && [ -n "$_ap_uci" ]; then
+							_q="'"
 							_cur_dev=""; _cur_vlan=""; _cur_idx=""
 							while read -r _bv_l; do
 								case "$_bv_l" in
-									"network.@bridge-vlan["*)
+									"network.@bridge-vlan["*.*=*)
 										_bv_rest=${_bv_l#network.@bridge-vlan[}
 										_idx=${_bv_rest%%]*}
 										_prop=${_bv_rest#*].}
@@ -239,12 +240,12 @@ case "$1" in
 										fi
 										case "$_prop" in
 											device=*)
-												_v=${_prop#*\'}
-												_cur_dev=${_v%\'*}
+												_v=${_prop#*=}
+												_v=${_v#"$_q"}; _cur_dev=${_v%"$_q"}
 												;;
 											vlan=*)
-												_v=${_prop#*\'}
-												_cur_vlan=${_v%\'*}
+												_v=${_prop#*=}
+												_v=${_v#"$_q"}; _cur_vlan=${_v%"$_q"}
 												;;
 										esac
 										;;

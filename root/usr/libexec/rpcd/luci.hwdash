@@ -2052,7 +2052,10 @@ EOF_DMESG
 								_sq_bsize=$(hexdump -v -s 12 -n 4 -e '1/4 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
 								_sq_comp=$(hexdump -v -s 20 -n 2 -e '1/2 "%u"' "/dev/$_sqfs_dev" 2>/dev/null)
 								set -- $(hexdump -v -s 40 -n 8 -e '1/1 " %02x"' "/dev/$_sqfs_dev" 2>/dev/null)
-								_sq_used=$(( 0x$1 + (0x$2 << 8) + (0x$3 << 16) + (0x$4 << 24) + (0x$5 << 32) + (0x$6 << 40) + (0x$7 << 48) + (0x$8 << 56) ))
+								_sq_used=0
+								if [ "$#" -eq 8 ]; then
+									_sq_used=$(( 0x$1 + (0x$2 << 8) + (0x$3 << 16) + (0x$4 << 24) + (0x$5 << 32) + (0x$6 << 40) + (0x$7 << 48) + (0x$8 << 56) ))
+								fi
 								case "$_sq_comp" in
 									1) _sq_comp_name="gzip" ;;
 									2) _sq_comp_name="lzma" ;;
