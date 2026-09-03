@@ -5259,6 +5259,7 @@ return view.extend({
                                         el.style.color = getDynColor(busyPct);
                                     }
                                 }
+                            });
                         }
                         wifiCard.style.display = wifiRendered > 0 ? 'flex' : 'none';
                     }
