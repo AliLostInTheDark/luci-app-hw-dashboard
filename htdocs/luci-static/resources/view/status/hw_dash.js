@@ -47,17 +47,6 @@ var callHwSetCpuPerf = rpc.declare({
     params: ['perf'],
     expect: {}
 });
-var callHwGetAql = rpc.declare({
-    object: 'luci.hwdash.ctl',
-    method: 'get_aql',
-    expect: {}
-});
-var callHwSetAql = rpc.declare({
-    object: 'luci.hwdash.ctl',
-    method: 'set_aql',
-    params: ['aql'],
-    expect: {}
-});
 var callHwWifiClients = rpc.declare({
     object: 'luci.hwdash.wifi',
     method: 'wifi_clients',
@@ -1027,8 +1016,6 @@ return view.extend({
             E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
         ]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-        var offloadCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Offload Engines'), E('div', { id: 'hw-offload', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-        var aqlCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Wireless AQL'), E('div', { id: 'hw-aql', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var irqCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Interrupts'), E('div', { id: 'hw-irq', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
@@ -1045,8 +1032,6 @@ return view.extend({
         container.appendChild(coresCard);
         container.appendChild(irqCard);
         container.appendChild(hwmonCard);
-        container.appendChild(offloadCard);
-        container.appendChild(aqlCard);
         container.appendChild(dskCard.node);
         container.appendChild(extCard);
         var myExtWrapper = E('div', {
@@ -1379,8 +1364,6 @@ return view.extend({
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
             cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
-            offload: { nodes: [offloadCard], label: 'Offload Engines', show: null },
-            aql: { nodes: [aqlCard], label: 'Wireless AQL', show: null },
             irq: { nodes: [irqCard], label: 'Interrupts', show: null },
             events: { nodes: [eventsCard], label: 'Hardware Events', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
@@ -1802,7 +1785,7 @@ return view.extend({
                     // argument as {perf: <arg>}, so passing {perf:{...}} here
                     // sent {perf:{perf:{...}}}. The backend reads @.perf.governor,
                     // found nothing, and rejected every apply as invalid --
-                    // pass the value directly, as set_config/set_aql do.
+                    // pass the value directly, as set_config does.
                     callHwSetCpuPerf({
                         governor: govSel.value,
                         min_freq: minV * 1000,
@@ -1845,151 +1828,6 @@ return view.extend({
                     ? 'Applies immediately and persists across reboot (synced to /etc/config/cpu-perf).'
                     : 'Applies immediately; resets after reboot. Install luci-app-cpu-perf to persist.'));
         };
-        // --- Wireless AQL settings ------------------------------------
-        // Save / Revert / Reset follow LuCI's own semantics:
-        //   Save   - apply to the live radios AND persist to UCI
-        //   Revert - discard unsaved edits, reload what is persisted
-        //   Reset  - drop the persisted section and restore mac80211 defaults
-        var aqlBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
-        settingsPanel.appendChild(cbiSection('Wireless AQL (Airtime Queue Limits)', null, aqlBody));
-
-        var AQL_PRESETS = {
-            latency:   { low: 1500, high: 2500, label: 'Latency (1500 / 2500)' },
-            balanced:  { low: 5000, high: 12000, label: 'Balanced (5000 / 12000)' },
-            bandwidth: { low: 15000, high: 20000, label: 'Bandwidth (15000 / 20000)' }
-        };
-        var buildAqlForm = function(aq) {
-            aqlBody.innerHTML = '';
-            aqlBody.style.opacity = '1';
-            if (!aq || !aq.available) {
-                aqlSaveCurrent = function() { return Promise.resolve({ result: 'skipped' }); };
-                aqlBody.appendChild(E('div', { style: 'opacity: 0.7; line-height: 1.5;' },
-                    (aq && aq.debugfs === 0)
-                        ? 'Not available: debugfs is not mounted on this build (needs CONFIG_DEBUG_FS, mounted at /sys/kernel/debug).'
-                        : 'Not available: debugfs is present, but this kernel exposes no mac80211 AQL controls under /sys/kernel/debug/ieee80211 (needs CONFIG_MAC80211_DEBUGFS).'));
-                return;
-            }
-            var def = aq.defaults || { low: 5000, high: 12000, threshold: 24000 };
-            var saved = aq.saved || {};
-            // What the radios are running right now, which is the honest
-            // starting point when nothing has been persisted yet.
-            var live = (aq.phys && aq.phys[0]) || null;
-            var liveBe = null;
-            if (live && live.limits) live.limits.forEach(function(l) { if (l.ac === 'BE') liveBe = l; });
-            var curLow  = saved.low  != null ? saved.low  : (liveBe ? liveBe.low  : def.low);
-            var curHigh = saved.high != null ? saved.high : (liveBe ? liveBe.high : def.high);
-            var curTh   = saved.threshold != null ? saved.threshold : (live ? live.threshold : def.threshold);
-            var curEn   = saved.enable != null ? saved.enable : (live && live.enable === 0 ? 0 : 1);
-
-            if (aq.wed_active) {
-                aqlBody.appendChild(E('div', {
-                    style: 'margin-bottom: 10px; padding: 8px 10px; border-left: 3px solid #ffa726; background: rgba(255,167,38,0.08); font-size: 0.82em; line-height: 1.45;'
-                }, 'WED is active' + (aq.wed_devs ? ' (' + aq.wed_devs + ')' : '') + '. It offloads the Wi\u2011Fi datapath in hardware and bypasses mac80211\u2019s queues entirely, so AQL does not govern that traffic and these values will have no effect. Disable WED to tune latency with AQL \u2014 the two are mutually exclusive.'));
-            }
-
-            var presetSel = E('select', { class: 'cbi-input-select', style: 'width: 260px;' });
-            Object.keys(AQL_PRESETS).forEach(function(k) {
-                presetSel.appendChild(E('option', { value: k }, AQL_PRESETS[k].label));
-            });
-            presetSel.appendChild(E('option', { value: 'custom' }, 'Custom'));
-            var lowInput  = E('input', { type: 'text', class: 'cbi-input-text', value: String(curLow),  style: 'width: 110px;' });
-            var highInput = E('input', { type: 'text', class: 'cbi-input-text', value: String(curHigh), style: 'width: 110px;' });
-            var thInput   = E('input', { type: 'text', class: 'cbi-input-text', value: String(curTh),   style: 'width: 110px;' });
-            var enCb = E('input', { type: 'checkbox', style: 'width: 18px; height: 18px;' });
-            enCb.checked = curEn !== 0;
-
-            var syncPreset = function() {
-                var m = 'custom';
-                Object.keys(AQL_PRESETS).forEach(function(k) {
-                    if (String(AQL_PRESETS[k].low) === lowInput.value.trim() &&
-                        String(AQL_PRESETS[k].high) === highInput.value.trim()) m = k;
-                });
-                presetSel.value = m;
-            };
-            syncPreset();
-            presetSel.addEventListener('change', function() {
-                var pr = AQL_PRESETS[presetSel.value];
-                if (!pr) return;
-                lowInput.value = String(pr.low);
-                highInput.value = String(pr.high);
-            });
-            lowInput.addEventListener('input', syncPreset);
-            highInput.addEventListener('input', syncPreset);
-
-            var msg = E('span', { style: 'margin-left: 10px; font-size: 0.85em;' });
-            var setMsg = function(t, c) { msg.textContent = t; msg.style.color = c || ''; };
-            var busy = function(b) {
-                [saveBtn, revertBtn, resetBtn].forEach(function(x) { x.disabled = b; });
-            };
-            var reload = function(note) {
-                return callHwGetAql().then(function(fresh) {
-                    buildAqlForm(fresh);
-                    if (note) setTimeout(function() {
-                        var m2 = aqlBody.querySelector('[data-aqlmsg]');
-                        if (m2) { m2.textContent = note.t; m2.style.color = note.c; }
-                    }, 0);
-                });
-            };
-            var saveBtn = E('button', { class: 'cbi-button cbi-button-save' }, 'Save');
-            var revertBtn = E('button', { class: 'cbi-button' }, 'Revert');
-            var resetBtn = E('button', { class: 'cbi-button cbi-button-reset' }, 'Reset');
-            msg.setAttribute('data-aqlmsg', '1');
-
-            saveBtn.addEventListener('click', function() {
-                var lo = parseInt(lowInput.value, 10), hi = parseInt(highInput.value, 10), th = parseInt(thInput.value, 10);
-                if (!(lo > 0) || !(hi > 0) || lo > hi) { setMsg('Low must be a number \u2264 high.', '#ff5252'); return; }
-                busy(true); setMsg('Applying\u2026');
-                callHwSetAql({ low: lo, high: hi, threshold: th > 0 ? th : def.threshold, enable: enCb.checked ? 1 : 0 })
-                    .then(function(r) {
-                        busy(false);
-                        if (r && r.result === 'ok') reload({ t: 'Saved and applied.', c: '#8bc34a' });
-                        else setMsg('Rejected: ' + ((r && r.result) || 'error'), '#ff5252');
-                    }).catch(function() { busy(false); setMsg('Request failed.', '#ff5252'); });
-            });
-            revertBtn.addEventListener('click', function() {
-                busy(true); setMsg('Reverting\u2026');
-                reload({ t: 'Reverted to saved values.', c: '' }).then(function() { busy(false); });
-            });
-            resetBtn.addEventListener('click', function() {
-                busy(true); setMsg('Resetting\u2026');
-                callHwSetAql({ reset: true }).then(function(r) {
-                    busy(false);
-                    if (r && r.result === 'ok') reload({ t: 'Reset to driver defaults.', c: '#8bc34a' });
-                    else setMsg('Reset failed.', '#ff5252');
-                }).catch(function() { busy(false); setMsg('Request failed.', '#ff5252'); });
-            });
-
-            // Let the page-level Save flush whatever is in these inputs.
-            aqlSaveCurrent = function() {
-                var lo = parseInt(lowInput.value, 10), hi = parseInt(highInput.value, 10), th = parseInt(thInput.value, 10);
-                if (!(lo > 0) || !(hi > 0) || lo > hi) return Promise.resolve({ result: 'invalid' });
-                return callHwSetAql({ low: lo, high: hi, threshold: th > 0 ? th : def.threshold, enable: enCb.checked ? 1 : 0 })
-                    .catch(function() { return { result: 'error' }; });
-            };
-
-            aqlBody.appendChild(cbiRow('Preset', presetSel));
-            aqlBody.appendChild(cbiRow('TX queue low (\u00b5s)', lowInput));
-            aqlBody.appendChild(cbiRow('TX queue high (\u00b5s)', highInput));
-            aqlBody.appendChild(cbiRow('Threshold (\u00b5s)', thInput));
-            aqlBody.appendChild(cbiRow('AQL enabled', enCb));
-            aqlBody.appendChild(cbiActions([saveBtn, revertBtn, resetBtn, msg]));
-            aqlBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px; line-height: 1.5;' },
-                'Lower limits cut latency under load at some cost to peak throughput; 1500\u20132500 is the usual sweet spot, and Balanced matches the mac80211 defaults. Applies to every radio immediately and is replayed on boot, since debugfs itself does not persist.'));
-        };
-        // Assigned once the AQL form exists; the page-level Save calls it to
-        // flush the staged values. Resolves with {result:'skipped'} when there
-        // is no form (unsupported build) so Save still reports success.
-        var aqlSaveCurrent = function() { return Promise.resolve({ result: 'skipped' }); };
-        var aqlLoaded = false;
-        var loadAql = function() {
-            if (aqlLoaded) return;
-            aqlLoaded = true;
-            callHwGetAql().then(buildAqlForm).catch(function() {
-                aqlBody.textContent = 'Failed to read AQL state.';
-                aqlBody.style.opacity = '1';
-            });
-        };
-
         var cpuPerfLoaded = false;
         var loadCpuPerf = function() {
             if (cpuPerfLoaded) return;
@@ -2067,11 +1905,9 @@ return view.extend({
         // --- page-level Save / Revert / Reset --------------------------
         // Everything above applies as you change it (that behaviour predates
         // this bar and is what makes the panel feel live), so Save's job is to
-        // flush the one section that is genuinely staged -- the AQL form --
-        // and re-persist the rest, then report a single result. Revert and
-        // Reset are the ones that really needed to be page-wide: previously
-        // there was no way to undo a settings change short of reversing each
-        // control by hand.
+        // re-persist it and report a single result. Revert and Reset are the
+        // ones that really needed to be page-wide: previously there was no way
+        // to undo a settings change short of reversing each control by hand.
         var pageMsg = E('span', { style: 'font-size: 0.85em; font-weight: 600; line-height: 1;' });
         var setPageMsg = function(t, c) { pageMsg.textContent = t || ''; pageMsg.style.color = c || ''; };
         var pageSaveBtn = E('button', { type: 'button', class: 'cbi-button cbi-button-save' }, 'Save');
@@ -2080,28 +1916,17 @@ return view.extend({
         var pageBusy = function(b) { [pageSaveBtn, pageRevertBtn, pageResetBtn].forEach(function(x) { x.disabled = b; }); };
 
         pageSaveBtn.addEventListener('click', function() {
-            pageBusy(true); setPageMsg('Saving\u2026');
-            var jobs = [saveConfig()];
-            if (typeof aqlSaveCurrent === 'function') jobs.push(aqlSaveCurrent());
-            Promise.all(jobs).then(function(r) {
+            pageBusy(true); setPageMsg('Saving…');
+            Promise.resolve(saveConfig()).then(function(cfgRes) {
                 pageBusy(false);
-                var cfgRes = r[0], aqlRes = r[1];
-                // The dashboard settings are the point of this button, so their
-                // result is checked first and a failure there is reported as a
-                // failure -- previously only the AQL half was inspected.
                 if (!cfgRes || cfgRes.result !== 'ok') {
                     setPageMsg('Save failed — the router rejected the settings'
                         + (cfgRes && cfgRes.result ? ' (' + cfgRes.result + ')' : '')
                         + '. Your changes are still staged here.', '#ff5252');
                     return;
                 }
-                if (aqlRes && aqlRes.result && aqlRes.result !== 'ok' && aqlRes.result !== 'skipped') {
-                    settingsDirty = false;
-                    setPageMsg('Settings saved, but AQL was rejected: ' + aqlRes.result, '#ffa726');
-                } else {
-                    settingsDirty = false;
-                    setPageMsg('All settings saved.', '#8bc34a');
-                }
+                settingsDirty = false;
+                setPageMsg('All settings saved.', '#8bc34a');
             }).catch(function() { pageBusy(false); setPageMsg('Save failed.', '#ff5252'); });
         });
 
@@ -2132,7 +1957,6 @@ return view.extend({
                 if (typeof applyCardSizes === 'function') applyCardSizes();
                 if (typeof renderTargetList === 'function') renderTargetList();
                 if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
-                aqlLoaded = false; loadAql();
                 settingsDirty = false;
                 pageBusy(false); setPageMsg('Reverted to saved settings.', '');
             }).catch(function() { pageBusy(false); setPageMsg('Revert failed.', '#ff5252'); });
@@ -2158,9 +1982,8 @@ return view.extend({
             if (typeof applyCardSizes === 'function') applyCardSizes();
             if (typeof renderTargetList === 'function') renderTargetList();
             if (typeof syncCardCheckboxes === 'function') syncCardCheckboxes();
-            Promise.all([saveConfig(), callHwSetAql({ reset: true }).catch(function() { return null; })])
+            Promise.resolve(saveConfig())
                 .then(function() {
-                    aqlLoaded = false; loadAql();
                     settingsDirty = false;
                     pageBusy(false); setPageMsg('All settings reset to defaults.', '#8bc34a');
                 }).catch(function() { pageBusy(false); setPageMsg('Reset failed.', '#ff5252'); });
@@ -2179,7 +2002,7 @@ return view.extend({
             style: 'padding: 4px 14px;',
             click: function() {
                 settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
-                if (settingsPanel.style.display !== 'none') { loadCpuPerf(); loadAql(); }
+                if (settingsPanel.style.display !== 'none') loadCpuPerf();
             }
         }, '\u2699 Settings');
         var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
@@ -3722,8 +3545,8 @@ return view.extend({
         // when there is nothing left on screen that it produces. At 253ms of
         // router CPU per call it is by far the most expensive tick to run for
         // nobody's benefit.
-        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'offload',
-            'aql', 'irq', 'events', 'storage', 'ext', 'ports', 'pcie', 'thermal', 'wifi', 'alerts'];
+        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'irq',
+            'events', 'storage', 'ext', 'ports', 'pcie', 'thermal', 'wifi', 'alerts'];
         // Registered further down by the phased dispatcher, not here -- see the
         // comment next to it for why all three ticks share one poll entry.
         var infoTick = function() {
@@ -4940,12 +4763,28 @@ return view.extend({
                 if (res.pcie_devs) {
                     validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
                 }
-                var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; });
-                var usbControllers = (res.usb_ports || []).map(function(p) {
-                    return { name: p.product || 'USB Host Controller', speed: p.speed, version: '', max_power: '' };
+                // Host controllers, one row each, rated at the fastest bus the
+                // controller offers -- the backend folds an xHCI's USB 2.0 and
+                // USB 3.x root hubs into a single entry. Peripherals are listed
+                // separately and only while something is actually plugged in.
+                var usbGen = function(v) {
+                    return v >= 20000 ? 'USB 3.2 Gen 2×2 (20 Gbps)' : v >= 10000 ? 'USB 3.2 Gen 2 (10 Gbps)'
+                        : v >= 5000 ? 'USB 3.2 Gen 1 (5 Gbps)' : v >= 480 ? 'USB 2.0 (480 Mbps)'
+                        : v >= 12 ? 'USB 1.1 (12 Mbps)' : v > 0 ? 'USB 1.0 (1.5 Mbps)' : '';
+                };
+                var usbRate = function(v) { return v >= 1000 ? (v / 1000) + ' Gbps' : v > 0 ? v + ' Mbps' : ''; };
+                var usbCtlRaw = res.usb_ports || [];
+                var usbCtlNames = {};
+                usbCtlRaw.forEach(function(c) { var n = c.product || 'USB Host Controller'; usbCtlNames[n] = (usbCtlNames[n] || 0) + 1; });
+                var usbCtls = usbCtlRaw.map(function(c, i) {
+                    var n = c.product || 'USB Host Controller', v = parseFloat(c.speed) || 0;
+                    // Two identical controllers (IPQ and Filogic boards carry a
+                    // pair) are told apart by their device node.
+                    return { key: c.ctl || (n + '|' + i), name: usbCtlNames[n] > 1 && c.ctl ? n + ' (' + c.ctl + ')' : n, speed: v, label: usbGen(v) };
                 });
-                var usbAll = usbControllers.concat(usbDevs);
-                var hasUsb = usbAll.length > 0;
+                var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; })
+                    .map(function(u, i) { var v = parseFloat(u.speed) || 0; return { key: u.name + '|' + i, name: u.name, speed: v, label: usbRate(v) }; });
+                var hasUsb = usbCtls.length > 0 || usbDevs.length > 0;
                 var hasEth = res.eth_links && res.eth_links.length > 0;
                 if ((hasEth || hasUsb) && portsNode) {
                     ethCard.style.display = 'flex';
@@ -4953,18 +4792,23 @@ return view.extend({
                         portsNode.innerHTML = '';
                         var ethSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'Ethernet');
                         var ethListWrap = E('div', {});
-                        var usbSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'USB');
+                        var usbSubH = E('h4', { style: 'margin: 0 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'USB Host Controllers');
                         var usbListWrap = E('div', {});
+                        var usbDevSubH = E('h4', { style: 'margin: 10px 0 4px 0; font-size: 0.85em; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; display: none;' }, 'USB Devices');
+                        var usbDevWrap = E('div', {});
                         portsNode.appendChild(ethSubH);
                         portsNode.appendChild(ethListWrap);
                         portsNode.appendChild(usbSubH);
                         portsNode.appendChild(usbListWrap);
-                        self._portsRefs = { ethSubH: ethSubH, ethListWrap: ethListWrap, usbSubH: usbSubH, usbListWrap: usbListWrap, ethCache: {}, usbCache: {} };
+                        portsNode.appendChild(usbDevSubH);
+                        portsNode.appendChild(usbDevWrap);
+                        self._portsRefs = { ethSubH: ethSubH, ethListWrap: ethListWrap, usbSubH: usbSubH, usbListWrap: usbListWrap, usbDevSubH: usbDevSubH, usbDevWrap: usbDevWrap, ethCache: {}, usbCache: {}, usbDevCache: {} };
                     }
                     var pr = self._portsRefs;
                     pr.ethSubH.style.display = hasEth ? '' : 'none';
-                    pr.usbSubH.style.display = hasUsb ? '' : 'none';
+                    pr.usbSubH.style.display = usbCtls.length ? '' : 'none';
                     pr.usbSubH.style.margin = hasEth ? '10px 0 4px 0' : '0 0 4px 0';
+                    pr.usbDevSubH.style.display = usbDevs.length ? '' : 'none';
                     if (hasEth && !self.prevEth) self.prevEth = {};
                     syncRows(pr.ethListWrap, pr.ethCache, hasEth ? res.eth_links : [], function(l) { return l.iface; }, function(l) {
                         var dot = E('div', { style: 'width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;' });
@@ -5055,30 +4899,26 @@ return view.extend({
                             entry.macRow.style.display = 'none';
                         }
                     });
-                    syncRows(pr.usbListWrap, pr.usbCache, hasUsb ? usbAll : [], function(u, i) { return u.name + '|' + i; }, function(u) {
-                        var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' });
-                        var speedVal = E('span', {});
-                        var speedRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Speed:'), speedVal]);
-                        var verVal = E('span', {});
-                        var verRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'USB Version:'), verVal]);
-                        var pwrVal = E('span', {});
-                        var pwrRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Max Power Draw:'), pwrVal]);
-                        var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [nameDiv, speedRow, verRow, pwrRow]);
-                        return { el: el, nameDiv: nameDiv, speedRow: speedRow, speedVal: speedVal, verRow: verRow, verVal: verVal, pwrRow: pwrRow, pwrVal: pwrVal };
-                    }, function(entry, u) {
+                    // Name and one speed line only: a controller's rated maximum,
+                    // or the rate a peripheral actually negotiated.
+                    var usbRowBuild = function(label) {
+                        return function() {
+                            var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' });
+                            var speedVal = E('span', {});
+                            var speedRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, label), speedVal]);
+                            var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [nameDiv, speedRow]);
+                            return { el: el, nameDiv: nameDiv, speedRow: speedRow, speedVal: speedVal };
+                        };
+                    };
+                    var usbRowPatch = function(entry, u) {
                         entry.nameDiv.textContent = u.name;
-                        var spd = parseInt(u.speed) || 0;
-                        var col = spd >= 5000 ? '#00bcd4' : spd >= 480 ? '#ffea00' : '#9e9e9e';
-                        var spdLabel = spd >= 10000 ? 'USB 3.2 (' + spd + ' Mbps)' : spd >= 5000 ? 'USB 3.0 (' + spd + ' Mbps)' : spd >= 480 ? 'USB 2.0 (' + spd + ' Mbps)' : spd > 0 ? 'USB 1.x (' + spd + ' Mbps)' : '';
-                        entry.speedRow.style.display = spdLabel ? 'flex' : 'none';
-                        if (spdLabel) { entry.speedVal.style.color = col; entry.speedVal.textContent = spdLabel; }
-                        var ver = u.version ? u.version.trim() : '';
-                        entry.verRow.style.display = ver ? 'flex' : 'none';
-                        if (ver) entry.verVal.textContent = ver;
-                        var hasPwr = u.max_power && u.max_power !== '0mA';
-                        entry.pwrRow.style.display = hasPwr ? 'flex' : 'none';
-                        if (hasPwr) entry.pwrVal.textContent = u.max_power;
-                    });
+                        entry.speedRow.style.display = u.label ? 'flex' : 'none';
+                        entry.speedVal.style.color = u.speed >= 5000 ? '#00bcd4' : u.speed >= 480 ? '#ffea00' : '#9e9e9e';
+                        entry.speedVal.textContent = u.label;
+                    };
+                    var usbKey = function(u) { return u.key; };
+                    syncRows(pr.usbListWrap, pr.usbCache, usbCtls, usbKey, usbRowBuild('Max Speed:'), usbRowPatch);
+                    syncRows(pr.usbDevWrap, pr.usbDevCache, usbDevs, usbKey, usbRowBuild('Speed:'), usbRowPatch);
                 } else {
                     ethCard.style.display = 'none';
                     self._portsRefs = null;
@@ -5349,180 +5189,6 @@ return view.extend({
                     }
                 } else {
                     irqCard.style.display = 'none';
-                }
-                if (res.offload && (res.offload.ft > 0 || res.offload.ppe_flows >= 0 || res.offload.wed > 0 || res.offload.sw_cfg > 0 || res.offload.hw_cfg > 0 || res.offload.qcom)) {
-                    var off = res.offload;
-                    var offNode = document.getElementById('hw-offload');
-                    if (offNode) {
-                        var offRows = [];
-                        if (!off.qcom) {
-                            offRows.push({ k: 'ft', type: 'row', label: 'Flowtable Fast Path', val: off.ft > 0 ? 'Active' : 'Not configured', color: off.ft > 0 ? '#00bcd4' : '#9e9e9e' });
-                            offRows.push({ k: 'cfg', type: 'row', label: 'Config (SW / HW)', val: (off.sw_cfg > 0 ? 'on' : 'off') + ' / ' + (off.hw_cfg > 0 ? 'on' : 'off'), color: (off.sw_cfg > 0 || off.hw_cfg > 0) ? '' : '#9e9e9e' });
-                        }
-                        var connNow = (res.cpu_meta && res.cpu_meta.conntrack) || 0;
-                        if (off.sw_flows >= 0) offRows.push({ k: 'swflows', type: 'bar', label: off.qcom ? 'Conntrack Offloaded Flows' : 'Offloaded / Active Flows', cur: off.sw_flows, tot: connNow, color: '#00bcd4' });
-                        // Qualcomm PPE keeps its own accounting; conntrack's
-                        // OFFLOAD count is a different (larger) number and was
-                        // previously shown as if it were the hardware figure.
-                        if (off.qcom && off.qcom.bound >= 0) {
-                            offRows.push({ k: 'qbound', type: 'row', label: 'PPE Bound Flows (hardware)', val: String(off.qcom.bound), color: off.qcom.bound > 0 ? '#8bc34a' : '#9e9e9e' });
-                            if (off.qcom.unsupported >= 0) offRows.push({ k: 'qunsup', type: 'row', label: 'Not Accelerable', val: String(off.qcom.unsupported), color: off.qcom.unsupported > 0 ? '#ffa726' : '#9e9e9e' });
-                            if (off.qcom.failed > 0) offRows.push({ k: 'qfail', type: 'row', label: 'PPE Bind Failures', val: String(off.qcom.failed), color: '#ff5252' });
-                        }
-                        if (!off.qcom && off.ppe_flows >= 0) offRows.push({ k: 'ppeflows', type: 'bar', label: 'PPE Bind Entries', cur: off.ppe_flows, tot: off.ppe_total > 0 ? off.ppe_total : (off.sw_flows >= 0 ? off.sw_flows : off.ppe_flows), color: '#8bc34a' });
-                        if (off.wed > 0) offRows.push({ k: 'wed', type: 'row', label: 'WED (Wi-Fi offload)', val: off.wed + ' engine' + (off.wed > 1 ? 's' : ''), color: '#00bcd4' });
-                        // Accelerator is configured but the kernel exposes no
-                        // counters for it -- say so, rather than showing an
-                        // "Active" row with no numbers under it and leaving the
-                        // reader to guess whether offload is broken.
-                        if (off.dbg !== undefined && off.dbg < 2 && (off.ft > 0 || off.hw_cfg > 0 || off.sw_cfg > 0)) {
-                            offRows.push({
-                                k: 'nodbg', type: 'row', label: 'Flow counters',
-                                val: off.dbg === 0 ? 'debugfs not mounted' : 'not exposed by this build',
-                                color: '#ffa726'
-                            });
-                        }
-                        if (off.qcom) {
-                            var q = off.qcom;
-                            offRows.push({ k: 'qcomhdr', type: 'header', label: 'Qualcomm PPE Diagnostics' });
-                            var qNum = function(n) { return (typeof n === 'number' ? n : 0).toLocaleString(); };
-                            // Named punt reasons straight from the hardware --
-                            // "L3 no-route action" is actionable in a way a raw
-                            // CPU code number never was. Sorted by volume, top
-                            // few only; the long tail is all zeroes.
-                            (q.punts || []).slice().sort(function(a, b) { return b.packets - a.packets; }).slice(0, 4).forEach(function(pt, i) {
-                                offRows.push({ k: 'punt' + i, type: 'row', label: 'Punt: ' + pt.name, val: qNum(pt.packets), color: '#ffa726' });
-                            });
-                            (q.drops || []).slice().sort(function(a, b) { return b.packets - a.packets; }).slice(0, 3).forEach(function(dr, i) {
-                                offRows.push({ k: 'qdrop' + i, type: 'row', label: 'Drop: ' + dr.name + (dr.port >= 0 ? ' (port ' + dr.port + ')' : ''), val: qNum(dr.packets), color: '#ff5252' });
-                            });
-                            if (q.port_drops !== undefined) offRows.push({ k: 'qpdrop', type: 'row', label: 'Port RX Drops', val: qNum(q.port_drops), color: q.port_drops > 0 ? '#ff5252' : '#9e9e9e' });
-                            if (q.queue_drops !== undefined) offRows.push({ k: 'qqdrop', type: 'row', label: 'Queue Drops / Pending', val: qNum(q.queue_drops) + ' / ' + qNum(q.queue_pending), color: q.queue_drops > 0 ? '#ff5252' : '#9e9e9e' });
-                            var hits = 0, misses = 0;
-                            if (q.cpu_code) {
-                                Object.keys(q.cpu_code).forEach(function(k) {
-                                    var val = parseInt(q.cpu_code[k] || 0);
-                                    if (k.indexOf('_drop0') !== -1) {
-                                        hits += val;
-                                    } else if (k.indexOf('_drop') !== -1) {
-                                        misses += val;
-                                    } else {
-                                        var code = k.replace('cpucode_', '');
-                                        if (['152', '153', '154', '155'].indexOf(code) !== -1) {
-                                            hits += val;
-                                        } else if (['162', '163'].indexOf(code) !== -1) {
-                                            misses += val;
-                                        }
-                                    }
-                                });
-                            }
-                            offRows.push({ k: 'hits', type: 'row', label: 'Punted to CPU (No Drop)', val: hits, color: hits > 0 ? '#8bc34a' : '#9e9e9e' });
-                            offRows.push({ k: 'misses', type: 'row', label: 'Punted to CPU (Dropped)', val: misses, color: misses > 0 ? '#ffb300' : '#9e9e9e' });
-                            var silent = q.bm_silent || 0;
-                            var overflow = q.bm_overflow || 0;
-                            offRows.push({ k: 'bmdrops', type: 'row', label: 'PPE Buffer Drops (Silent / Over)', val: silent + ' / ' + overflow, color: (silent > 0 || overflow > 0) ? '#ff5252' : '#9e9e9e' });
-                            var edma_err_cnt = 0;
-                            if (q.edma_err) {
-                                Object.keys(q.edma_err).forEach(function(k) {
-                                    edma_err_cnt += parseInt(q.edma_err[k] || 0);
-                                });
-                            }
-                            offRows.push({ k: 'edma', type: 'row', label: 'EDMA AXI / Ring Errors', val: edma_err_cnt, color: edma_err_cnt > 0 ? '#ff5252' : '#9e9e9e' });
-                        }
-                        offRows.push({ k: 'footer', type: 'footer' });
-                        if (!self._offCache) self._offCache = {};
-                        syncRows(offNode, self._offCache, offRows, function(r) { return r.k; }, function(r) {
-                            if (r.type === 'row') {
-                                var val = E('span', { class: 'hw-stat-value' });
-                                var elr = E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), val]);
-                                return { el: elr, val: val };
-                            } else if (r.type === 'bar') {
-                                var val2 = E('span', { class: 'hw-stat-value' });
-                                var fill = E('div', { class: 'hw-bar-fill' });
-                                var elr2 = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val2]), E('div', { class: 'hw-bar-bg' }, [fill])]);
-                                return { el: elr2, val: val2, fill: fill };
-                            } else if (r.type === 'header') {
-                                var elr3 = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
-                                    E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, r.label),
-                                    E('span', { class: 'hw-stat-value' }, '')
-                                ]);
-                                return { el: elr3 };
-                            } else {
-                                var elr4 = E('div', { style: 'font-size: 0.72em; opacity: 0.45; margin-top: 8px; text-align: center;' }, 'Flows bound to the PPE are routed in hardware and never touch the CPU');
-                                return { el: elr4 };
-                            }
-                        }, function(entry, r) {
-                            if (r.type === 'row') {
-                                entry.val.textContent = r.val;
-                                entry.val.style.color = r.color || '';
-                            } else if (r.type === 'bar') {
-                                var pctB = r.tot > 0 ? Math.min(100, r.cur / r.tot * 100) : 0;
-                                entry.val.textContent = r.cur + ' / ' + r.tot;
-                                entry.val.style.color = r.color;
-                                entry.fill.style.width = pctB + '%';
-                                entry.fill.style.background = r.color;
-                            }
-                        });
-                    }
-                    offloadCard.style.display = 'flex';
-                } else {
-                    offloadCard.style.display = 'none';
-                }
-                // --- Wireless AQL ------------------------------------------
-                // Hidden outright when the controls don't exist: no debugfs, or
-                // a kernel built without CONFIG_MAC80211_DEBUGFS. There is
-                // nothing to show and nothing to tune, so an empty card would
-                // just be noise.
-                if (res.aql && res.aql.available) {
-                    var aq = res.aql;
-                    var aqlNode = document.getElementById('hw-aql');
-                    if (aqlNode) {
-                        var aqlRows = [];
-                        // WED offloads the WiFi datapath in hardware and never
-                        // enqueues through mac80211, so AQL simply doesn't see
-                        // that traffic. Lead with that -- the values below are
-                        // real, they just aren't governing anything.
-                        if (aq.wed_active) {
-                            aqlRows.push({ k: 'wedwarn', type: 'row', label: '⚠ WED active' + (aq.wed_devs ? ' (' + aq.wed_devs + ')' : ''), val: 'AQL bypassed', color: '#ffa726' });
-                        } else if (aq.wed_param) {
-                            aqlRows.push({ k: 'wedparam', type: 'row', label: 'WED', value: '', val: 'enabled, not attached', color: '#9e9e9e' });
-                        }
-                        (aq.phys || []).forEach(function(ph) {
-                            var be = null;
-                            (ph.limits || []).forEach(function(l) { if (l.ac === 'BE') be = l; });
-                            if (!be && ph.limits && ph.limits.length) be = ph.limits[0];
-                            aqlRows.push({ k: ph.phy + '-hdr', type: 'header', label: ph.phy.toUpperCase() + (ph.enable === 0 ? ' (disabled)' : '') });
-                            if (be) {
-                                aqlRows.push({ k: ph.phy + '-lim', type: 'row', label: 'TX Queue Limit (low / high)', val: be.low + ' / ' + be.high + ' µs', color: be.high <= 3000 ? '#8bc34a' : (be.high >= 12000 ? '#00bcd4' : '') });
-                            }
-                            aqlRows.push({ k: ph.phy + '-th', type: 'row', label: 'Threshold', val: ph.threshold + ' µs', color: '' });
-                            // Pending airtime is the proof it's live: a WED-
-                            // bypassed radio sits at 0 no matter the load.
-                            aqlRows.push({ k: ph.phy + '-pend', type: 'row', label: 'Pending Airtime', val: ph.pending_us + ' µs', color: ph.pending_us > 0 ? '#8bc34a' : '#9e9e9e' });
-                        });
-                        syncRows(aqlNode, self._aqlCache || (self._aqlCache = {}), aqlRows, function(r) { return r.k; }, function(r) {
-                            if (r.type === 'header') {
-                                var eh = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); margin: 8px 0; padding-top: 8px;' }, [
-                                    E('span', { class: 'hw-stat-label', style: 'font-weight: bold; color: #8bc34a;' }, r.label),
-                                    E('span', { class: 'hw-stat-value' }, '')
-                                ]);
-                                return { el: eh };
-                            }
-                            var v = E('span', { class: 'hw-stat-value' });
-                            return { el: E('div', { class: 'hw-stat-row' }, [E('span', { class: 'hw-stat-label' }, r.label), v]), val: v };
-                        }, function(entry, r) {
-                            if (r.type === 'header') {
-                                entry.el.firstChild.textContent = r.label;
-                                return;
-                            }
-                            entry.el.firstChild.textContent = r.label;
-                            entry.val.textContent = r.val;
-                            entry.val.style.color = r.color;
-                        });
-                    }
-                    aqlCard.style.display = 'flex';
-                } else {
-                    aqlCard.style.display = 'none';
                 }
                 if (res.hw_events && res.hw_events.length > 0) {
                     var evNode = document.getElementById('hw-events');
@@ -6019,8 +5685,8 @@ return view.extend({
         // the global tick counter, so info(3s), ping(2s) and wanQuality(2s)
         // coincided on every sixth tick -- and, worse, all three fired together
         // on the very first one. That is the most expensive moment info ever
-        // has: while the page was closed its caches (offload 15s, events 30s,
-        // wifi 20s, ethtool 30s) all expired, so the first call regenerates
+        // has: while the page was closed its caches (events 30s, wifi 20s,
+        // ethtool 30s) all expired, so the first call regenerates
         // every one of them. Measured on a 4-core aarch64 router, that first
         // info costs 2-3x a warm one -- and it was landing on the same tick as
         // the other two calls.

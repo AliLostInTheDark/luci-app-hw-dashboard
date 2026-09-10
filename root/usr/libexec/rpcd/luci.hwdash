@@ -1,7 +1,6 @@
 #!/bin/sh
 
 . /usr/share/hwdash/rpcd-common.sh
-. /usr/share/hwdash/rpcd-aql.sh
 
 _JS_TAB=$(printf '\t')
 _JS_CR=$(printf '\r')
@@ -825,296 +824,6 @@ EOF_DMI
 				fi
 				SOFTNET="$SOFTNET]"
 
-				# --- offload engines. The LIVE flow counts are the single
-				# most expensive thing in the whole poll on a busy high-end
-				# router: `grep -c OFFLOAD /proc/net/nf_conntrack` reads the
-				# ENTIRE conntrack table (tens of thousands of lines on an
-				# IPQ9554 under load) and the PPE bind walk touches every
-				# hardware-bound flow. Doing that on the request path stalled
-				# every 3s poll. The whole block (config + counts) now lives
-				# behind a 5s stale-while-revalidate cache: the request serves
-				# the last computed value instantly and a detached child does
-				# the heavy read at most once per refresh window (15s cache,
-					# 30s in-flight lock).
-				_offload_refresh() {
-					local _ft=0 _swcfg=0 _hwcfg=0 _ppe=-1 _sw=-1 _wed=0 _ptot=0 _pl _p _w _hl _hv _pd _pn
-					local _qcom_json="null"
-					# Can we read hardware counters at all on this build?
-					#   0 = debugfs not mounted / not compiled in
-					#   1 = debugfs there, but no PPE/WED/hnat node exposed
-					#   2 = a real counter source is present
-					# Without this the card would report "Flowtable Active" and
-					# then show no flow counts, with nothing to say why -- the
-					# accelerator is working fine, the kernel just isn't
-					# exposing its statistics on this build.
-					local _dbg=0
-					[ -d /sys/kernel/debug ] && _dbg=1
-					if [ $_dbg -eq 1 ]; then
-						for _p in /sys/kernel/debug/ppe*/bind /sys/kernel/debug/ppe/cpu_code \
-						          /sys/kernel/debug/hnat/hnat_stats; do
-							[ -f "$_p" ] && { _dbg=2; break; }
-						done
-						[ $_dbg -eq 1 ] && [ -d /sys/kernel/debug/wed0 ] && _dbg=2
-					fi
-					command -v nft >/dev/null && _ft=$(nft list flowtables 2>/dev/null | grep -c "flags offload")
-					_swcfg=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
-					_hwcfg=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
-					case "$_ft" in ""|*[!0-9]*) _ft=0 ;; esac
-					case "$_swcfg" in ""|*[!0-9]*) _swcfg=0 ;; esac
-					case "$_hwcfg" in ""|*[!0-9]*) _hwcfg=0 ;; esac
-					for _p in /sys/kernel/debug/ppe*/bind; do
-						[ -f "$_p" ] || continue
-						[ "$_ppe" -lt 0 ] && _ppe=0
-						while read -r _pl; do case "$_pl" in *BND*) _ppe=$((_ppe + 1)) ;; esac; done < "$_p"
-					done
-					[ -f /proc/net/nf_conntrack ] && _sw=$(grep -c OFFLOAD /proc/net/nf_conntrack 2>/dev/null)
-					case "$_sw" in ""|*[!0-9]*) _sw=-1 ;; esac
-					for _w in /sys/kernel/debug/wed[0-9]*; do [ -d "$_w" ] && _wed=$((_wed + 1)); done
-					# PPE table capacity: SDK hnat driver publishes it in
-					# hnat_stats; upstream mtk_eth_soc uses MTK_PPE_ENTRIES =
-					# 1024 << 4 = 16384 per PPE (verified linux-6.12.94).
-					if [ -f /sys/kernel/debug/hnat/hnat_stats ]; then
-						while read -r _hl; do
-							case "$_hl" in
-								*"entry num="*) _hv=${_hl##*entry num=}; _hv=${_hv%%[!0-9]*}; case "$_hv" in ""|*[!0-9]*) ;; *) _ptot=$((_ptot + _hv)) ;; esac ;;
-							esac
-						done < /sys/kernel/debug/hnat/hnat_stats
-					else
-						_pn=0; for _pd in /sys/kernel/debug/ppe[0-9]*; do [ -d "$_pd" ] && _pn=$((_pn + 1)); done
-						if [ $_pn -gt 0 ]; then
-							_ptot=$((_pn * 16384))
-						elif [ -d /sys/kernel/debug/ppe ]; then
-							_ptot=4096
-							[ "$_sw" -ge 0 ] && _ppe=$_sw || _ppe=0
-							# Qualcomm PPE keeps its own flow accounting, which is
-							# NOT the same number as conntrack's OFFLOAD count.
-							# Using conntrack as a proxy overstated it badly --
-							# measured on an IPQ9554, conntrack reported 16
-							# offloaded while the PPE had exactly 1 flow bound in
-							# hardware. "unsupported" is the useful companion: a
-							# flow the accelerator looked at and could not take.
-							local _qbound=-1 _qunsup=-1 _qfail=-1 _qtok _qline
-							if [ -f /sys/kernel/debug/ppe/flows ]; then
-								read -r _qline < /sys/kernel/debug/ppe/flows
-								for _qtok in $_qline; do
-									case "$_qtok" in
-										bound:*) _qbound=${_qtok#bound:} ;;
-										unsupported:*) _qunsup=${_qtok#unsupported:} ;;
-										failed:*) _qfail=${_qtok#failed:} ;;
-									esac
-								done
-								case "$_qbound" in ''|*[!0-9]*) _qbound=-1 ;; esac
-								case "$_qunsup" in ''|*[!0-9]*) _qunsup=-1 ;; esac
-								case "$_qfail" in ''|*[!0-9]*) _qfail=-1 ;; esac
-								[ "$_qbound" -ge 0 ] && _ppe=$_qbound
-							fi
-							local _cpu_code_json="{}"
-							# Named punt/drop reasons, per-port drops and queue
-							# state -- all Qualcomm PPE only. cpu_code below
-							# gives raw numeric codes; reason_counters gives the
-							# same events with the hardware's own English names
-							# and packet/byte counts, which is what's actually
-							# actionable ("L3 no-route action" beats "code 162").
-							#
-							# CAREFUL: a "drop code:0" row is the NOT-dropped
-							# bucket -- its packet count matches PORT RX exactly.
-							# Only a non-zero drop code is a real drop, and
-							# treating code 0 as one would overstate drops by the
-							# entire forwarded volume.
-							local _punts="" _drops="" _pf=1 _df=1
-							if [ -f /sys/kernel/debug/ppe/reason_counters ]; then
-								local _rl _rcode _rpkt _rname _rport
-								while read -r _rl; do
-									case "$_rl" in
-										"cpu code:"*|"drop code:"*) ;;
-										*) continue ;;
-									esac
-									_rcode=${_rl#* code:}; _rcode=${_rcode%% *}
-									case "$_rcode" in ''|*[!0-9]*) continue ;; esac
-									case "$_rl" in
-										*packets:*) _rpkt=${_rl#*packets:}; _rpkt=${_rpkt%% *} ;;
-										*) _rpkt=0 ;;
-									esac
-									case "$_rpkt" in ''|*[!0-9]*) _rpkt=0 ;; esac
-									[ "$_rpkt" -eq 0 ] && continue
-									case "$_rl" in
-										*name:*) _rname=${_rl#*name:} ;;
-										*) _rname="" ;;
-									esac
-									case "$_rname" in ''|unlabelled) _rname="code $_rcode" ;; esac
-									json_esc "$_rname"
-									case "$_rl" in
-										"cpu code:"*)
-											[ $_pf -eq 0 ] && _punts="$_punts,"
-											_punts="$_punts{\"code\":$_rcode,\"packets\":$_rpkt,\"name\":\"$JSV\"}"
-											_pf=0
-											;;
-										*)
-											[ "$_rcode" -eq 0 ] && continue
-											case "$_rl" in
-												*port:*) _rport=${_rl#*port:}; _rport=${_rport%% *} ;;
-												*) _rport=-1 ;;
-											esac
-											case "$_rport" in ''|*[!0-9]*) _rport=-1 ;; esac
-											[ $_df -eq 0 ] && _drops="$_drops,"
-											_drops="$_drops{\"code\":$_rcode,\"port\":$_rport,\"packets\":$_rpkt,\"name\":\"$JSV\"}"
-											_df=0
-											;;
-									esac
-								done < /sys/kernel/debug/ppe/reason_counters
-							fi
-							# Per-port and per-queue drop totals. Tokens look
-							# like "<count>/<drop>(port=0000)"; the VPORT_*
-							# section repeats the same numbers, so only the
-							# PORT_* one is read to avoid double counting.
-							local _pdrop=0 _qdrop=0 _qpend=0
-							if [ -f /sys/kernel/debug/ppe/port_rx ]; then
-								local _sec="" _tk _tv
-								while read -r _rl; do
-									case "$_rl" in
-										VPORT*) _sec=skip; continue ;;
-										PORT*) _sec=use ;;
-									esac
-									[ "$_sec" = "use" ] || continue
-									for _tk in $_rl; do
-										case "$_tk" in
-											*/*\(port=*\)*)
-												_tv=${_tk#*/}; _tv=${_tv%%(*}
-												case "$_tv" in ''|*[!0-9]*) ;; *) _pdrop=$((_pdrop + _tv)) ;; esac
-												;;
-										esac
-									done
-								done < /sys/kernel/debug/ppe/port_rx
-							fi
-							if [ -f /sys/kernel/debug/ppe/qm ]; then
-								local _tk _tv _tp
-								while read -r _rl; do
-									for _tk in $_rl; do
-										case "$_tk" in
-											*/*/*\(queue=*\)*)
-												_tp=${_tk#*/}; _tp=${_tp%%/*}
-												_tv=${_tk##*/}; _tv=${_tv%%(*}
-												case "$_tp" in ''|*[!0-9]*) ;; *) _qpend=$((_qpend + _tp)) ;; esac
-												case "$_tv" in ''|*[!0-9]*) ;; *) _qdrop=$((_qdrop + _tv)) ;; esac
-												;;
-										esac
-									done
-								done < /sys/kernel/debug/ppe/qm
-							fi
-							if [ -f /sys/kernel/debug/ppe/cpu_code ]; then
-								local _line _pkt _port _drop _first=1
-								_cpu_code_json="{"
-								while read -r _line; do
-									trim_ws _line
-									[ -z "$_line" ] && continue
-									case "$_line" in
-										"CPU CODE:"*)
-											_line=${_line#CPU CODE:}
-											trim_ws _line
-											;;
-									esac
-									[ -z "$_line" ] && continue
-									case "$_line" in
-										*\(port=*\),dropcode:*)
-											_pkt=${_line%%(port*}
-											trim_ws _pkt
-											_port=${_line##*port=}
-											_port=${_port%%)*}
-											while [ "${_port#0}" != "$_port" ]; do
-												_port=${_port#0}
-											done
-											[ -z "$_port" ] && _port=0
-											_drop=${_line##*dropcode:}
-											trim_ws _drop
-											while [ "${_drop#0}" != "$_drop" ]; do
-												_drop=${_drop#0}
-											done
-											[ -z "$_drop" ] && _drop=0
-											[ $_first -eq 0 ] && _cpu_code_json="$_cpu_code_json,"
-											_cpu_code_json="$_cpu_code_json\"cpucode_port${_port}_drop${_drop}\":${_pkt:-0}"
-											_first=0
-											;;
-									esac
-								done < /sys/kernel/debug/ppe/cpu_code
-								_cpu_code_json="$_cpu_code_json}"
-							fi
-							local _bm_silent=0 _bm_overflow=0
-							if [ -f /sys/kernel/debug/ppe/bm ]; then
-								local _mode="" _line _p _v
-								while read -r _line; do
-									case "$_line" in
-										*"BM SILENT_DROP:"*) _mode="silent" ;;
-										*"BM OVERFLOW_DROP:"*) _mode="overflow" ;;
-										*"BM USED/REACT:"*) _mode="" ;;
-									esac
-									if [ -n "$_mode" ]; then
-										for _v in $_line; do
-											case "$_v" in
-												*port=*)
-													_p=${_v%%(*}
-													if [ "$_mode" = "silent" ]; then
-														_bm_silent=$((_bm_silent + ${_p:-0}))
-													else
-														_bm_overflow=$((_bm_overflow + ${_p:-0}))
-													fi
-													;;
-											esac
-										done
-									fi
-								done < /sys/kernel/debug/ppe/bm
-							fi
-							local _edma_err_json="{}"
-							if [ -f /sys/kernel/debug/ppe/edma/stats/err_stats ]; then
-								local _line _k _v _first=1
-								_edma_err_json="{"
-								while read -r _line; do
-									case "$_line" in
-										*"="*)
-											_k=${_line%%=*}
-											trim_ws _k
-											_k=$(printf '%s' "$_k" | tr 'A-Z ' 'a-z_')
-											_v=${_line##*=}
-											trim_ws _v
-											[ $_first -eq 0 ] && _edma_err_json="$_edma_err_json,"
-											_edma_err_json="$_edma_err_json\"$_k\":${_v:-0}"
-											_first=0
-											;;
-									esac
-								done < /sys/kernel/debug/ppe/edma/stats/err_stats
-								_edma_err_json="$_edma_err_json}"
-							fi
-							_qcom_json="{\"qcom_ppe\":1,\"bound\":$_qbound,\"unsupported\":$_qunsup,\"failed\":$_qfail,\"punts\":[$_punts],\"drops\":[$_drops],\"port_drops\":$_pdrop,\"queue_drops\":$_qdrop,\"queue_pending\":$_qpend,\"cpu_code\":$_cpu_code_json,\"bm_silent\":$_bm_silent,\"bm_overflow\":$_bm_overflow,\"edma_err\":$_edma_err_json}"
-						fi
-					fi
-					_cache_write /tmp/hwdash_offload.json 15 "{\"ft\":$_ft,\"sw_cfg\":$_swcfg,\"hw_cfg\":$_hwcfg,\"ppe_flows\":$_ppe,\"sw_flows\":$_sw,\"ppe_total\":$_ptot,\"wed\":$_wed,\"dbg\":$_dbg,\"qcom\":$_qcom_json}"
-				}
-				OFFLOAD_JSON=""
-				if _cache_read /tmp/hwdash_offload.json; then
-					OFFLOAD_JSON="$C_VAL"
-				elif [ -n "$C_VAL" ]; then
-					OFFLOAD_JSON="$C_VAL"
-					if ! _cache_read /tmp/hwdash_offload.lock; then
-						_cache_write /tmp/hwdash_offload.lock 30 refreshing
-						( _offload_refresh ) >/dev/null 2>&1 &
-					fi
-				else
-					if ! _cache_read /tmp/hwdash_offload.lock; then
-						_cache_write /tmp/hwdash_offload.lock 30 refreshing
-						( _offload_refresh ) >/dev/null 2>&1 &
-					fi
-					OFFLOAD_JSON="{\"ft\":0,\"sw_cfg\":0,\"hw_cfg\":0,\"ppe_flows\":-1,\"sw_flows\":-1,\"ppe_total\":0,\"wed\":0,\"qcom\":null}"
-				fi
-
-				# The since-boot watermark block (peak temp / conntrack / PPE)
-				# used to live here and has been removed. Nothing consumed it:
-				# hw_dash.js never read the "peaks" object at any point, and its
-				# ppe field could not have been right anyway -- it was computed
-				# from a PPE_FLOWS variable this script never assigns, so it
-				# reported 0 permanently even on a router with hardware offload
-				# actively binding flows. It cost a sourced file plus a rewrite
-				# on every record break, and shipped five more fields in a
-				# payload polled every three seconds, for no reader.
-
 				# --- hardware events: interesting dmesg lines (thermal, ECC,
 				# link flaps, USB, OOM, voltage). dmesg+grep forks only run
 				# once per 10s window; the result is TTL-cached.
@@ -1474,19 +1183,43 @@ EOF
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
 
+				# One row per physical host controller, rated at the fastest bus
+				# it offers. An xHCI controller registers two root hubs (a USB
+				# 2.0 bus and a USB 3.x bus), so listing root hubs showed every
+				# controller twice. Root hubs are grouped by their parent device,
+				# which `cd -P` resolves without forking readlink. USB/IP and
+				# dummy_hcd are software controllers with no port behind them.
 				USB_PORTS="["
 				FIRST_USB=1
+				_usb_seen=" "
+				_usb_owd=$PWD
 				for usb in /sys/bus/usb/devices/usb*; do
 					[ -f "$usb/speed" ] || continue
-					read_file speed "$usb/speed" "0"
+					cd -P "$usb/.." 2>/dev/null || continue
+					_uctl=${PWD##*/}
+					case "$_uctl" in vhci_hcd*|dummy_hcd*) continue ;; esac
+					case "$_usb_seen" in *" $_uctl "*) continue ;; esac
+					_usb_seen="$_usb_seen$_uctl "
+					_umax=0
+					for _uh in "$PWD"/usb*; do
+						read_file speed "$_uh/speed" "0"
+						case "$speed" in ''|*[!0-9]*) continue ;; esac
+						[ "$speed" -gt "$_umax" ] && _umax=$speed
+					done
 					read_file product "$usb/product" "USB Host Controller"
 					if [ $FIRST_USB -eq 0 ]; then USB_PORTS="$USB_PORTS,"; fi
-					json_esc "$product"
-					USB_PORTS="$USB_PORTS{\"speed\":\"$speed\",\"product\":\"$JSV\"}"
+					json_esc "$product"; _n=$JSV
+					json_esc "$_uctl"
+					USB_PORTS="$USB_PORTS{\"speed\":\"$_umax\",\"product\":\"$_n\",\"ctl\":\"$JSV\"}"
 					FIRST_USB=0
 				done
+				cd "$_usb_owd" 2>/dev/null
 				USB_PORTS="$USB_PORTS]"
 
+				# Connected peripherals only. Hubs are skipped: an on-board hub
+				# chip is always enumerated, so with nothing plugged in it would
+				# still be listed as a connected device. Anything plugged into a
+				# hub enumerates on its own and still shows.
 				USB_DEVS="["
 				FIRST_USB=1
 				for usb in /sys/bus/usb/devices/*; do
@@ -1498,11 +1231,11 @@ EOF
 					esac
 					[ -f "$usb/idVendor" ] || continue
 					[ -f "$usb/speed" ] || continue
+					read_file _ucls "$usb/bDeviceClass" ""
+					[ "$_ucls" = "09" ] && continue
 					read_file product "$usb/product" ""
 					read_file manufacturer "$usb/manufacturer" ""
 					read_file speed "$usb/speed" "Unknown"
-					read_file version "$usb/version" ""
-					read_file maxpower "$usb/bMaxPower" ""
 					[ -z "$product" ] && [ -z "$manufacturer" ] && continue
 					if [ -n "$manufacturer" ]; then
 						dev_name="$manufacturer $product"
@@ -1510,9 +1243,8 @@ EOF
 						dev_name="$product"
 					fi
 					if [ $FIRST_USB -eq 0 ]; then USB_DEVS="$USB_DEVS,"; fi
-					json_esc "$dev_name"; _n=$JSV
-					json_esc "$version"
-					USB_DEVS="$USB_DEVS{\"name\":\"$_n\",\"speed\":\"$speed\",\"version\":\"$JSV\",\"max_power\":\"$maxpower\"}"
+					json_esc "$dev_name"
+					USB_DEVS="$USB_DEVS{\"name\":\"$JSV\",\"speed\":\"$speed\"}"
 					FIRST_USB=0
 				done
 				USB_DEVS="$USB_DEVS]"
@@ -1773,11 +1505,6 @@ EOF
 				fi
 				WIFI_SURVEY="$WIFI_SURVEY}"
 
-				# AQL live state (cheap: a handful of small debugfs reads,
-				# skipped entirely when the directory isn't there).
-				_aql_scan
-				_aql_wed_state
-				AQL_JSON="{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"phys\":[$AQL_PHYS]}"
 
 				# UBI device tree + MTD partition table are hardware inventory:
 				# the layout is fixed at flash time and wear/ECC counters move on
@@ -2318,7 +2045,7 @@ EOF_LSCPU
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"offload\":$OFFLOAD_JSON, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"aql\":$AQL_JSON, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

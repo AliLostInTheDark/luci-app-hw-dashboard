@@ -33,10 +33,11 @@ define Package/luci-app-hw-dashboard/postinst
 		/etc/init.d/hwdash-wanmon enable 2>/dev/null
 		/etc/init.d/hwdash-wanmon restart 2>/dev/null
 	}
-	[ -x /etc/init.d/hwdash-aql ] && {
-		/etc/init.d/hwdash-aql enable 2>/dev/null
-		/etc/init.d/hwdash-aql start 2>/dev/null
-	}
+	# The Wireless AQL card and its boot-time replay service were dropped in
+	# 1.2.6. apk does not run the old package's prerm on upgrade, so clear
+	# the now-dangling enable links and the saved section here instead.
+	rm -f /etc/rc.d/S*hwdash-aql /etc/rc.d/K*hwdash-aql
+	uci -q delete hwdash.aql && uci -q commit hwdash
 	( sleep 3; ubus call luci.hwdash info >/dev/null 2>&1; ubus call luci.hwdash info >/dev/null 2>&1 ) &
 	exit 0
 }
@@ -47,8 +48,6 @@ define Package/luci-app-hw-dashboard/prerm
 [ -n "$${IPKG_INSTROOT}" ] || {
 	/etc/init.d/hwdash-wanmon stop 2>/dev/null
 	/etc/init.d/hwdash-wanmon disable 2>/dev/null
-	/etc/init.d/hwdash-aql stop 2>/dev/null
-	/etc/init.d/hwdash-aql disable 2>/dev/null
 	rm -rf /tmp/hwdash*
 	exit 0
 }

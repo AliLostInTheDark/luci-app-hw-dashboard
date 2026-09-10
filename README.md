@@ -38,7 +38,6 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 | **NAT Type Test** | On-demand STUN probe (RFC 3489/5780) reporting NAT behavior, filtering, and public egress address — dual-stack, and isolated per protocol family |
 | **AP Mode** | Dedicated card for access points behind a router — pings the real upstream gateway rather than assuming a WAN that doesn't exist |
 | **Card Layout** | Drag to reorder any card, and cycle its width between Small / Half / Full — saved per device, works on touch as well as mouse |
-| **Wireless AQL** | Tune airtime queue limits for lower Wi‑Fi latency under load — with presets, save/revert/reset, and persistence across reboots |
 | **Privacy** | Every background DNS lookup this package makes is automatically kept off a filtering resolver (AdGuard Home, Pi‑hole, Unbound) |
 | **Settings** | Persist on-device via UCI — follow the router across browsers, sysupgrades and backups |
 
@@ -172,13 +171,7 @@ Voltage/current/fan/power rails from `hwmon`, plus Intel RAPL package/core/DRAM 
 <details>
 <summary><b>Ports & PCIe Topology</b></summary>
 
-Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers and connected peripherals with real negotiated speed. PCIe devices with negotiated link speed/width shown next to the controller's rated maximum, so a device running below capability is obvious at a glance.
-</details>
-
-<details>
-<summary><b>Offload Engines</b></summary>
-
-Whether the packet fast path is actually active — nftables flowtable state, hardware/software offload switches, live conntrack-offloaded and PPE-bound flow counts (with since-boot peak), and WED engine presence. Covers both MediaTek (PPE/WED) and Qualcomm (PPE) accelerators. On Qualcomm it additionally decodes the PPE's own diagnostics — the hardware-bound flow count, flows it could not accelerate, and named reasons for packets being punted to the CPU or dropped ("L3 no-route action" rather than a raw code number), plus per-port and per-queue drop counters. The card hides itself on platforms with no offload at all, and where offload is configured but the kernel exposes no counters for it, it says so instead of showing an “Active” row with nothing under it.
+Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers with the fastest speed each supports (one row per controller, not per root hub), plus any plugged-in peripherals with the speed they negotiated; hubs are left out. PCIe devices with negotiated link speed/width shown next to the controller's rated maximum, so a device running below capability is obvious at a glance.
 </details>
 
 <details>
@@ -218,16 +211,6 @@ A single prioritized card surfacing anything that needs attention right now — 
 </details>
 
 <details>
-<summary><b>Wireless AQL</b></summary>
-
-Airtime Queue Limits control how much Wi‑Fi traffic mac80211 will buffer per station. Lowering them trades a little peak throughput for markedly lower latency under load, since a bulk transfer can no longer push everything else behind hundreds of milliseconds of queued frames — the 1500–2500 µs range is the usual sweet spot.
-
-The card shows the live limit, threshold and in-flight airtime per radio. Settings offers latency/balanced/bandwidth presets plus custom values, with **Save / Revert / Reset** — Save applies to every radio and persists, Revert restores the last saved values, Reset returns to the driver defaults. Because these controls live in debugfs and don't survive a reboot, saved values are replayed at boot by a small init service.
-
-Requires `CONFIG_MAC80211_DEBUGFS` and a mounted debugfs; the card hides itself entirely on builds without them. **AQL and WED are mutually exclusive** — WED offloads the Wi‑Fi datapath in hardware and bypasses mac80211's queues, so AQL never sees that traffic. When WED is active the card says so rather than letting you tune a control that does nothing.
-</details>
-
-<details>
 <summary><b>Hardware Events</b></summary>
 
 A filtered `dmesg` view — thermal, ECC, link-flap, USB, OOM and voltage events with relative timestamps.
@@ -241,7 +224,7 @@ One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, con
 
 ## Settings
 
-Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), tune Wireless AQL, adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
 
 **⇕ Rearrange Cards** (next to the gear icon) turns on drag handles and a size-cycle button on every card — drag to reorder, or click the size button to step through Small → Half → Full width. Works with touch as well as mouse. Layout and sizing are saved the same way as every other setting.
 

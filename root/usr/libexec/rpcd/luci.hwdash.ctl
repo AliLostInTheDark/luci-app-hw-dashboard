@@ -1,40 +1,6 @@
 #!/bin/sh
 
 . /usr/share/hwdash/rpcd-common.sh
-. /usr/share/hwdash/rpcd-aql.sh
-
-
-# Write the requested limits to every PHY. $1=low $2=high $3=threshold
-# $4=enable. mac80211 takes one "<ac> <low> <high>" line per access class on
-# aql_txq_limit; access classes are indexed 0-3 (VO/VI/BE/BK).
-_aql_apply() {
-	local _lo=$1 _hi=$2 _th=$3 _en=$4 _ac=0 _p
-	[ -d "$AQL_DIR" ] || return 1
-	for _p in "$AQL_DIR"/phy*; do
-		[ -f "$_p/aql_txq_limit" ] || continue
-		_ac=0
-		while [ $_ac -lt 4 ]; do
-			echo "$_ac $_lo $_hi" > "$_p/aql_txq_limit" 2>/dev/null
-			_ac=$((_ac + 1))
-		done
-		[ -n "$_th" ] && [ -w "$_p/aql_threshold" ] && echo "$_th" > "$_p/aql_threshold" 2>/dev/null
-		[ -n "$_en" ] && [ -w "$_p/aql_enable" ] && echo "$_en" > "$_p/aql_enable" 2>/dev/null
-	done
-	return 0
-}
-
-# Saved (persisted) settings, into AQL_CFG_*. Empty low/high = never
-# configured, i.e. the driver defaults are in force.
-_aql_cfg_read() {
-	AQL_CFG_LOW=$(uci -q get hwdash.aql.low 2>/dev/null)
-	AQL_CFG_HIGH=$(uci -q get hwdash.aql.high 2>/dev/null)
-	AQL_CFG_TH=$(uci -q get hwdash.aql.threshold 2>/dev/null)
-	AQL_CFG_EN=$(uci -q get hwdash.aql.enable 2>/dev/null)
-	case "$AQL_CFG_LOW" in ''|*[!0-9]*) AQL_CFG_LOW="" ;; esac
-	case "$AQL_CFG_HIGH" in ''|*[!0-9]*) AQL_CFG_HIGH="" ;; esac
-	case "$AQL_CFG_TH" in ''|*[!0-9]*) AQL_CFG_TH="" ;; esac
-	case "$AQL_CFG_EN" in 0|1) ;; *) AQL_CFG_EN="" ;; esac
-}
 
 # Hand the collector the user's raw (unresolved) WAN probe targets. It owns
 # hostname resolution and the fallback list; this side deliberately does not
@@ -200,7 +166,7 @@ _nat_parse_out() {
 
 case "$1" in
 	list)
-		echo '{ "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "get_aql": { }, "set_aql": { "aql": {} }, "nat_test": { "iface": "" } }'
+		echo '{ "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "nat_test": { "iface": "" } }'
 		;;
 	call)
 		case "$2" in
@@ -303,12 +269,6 @@ case "$1" in
 				CPF_AVAIL_FLAG=0
 				[ -d "$_CF" ] && [ "$CPF_GOV" != "unknown" ] && [ "${CPF_IMAX:-0}" -gt 0 ] && CPF_AVAIL_FLAG=1
 				echo "{\"available\":$CPF_AVAIL_FLAG,\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
-				;;
-			get_aql)
-				_aql_scan
-				_aql_wed_state
-				_aql_cfg_read
-				echo "{\"available\":$AQL_AVAIL,\"debugfs\":$AQL_DEBUGFS,\"wed_active\":$AQL_WED,\"wed_param\":$AQL_WED_PARAM,\"wed_devs\":\"$AQL_WED_DEVS\",\"defaults\":{\"low\":$AQL_DEF_LOW,\"high\":$AQL_DEF_HIGH,\"threshold\":$AQL_DEF_THRESHOLD},\"saved\":{\"low\":${AQL_CFG_LOW:-null},\"high\":${AQL_CFG_HIGH:-null},\"threshold\":${AQL_CFG_TH:-null},\"enable\":${AQL_CFG_EN:-null}},\"phys\":[$AQL_PHYS]}"
 				;;
 			nat_test)
 				# Limit the probe to a WAN shown by this dashboard. This prevents a
@@ -499,58 +459,6 @@ EOF
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
 				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$_nat_p4"; else printf 'null'; fi
 				echo '}'
-				;;
-			set_aql)
-				# Applies immediately AND persists to UCI, so a reboot doesn't
-				# silently revert it -- debugfs is volatile, so /etc/init.d/
-				# hwdash-aql replays the saved values on every boot.
-				# reset=true clears the saved section and restores the mac80211
-				# defaults, which is the "Reset" button rather than "Revert"
-				# (that one is purely client-side: reload the saved values).
-				_IN=""
-				IFS= read -r _IN 2>/dev/null
-				_ALO=""; _AHI=""; _ATH=""; _AEN=""; _ARST=""
-				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					eval "$(printf '%s' "$_IN" | head -c 1024 | jsonfilter \
-						-e '_ALO=@.aql.low' -e '_AHI=@.aql.high' \
-						-e '_ATH=@.aql.threshold' -e '_AEN=@.aql.enable' \
-						-e '_ARST=@.aql.reset' 2>/dev/null)"
-				fi
-				_aql_scan
-				if [ "$AQL_AVAIL" != "1" ]; then
-					echo '{"result":"unavailable"}'
-				elif [ "$_ARST" = "true" ] || [ "$_ARST" = "1" ]; then
-					_aql_apply "$AQL_DEF_LOW" "$AQL_DEF_HIGH" "$AQL_DEF_THRESHOLD" 1
-					uci -q delete hwdash.aql
-					uci -q commit hwdash
-					echo '{"result":"ok","reset":true}'
-				else
-					_AOK=1
-					# Bounds are deliberately generous -- this is a tuning knob,
-					# not a safety rail -- but a non-integer or an inverted
-					# low/high pair would be written to debugfs verbatim.
-					case "$_ALO" in ''|*[!0-9]*) _AOK=0 ;; esac
-					case "$_AHI" in ''|*[!0-9]*) _AOK=0 ;; esac
-					if [ $_AOK -eq 1 ]; then
-						[ "$_ALO" -lt 100 ] && _AOK=0
-						[ "$_AHI" -gt 100000 ] && _AOK=0
-						[ "$_ALO" -gt "$_AHI" ] && _AOK=0
-					fi
-					case "$_ATH" in ''|*[!0-9]*) _ATH=$AQL_DEF_THRESHOLD ;; esac
-					case "$_AEN" in true|1) _AEN=1 ;; false|0) _AEN=0 ;; *) _AEN=1 ;; esac
-					if [ $_AOK -eq 1 ]; then
-						_aql_apply "$_ALO" "$_AHI" "$_ATH" "$_AEN"
-						uci -q set hwdash.aql=aql
-						uci -q set hwdash.aql.low="$_ALO"
-						uci -q set hwdash.aql.high="$_AHI"
-						uci -q set hwdash.aql.threshold="$_ATH"
-						uci -q set hwdash.aql.enable="$_AEN"
-						uci -q commit hwdash
-						echo '{"result":"ok"}'
-					else
-						echo '{"result":"invalid"}'
-					fi
-				fi
 				;;
 			set_cpu_perf)
 				_IN=""
