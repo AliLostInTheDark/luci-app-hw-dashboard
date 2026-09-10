@@ -37,7 +37,6 @@ ISP_RETRY_INTERVAL=60
 WINDOW_BUCKET_SECS=300
 WINDOW_BUCKETS=288
 PING_CAP=4
-LOOP_DEADLINE=20
 # Number of consecutive probe failures required before a link is declared
 # DOWN. A single missed ping on an otherwise-healthy v6 link (ICMP6
 # occasionally filtered by ISP) no longer flicks the status red or clears the
@@ -646,12 +645,12 @@ EOF
 
 # Run one command with a hard wall-clock cap of its own.
 #
-# The outer LOOP_DEADLINE in the main loop is NOT a substitute for this: it
-# kill -9's the per-interface subshell PID, and that does not reach a
-# grandchild. A wedged nslookup (trivially reachable -- a DNS server that
-# accepts the query and never answers, which is exactly what a misrouted
-# resolver does) would be orphaned rather than killed, and resolve_isp would
-# start a fresh one every ISP_RETRY_INTERVAL, forever.
+# There is no loop-level watchdog: every external command in the probe path
+# must bound itself. ping does (-w/-W), curl does (--max-time 5) and the ubus
+# client does (30s default). nslookup does not -- a DNS server that accepts
+# the query and never answers, which is exactly what a misrouted resolver
+# does, holds it open forever, and the main loop's `wait` would block behind
+# it. That is what this cap is for.
 # The watchdog traps TERM and takes its own sleep down with it. Killing the
 # subshell alone does NOT reach the sleep it forked: the sleep is reparented to
 # init and lives out its full delay. Measured on the target busybox, the plain
@@ -680,9 +679,8 @@ run_capped() {
 # wrong trade here: this runs once per WAN every INTERVAL seconds -- the single
 # largest source of background forks on an idle router -- and ping already
 # bounds itself with -W 1 (measured 2s against a blackholed target, vs 11s
-# without). The loop's own LOOP_DEADLINE remains as the backstop, and a probe
-# that somehow outlived it would exit on its own within seconds rather than
-# hanging indefinitely the way a DNS query can.
+# without). Unlike a DNS query, it cannot hang indefinitely, so it needs no
+# cap of its own.
 run_probe() {
 	_outf=$1; shift
 	"$@" > "$_outf" 2>/dev/null
@@ -1566,6 +1564,7 @@ process_down_iface() {
 	_lastgood_ms="x"; _consec_miss=0
 	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _lastgood_ms _consec_miss < "$_stats_file" 2>/dev/null
 	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
+	case "$_consec_miss" in ''|*[!0-9]*) _consec_miss=0 ;; esac
 	_total=$((_total + 1))
 	_was_status=$_status
 	_consec_miss=$((_consec_miss + 1))

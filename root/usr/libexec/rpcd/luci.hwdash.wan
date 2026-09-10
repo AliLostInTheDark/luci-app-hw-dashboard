@@ -20,6 +20,7 @@ case "$1" in
 				WAN_QUALITY="null"
 				_wm_dir=/tmp/hwdash_wanmon
 				if [ -d "$_wm_dir" ]; then
+					_wm_tracked="$_wm_dir/.tracked"
 					_wm_tr=""
 					if [ -f "$_wm_tracked" ]; then
 						while read -r _tif; do
