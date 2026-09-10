@@ -93,17 +93,20 @@ None of these are required — every card degrades gracefully and says so where 
 | `ethtool-full` | Per-port negotiated flow control and EEE state in Ports Topology |
 | `smartmontools` | NVMe/SATA SMART health: wear, TBW, spare, power-on hours |
 | `lscpu` | CPU core name on ARM (e.g. `Cortex-A73`) — the only source for it |
-| `dmidecode` | Memory speed in the Memory card — **x86 only**, not built for ARM |
+| `dmidecode` | Memory speed in the Memory card — **x86 only** |
+| `kmod-hwmon-nct6775` | Motherboard fans, fan duty and voltage rails in Power & Fans — Nuvoton Super I/O, **x86 only** |
+| `kmod-hwmon-it87` | The same for ITE Super I/O chips — **x86 only** |
 
-Install the ones available on every target:
+The simplest route is **⚙ Settings → Optional Packages** on the dashboard itself. Each package has its own **Install** button, its name turns green once installed, and a red **Remove** button appears when nothing else on the router depends on it. Only packages that exist for the router's architecture and in its configured feeds are offered, and the affected cards refresh as soon as the job finishes.
+
+From a shell, install the ones available on every target:
 
 ```sh
 apk add stuntman-client ethtool-full smartmontools lscpu
 ```
 
-`dmidecode` is deliberately left out of that line: `apk` resolves the whole argument list or nothing, so including a name that doesn't exist for your architecture installs *none* of the others. On x86, add it separately with `apk add dmidecode`.
+`dmidecode` and the two `kmod-hwmon-*` drivers are deliberately left out of that line: `apk` resolves the whole argument list or nothing, so including a name that doesn't exist for your architecture installs *none* of the others. On x86, add them separately, e.g. `apk add dmidecode kmod-hwmon-nct6775`.
 
-The same list, with the same command, is shown under **⚙ Settings → Optional Packages** on the dashboard itself, so you don't have to come back here for it.
 
 > [!TIP]
 > Installing a newer release over an existing one clears all cached hardware data automatically, so stale readings from a previous version are never served.
@@ -165,7 +168,7 @@ USB mass storage devices with format and mount state shown separately (an unform
 <details>
 <summary><b>Power, Fans & Thermal Sensors</b></summary>
 
-Voltage/current/fan/power rails from `hwmon`, plus Intel RAPL package/core/DRAM power on x86. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and a cooling-device row showing active throttling plus the peak temperature seen since boot.
+Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fans (shown even when the fan has no speed sensor) and red highlighting of any reading the sensor driver flags as an alarm, plus Intel RAPL package/core/DRAM power on x86. On x86, motherboard fans and voltages need the Super I/O driver — install it from **⚙ Settings → Optional Packages**. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and a cooling-device row showing active throttling plus the peak temperature seen since boot.
 </details>
 
 <details>

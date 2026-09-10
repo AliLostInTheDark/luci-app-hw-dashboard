@@ -57,6 +57,17 @@ var callHwWanIps = rpc.declare({
     method: 'wan_ips',
     expect: {}
 });
+var callHwPkgStatus = rpc.declare({
+    object: 'luci.hwdash.ctl',
+    method: 'pkg_status',
+    expect: {}
+});
+var callHwPkgAction = rpc.declare({
+    object: 'luci.hwdash.ctl',
+    method: 'pkg_action',
+    params: ['pkg', 'op'],
+    expect: {}
+});
 var callHwNatTest = rpc.declare({
     object: 'luci.hwdash.ctl',
     method: 'nat_test',
@@ -1872,39 +1883,142 @@ return view.extend({
                 cpuPerfBody.textContent = 'Failed to read CPU performance state.';
             });
         };
+        // --- Optional packages ------------------------------------------
         // Every card degrades gracefully without these, so this is a list of
-        // what more you could see -- not a warning, and not a nag. The one
-        // package whose absence actually blocks a control the user can see and
-        // click (stuntman-client, behind TEST NAT TYPE) says so on the card
-        // itself; the rest just quietly show less, which is impossible to
-        // discover from the dashboard alone.
-        // dmidecode is x86-only. It stays out of the combined command on
-        // purpose: apk resolves the whole argument list or nothing, so one
-        // unavailable name makes the line install none of the others -- on ARM
-        // it fails outright with "unable to select packages", which is most
-        // OpenWrt hardware.
+        // what more you could see -- not a warning, and not a nag. Each has its
+        // own Install / Remove button rather than one all-in-one command: apk
+        // resolves an argument list all or nothing, so a single name missing
+        // for this architecture would install none of the rest. The router
+        // decides what is offered, from its own architecture and package index,
+        // and luci.hwdash.ctl only ever runs apk on the fixed names in its own
+        // list -- the page sends a name, never a command.
         var OPT_PKGS = [
-            ['stuntman-client', 'NAT Type Test — the STUN probe behind the TEST NAT TYPE button', 0],
-            ['ethtool-full', 'Per-port negotiated flow control and EEE state in Ports Topology', 0],
-            ['smartmontools', 'NVMe/SATA SMART health: wear, TBW, spare, power-on hours', 0],
-            ['lscpu', 'CPU core name on ARM (e.g. Cortex-A73) — the only source for it', 0],
-            ['dmidecode', 'Memory speed in the Memory card — x86 only, not built for ARM', 1]
+            ['stuntman-client', 'NAT Type Test — the STUN probe behind the TEST NAT TYPE button'],
+            ['ethtool-full', 'Per-port negotiated flow control and EEE state in Ports Topology'],
+            ['smartmontools', 'NVMe/SATA SMART health: wear, TBW, spare, power-on hours'],
+            ['lscpu', 'CPU core name on ARM (e.g. Cortex-A73) — the only source for it'],
+            ['dmidecode', 'Memory speed in the Memory card — x86 only'],
+            ['kmod-hwmon-nct6775', 'Motherboard fans, fan duty and voltage rails in Power & Fans — Nuvoton Super I/O, x86 only'],
+            ['kmod-hwmon-it87', 'Motherboard fans, fan duty and voltage rails in Power & Fans — ITE Super I/O, x86 only']
         ];
-        var optRows = OPT_PKGS.map(function(p) {
-            return E('div', { style: 'display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 0.85em;' }, [
-                E('code', { style: 'flex: 0 0 auto; font-weight: 700; min-width: 130px;' }, p[0]),
-                E('span', { style: 'opacity: 0.75;' }, p[1])
+        var pkgRows = {};
+        var pkgJob = null;
+        var pkgPollT = null;
+        var pkgNote = E('div', { style: 'margin-top: 8px; font-size: 0.8em; opacity: 0.7; line-height: 1.45;' });
+        var pkgRowEls = OPT_PKGS.map(function(p) {
+            var nameEl = E('code', { style: 'flex: 0 0 auto; min-width: 170px; font-weight: 700; color: #9e9e9e;' }, p[0]);
+            var stateEl = E('span', { style: 'font-size: 0.92em; opacity: 0.7;' });
+            var btn = E('button', { type: 'button', class: 'cbi-button', style: 'display: none;' });
+            btn.addEventListener('click', function() { pkgAct(p[0], btn.getAttribute('data-op')); });
+            pkgRows[p[0]] = { name: nameEl, state: stateEl, btn: btn };
+            return E('div', { style: 'display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0; font-size: 0.85em; border-bottom: 1px solid var(--border-color, rgba(128,128,128,0.12));' }, [
+                nameEl,
+                E('span', { style: 'flex: 1 1 220px; min-width: 0; opacity: 0.75;' }, p[1]),
+                E('span', { style: 'display: flex; align-items: center; gap: 8px; margin-left: auto;' }, [stateEl, btn])
             ]);
         });
-        var optCmd = 'apk add ' + OPT_PKGS.filter(function(p) { return !p[2]; })
-            .map(function(p) { return p[0]; }).join(' ');
-        optRows.push(E('div', { style: 'margin-top: 10px; font-size: 0.8em; opacity: 0.7;' }, 'Install the ones available on every target:'));
-        optRows.push(E('pre', {
-            style: 'margin: 4px 0 0 0; padding: 8px 10px; border-radius: 6px; background: rgba(128,128,128,0.12); font-size: 0.8em; overflow-x: auto; white-space: pre; user-select: all; cursor: text;'
-        }, optCmd));
+        var pkgSetState = function(name, txt, col) {
+            var r = pkgRows[name];
+            if (!r) return;
+            r.state.textContent = txt || '';
+            r.state.style.color = col || '';
+            r.state.style.opacity = col ? '1' : '0.7';
+        };
+        var renderPkgs = function(st) {
+            st = st || {};
+            var job = st.job || null;
+            var running = !!(job && job.state === 'running');
+            (st.pkgs || []).forEach(function(pk) {
+                var r = pkgRows[pk.name];
+                if (!r) return;
+                var mine = !!(job && job.pkg === pk.name);
+                var op = null, txt = '', col = '';
+                // The name is the status: green once installed, grey when not,
+                // so the list reads at a glance.
+                r.name.style.color = (pk.installed || pk.external) ? '#8bc34a' : '#9e9e9e';
+                r.name.title = pk.installed ? 'Installed' : pk.external ? 'Present, but not installed with apk' : 'Not installed';
+                if (mine && running) {
+                    txt = job.op === 'add' ? 'Installing\u2026' : 'Removing\u2026';
+                } else if (!pk.installed && pk.external) {
+                    // Already there without apk (a hand-copied binary, a built-in
+                    // driver). No button: installing would take the file over,
+                    // and removing it later would delete the original.
+                    txt = 'Already present \u2014 not from this package';
+                } else if (pk.installed) {
+                    if (pk.required_by) txt = 'Required by ' + pk.required_by;
+                    else op = 'del';
+                } else if (!pk.arch_ok) {
+                    txt = 'Not available for ' + (st.arch || 'this architecture');
+                } else if (pk.available === 0) {
+                    txt = 'Not in this router\u2019s package feeds';
+                } else {
+                    op = 'add';
+                }
+                if (mine && job.state === 'done' && job.rc !== 0) {
+                    txt = (job.op === 'add' ? 'Install' : 'Removal') + ' failed' + (job.msg ? ': ' + job.msg : '');
+                    col = '#ff5252';
+                }
+                pkgSetState(pk.name, txt, col);
+                r.btn.style.display = op ? '' : 'none';
+                if (op) {
+                    r.btn.setAttribute('data-op', op);
+                    r.btn.className = 'cbi-button ' + (op === 'add' ? 'cbi-button-positive' : 'cbi-button-remove');
+                    r.btn.textContent = op === 'add' ? 'Install' : 'Remove';
+                }
+                r.btn.disabled = running;
+            });
+            pkgNote.textContent = st.index === 0
+                ? 'The package index has not been downloaded since boot, so availability is not known yet. Install fetches it first.'
+                : 'Installed from this router\u2019s own apk feeds' + (st.arch ? ' (' + st.arch + ')' : '') + '. Green means installed.';
+        };
+        // The backend has already dropped whatever it cached from the package,
+        // so fetch fresh data now rather than on the next tick: the affected
+        // cards gain (or lose) their rows as soon as the job finishes.
+        var pkgRefreshCards = function() {
+            if (typeof infoTick === 'function') infoTick();
+            if (typeof wanIpTick === 'function') wanIpTick();
+        };
+        var loadPkgStatus = function() {
+            clearTimeout(pkgPollT);
+            return callHwPkgStatus().then(function(st) {
+                renderPkgs(st);
+                var job = st && st.job;
+                if (job && job.state === 'running') {
+                    pkgPollT = setTimeout(loadPkgStatus, 1500);
+                } else if (pkgJob && job && job.id === pkgJob) {
+                    pkgJob = null;
+                    pkgRefreshCards();
+                }
+            }).catch(function() {
+                pkgNote.textContent = 'Could not read package state from the router.';
+            });
+        };
+        var PKG_REFUSED = {
+            busy: 'Another package job is still running.',
+            required: 'Other installed packages still need it.',
+            unavailable: 'Not available for this router.',
+            present: 'Already present on the router outside apk.',
+            invalid: 'The router rejected the request.'
+        };
+        var pkgAct = function(name, op) {
+            if (op !== 'add' && op !== 'del') return;
+            Object.keys(pkgRows).forEach(function(k) { pkgRows[k].btn.disabled = true; });
+            pkgSetState(name, op === 'add' ? 'Installing\u2026' : 'Removing\u2026');
+            callHwPkgAction(name, op).then(function(r) {
+                if (r && r.result === 'started') {
+                    pkgJob = r.id;
+                    return loadPkgStatus();
+                }
+                return loadPkgStatus().then(function() {
+                    pkgSetState(name, PKG_REFUSED[r && r.result] || 'Request failed.', '#ff5252');
+                });
+            }).catch(function() {
+                loadPkgStatus().then(function() { pkgSetState(name, 'Request failed.', '#ff5252'); });
+            });
+        };
         settingsPanel.appendChild(cbiSection('Optional Packages',
-            'Everything here is optional. The dashboard works without them and says so where data is missing — installing one just adds detail to a card.',
-            optRows));
+            'Everything here is optional. The dashboard works without them and says so where data is missing \u2014 installing one just adds detail to a card.',
+            pkgRowEls.concat([pkgNote])));
         settingsPanel.appendChild(cbiSection('Diagnostics', null, [
             E('button', {
                 type: 'button',
@@ -2027,7 +2141,7 @@ return view.extend({
             style: 'padding: 4px 14px;',
             click: function() {
                 settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
-                if (settingsPanel.style.display !== 'none') loadCpuPerf();
+                if (settingsPanel.style.display !== 'none') { loadCpuPerf(); loadPkgStatus(); }
             }
         }, '\u2699 Settings');
         var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
@@ -5117,7 +5231,7 @@ return view.extend({
                     var hxShown = 0;
                     if (hxNode) {
                         var hxItems = (res.hwmon_extra || []).filter(function(hx) {
-                            return hx.unit === 'V' || hx.unit === 'RPM' || hx.unit === 'W' || hx.unit === 'A';
+                            return hx.unit === 'V' || hx.unit === 'RPM' || hx.unit === 'W' || hx.unit === 'A' || hx.unit === '%';
                         });
                         // RAPL reports cumulative microjoules, not an instantaneous
                         // power reading — derive Watts from the delta between polls,
@@ -5156,10 +5270,15 @@ return view.extend({
                         }, function(entry, hx) {
                             var txt = '';
                             if (hx.unit === 'V') txt = (hx.val / 1000).toFixed(2) + ' V';
-                            else if (hx.unit === 'RPM') txt = hx.val + ' RPM';
+                            else if (hx.unit === 'RPM') txt = hx.val + ' RPM' + (hx.duty >= 0 ? ' \u00b7 ' + hx.duty + ' %' : '');
+                            else if (hx.unit === '%') txt = hx.duty + ' %';
                             else if (hx.unit === 'W') txt = hx.val === null ? '\u2014' : (hx.val / 1e6).toFixed(2) + ' W';
                             else if (hx.unit === 'A') txt = (hx.val / 1000).toFixed(2) + ' A';
                             entry.val.textContent = txt;
+                            // A driver-raised alarm (reading outside its limits,
+                            // stalled fan) gets the dashboard's usual fault red.
+                            entry.val.style.color = hx.alarm ? '#ff5252' : '';
+                            entry.val.title = hx.alarm ? 'The sensor driver reports an alarm for this reading' : '';
                         });
                     }
                     hwmonCard.style.display = hxShown > 0 ? 'flex' : 'none';

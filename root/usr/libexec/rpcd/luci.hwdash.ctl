@@ -2,6 +2,102 @@
 
 . /usr/share/hwdash/rpcd-common.sh
 
+# Optional packages the Settings panel can install or remove. The list is
+# fixed here and nothing else ever reaches apk: the page sends one of these
+# names, never a command line. dmidecode and the Super I/O kmods are x86-only,
+# so they are gated on the architecture as well as on the package index.
+PKG_OPTIONAL="stuntman-client ethtool-full smartmontools lscpu dmidecode kmod-hwmon-nct6775 kmod-hwmon-it87"
+PKG_JOB=/tmp/hwdash-pkg.job
+PKG_LOG=/tmp/hwdash-pkg.log
+
+_pkg_known() {
+	case "$1" in ''|*[!a-z0-9-]*) return 1 ;; esac
+	case " $PKG_OPTIONAL " in *" $1 "*) return 0 ;; esac
+	return 1
+}
+
+_pkg_arch() {
+	PKG_ARCH=$(apk --print-arch 2>/dev/null)
+	[ -z "$PKG_ARCH" ] && [ -f /etc/apk/arch ] && read -r PKG_ARCH < /etc/apk/arch
+}
+
+_pkg_arch_ok() {
+	case "$1" in
+		dmidecode|kmod-hwmon-*)
+			case "$PKG_ARCH" in x86_64|x86|i386|i486|i586|i686) return 0 ;; esac
+			return 1 ;;
+	esac
+	return 0
+}
+
+# 0 when what the package provides is already on the router without apk
+# having installed it: a hand-copied binary, or a driver built into the
+# kernel or loaded by hand. Such a package is never offered for install --
+# apk would silently take the file over, and a later Remove would then
+# delete something apk never put there.
+_pkg_present() {
+	case "$1" in
+		stuntman-client) _has_stunclient ;;
+		smartmontools) command -v smartctl >/dev/null 2>&1 ;;
+		lscpu|dmidecode) command -v "$1" >/dev/null 2>&1 ;;
+		kmod-hwmon-*) [ -d "/sys/module/${1#kmod-hwmon-}" ] ;;
+		*) return 1 ;;
+	esac
+}
+
+# Installed packages that depend on $1, as bare names, into PKG_REQ. Remove
+# is only offered when this is empty: apk would refuse anyway, and the row
+# can say why instead of offering a button that cannot work.
+_pkg_required_by() {
+	local _l
+	PKG_REQ=""
+	while IFS= read -r _l; do
+		[ -n "$_l" ] || continue
+		case "$_l" in *" is required by:"*) continue ;; esac
+		PKG_REQ="${PKG_REQ:+$PKG_REQ, }${_l%%-[0-9]*}"
+	done <<EOF
+$(apk info -r "$1" 2>/dev/null)
+EOF
+}
+
+# 0 while a job is running. One older than ten minutes is treated as dead
+# (apk was killed mid-way), not as busy, so it cannot wedge the panel.
+_pkg_busy() {
+	local _id _op _pk _st _rc
+	[ -f "$PKG_JOB" ] || return 1
+	read -r _id _op _pk _st _rc < "$PKG_JOB"
+	[ "$_st" = "running" ] || return 1
+	case "$_id" in ''|*[!0-9]*) return 1 ;; esac
+	[ $(($(date +%s) - _id)) -lt 600 ]
+}
+
+# Runs detached: apk update + add can outlast rpcd's 30s call timeout. Once
+# it finishes, whatever the dashboard cached from this package is dropped, so
+# the next poll shows the new state instead of a copy from before the change.
+_pkg_run() {
+	local _op=$1 _pk=$2 _id=$3 _rc
+	if [ "$_op" = "add" ]; then
+		apk update > "$PKG_LOG" 2>&1
+		apk add "$_pk" >> "$PKG_LOG" 2>&1; _rc=$?
+	else
+		apk del "$_pk" > "$PKG_LOG" 2>&1; _rc=$?
+	fi
+	case "$_pk" in
+		ethtool-full) rm -f /tmp/hwdash_ethtool.cache /tmp/hwdash_ethtool.cache.lock ;;
+		smartmontools) rm -f /tmp/hwdash_nvme_smart_* ;;
+		lscpu) rm -f /tmp/hwdash/sys_static_v2.frag ;;
+		dmidecode) rm -f /tmp/hwdash_ddr_speed ;;
+		kmod-hwmon-*)
+			# Load or unload the driver now, or its sensors would only
+			# appear (or keep reporting) after the next reboot.
+			if [ $_rc -eq 0 ]; then
+				if [ "$_op" = "add" ]; then modprobe "${_pk#kmod-hwmon-}" >/dev/null 2>&1
+				else rmmod "${_pk#kmod-hwmon-}" >/dev/null 2>&1; fi
+			fi ;;
+	esac
+	printf '%s %s %s done %s\n' "$_id" "$_op" "$_pk" "$_rc" > "$PKG_JOB"
+}
+
 # Hand the collector the user's raw (unresolved) WAN probe targets. It owns
 # hostname resolution and the fallback list; this side deliberately does not
 # substitute a default for an empty value -- empty means "use your built-in
@@ -166,7 +262,7 @@ _nat_parse_out() {
 
 case "$1" in
 	list)
-		echo '{ "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "nat_test": { "iface": "" } }'
+		echo '{ "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "nat_test": { "iface": "" }, "pkg_status": { }, "pkg_action": { "pkg": "", "op": "" } }'
 		;;
 	call)
 		case "$2" in
@@ -269,6 +365,83 @@ case "$1" in
 				CPF_AVAIL_FLAG=0
 				[ -d "$_CF" ] && [ "$CPF_GOV" != "unknown" ] && [ "${CPF_IMAX:-0}" -gt 0 ] && CPF_AVAIL_FLAG=1
 				echo "{\"available\":$CPF_AVAIL_FLAG,\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
+				;;
+			pkg_status)
+				_pkg_arch
+				# One apk search for every name, answered from the cached
+				# index alone -- no network. With no index cached yet (fresh
+				# boot, before any apk update) availability is reported as
+				# unknown (-1) rather than missing; Install fetches it first.
+				_idx=0
+				for _f in /var/cache/apk/APKINDEX.* /etc/apk/cache/APKINDEX.*; do
+					[ -f "$_f" ] && { _idx=1; break; }
+				done
+				_avail=" "
+				[ $_idx -eq 1 ] && _avail=" $(apk search --exact $PKG_OPTIONAL 2>/dev/null | tr '\n' ' ') "
+				_inst=" $(sed -n 's/^P://p' /lib/apk/db/installed 2>/dev/null | tr '\n' ' ') "
+				_out=""
+				for _p in $PKG_OPTIONAL; do
+					_i=0; case "$_inst" in *" $_p "*) _i=1 ;; esac
+					_a=-1
+					if [ $_idx -eq 1 ]; then
+						_a=0; case "$_avail" in *" $_p-"[0-9]*) _a=1 ;; esac
+					fi
+					_ok=1; _pkg_arch_ok "$_p" || _ok=0
+					_x=0; [ $_i -eq 0 ] && _pkg_present "$_p" && _x=1
+					PKG_REQ=""; [ $_i -eq 1 ] && _pkg_required_by "$_p"
+					json_esc "$PKG_REQ"
+					_out="$_out${_out:+,}{\"name\":\"$_p\",\"installed\":$_i,\"available\":$_a,\"arch_ok\":$_ok,\"external\":$_x,\"required_by\":\"$JSV\"}"
+				done
+				_job="null"
+				if [ -f "$PKG_JOB" ]; then
+					read -r _jid _jop _jpk _jst _jrc < "$PKG_JOB"
+					case "$_jrc" in ''|*[!0-9]*) _jrc=-1 ;; esac
+					[ "$_jst" = "running" ] && ! _pkg_busy && { _jst="done"; _jrc=-1; }
+					# apk's own verdict: its ERROR line when there is one,
+					# otherwise the last line it printed.
+					_jmsg=""; _jerr=""
+					if [ -f "$PKG_LOG" ]; then
+						while IFS= read -r _l; do
+							[ -n "$_l" ] || continue
+							_jmsg=$_l
+							case "$_l" in ERROR*) [ -z "$_jerr" ] && _jerr=$_l ;; esac
+						done < "$PKG_LOG"
+					fi
+					json_esc "${_jerr:-$_jmsg}"
+					_job="{\"id\":\"$_jid\",\"op\":\"$_jop\",\"pkg\":\"$_jpk\",\"state\":\"$_jst\",\"rc\":$_jrc,\"msg\":\"$JSV\"}"
+				fi
+				json_esc "$PKG_ARCH"
+				echo "{\"arch\":\"$JSV\",\"index\":$_idx,\"job\":$_job,\"pkgs\":[$_out]}"
+				;;
+			pkg_action)
+				_IN=""
+				IFS= read -r _IN 2>/dev/null
+				_PK=""; _PO=""
+				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
+					eval "$(printf '%s' "$_IN" | head -c 512 | jsonfilter -e '_PK=@.pkg' -e '_PO=@.op' 2>/dev/null)"
+				fi
+				_pkg_arch
+				if ! _pkg_known "$_PK" || { [ "$_PO" != "add" ] && [ "$_PO" != "del" ]; }; then
+					echo '{"result":"invalid"}'
+				elif ! _pkg_arch_ok "$_PK"; then
+					echo '{"result":"unavailable"}'
+				elif _pkg_busy; then
+					echo '{"result":"busy"}'
+				elif [ "$_PO" = "add" ] && ! grep -qx "P:$_PK" /lib/apk/db/installed && _pkg_present "$_PK"; then
+					echo '{"result":"present"}'
+				else
+					PKG_REQ=""; [ "$_PO" = "del" ] && _pkg_required_by "$_PK"
+					if [ -n "$PKG_REQ" ]; then
+						json_esc "$PKG_REQ"
+						echo "{\"result\":\"required\",\"required_by\":\"$JSV\"}"
+					else
+						_jid=$(date +%s)
+						printf '%s %s %s running -\n' "$_jid" "$_PO" "$_PK" > "$PKG_JOB"
+						: > "$PKG_LOG"
+						( _pkg_run "$_PO" "$_PK" "$_jid" ) </dev/null >/dev/null 2>&1 &
+						echo "{\"result\":\"started\",\"id\":\"$_jid\"}"
+					fi
+				fi
 				;;
 			nat_test)
 				# Limit the probe to a WAN shown by this dashboard. This prevents a

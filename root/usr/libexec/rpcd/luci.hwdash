@@ -634,30 +634,96 @@ EOF
 				COOLING="$COOLING]"
 
 				# Non-temperature hwmon channels: voltage rails, fans, power,
-				# current. Most routers expose none (the card hides itself);
-				# boards with a PMIC get free telemetry. Builtin reads only.
+				# current and PWM fan duty. Most routers expose none (the card
+				# hides itself); boards with a PMIC or a Super I/O chip get free
+				# telemetry. Builtin reads only.
+				#
+				# A pwm-fan with no tachometer has pwmN but no fanN_input, so it
+				# used to be invisible; its duty cycle is reported instead, and
+				# where both exist the duty rides on the RPM row.
+				#
+				# Alarms are only believed where the channel has a limit to
+				# break. A desktop BIOS commonly leaves a Super I/O chip's
+				# min/max at 0, and the chip then flags every rail as out of
+				# range -- twelve of fifteen on the Z490 this was tested on.
+				#
+				# Super I/O voltage inputs are raw pin readings, most of them
+				# behind a board-specific divider (the 12 V rail reads about
+				# 1 V), so unlabelled they mean nothing and are left out. The
+				# few with a fixed meaning across the NCT6775 family are named.
+				# Super I/O fan headers reading 0 RPM with no alarm are empty
+				# headers and are left out too.
 				HWMON_EXTRA="["
 				_HX_FIRST=1
 				for h in /sys/class/hwmon/hwmon*; do
 					[ -d "$h" ] || continue
 					read_file _hx_name "$h/name" "hwmon"
-					for _hxi in "$h"/in[0-9]*_input "$h"/fan[0-9]*_input "$h"/power[0-9]*_input "$h"/curr[0-9]*_input; do
+					_hxsio=0
+					case "$_hx_name" in nct6*|it87*|it8*|w83*|f71*) _hxsio=1 ;; esac
+					for _hxi in "$h"/in[0-9]*_input "$h"/fan[0-9]*_input "$h"/power[0-9]*_input "$h"/curr[0-9]*_input "$h"/pwm[0-9] "$h"/pwm[0-9][0-9]; do
 						[ -f "$_hxi" ] || continue
 						read_file _hxv "$_hxi" ""
 						case "$_hxv" in ''|*[!0-9-]*) continue ;; esac
 						_hxch=${_hxi##*/}
 						_hxch=${_hxch%_input}
+						_hxd=-1
 						case "$_hxch" in
 							in*) _hxu="V" ;;
-							fan*) _hxu="RPM" ;;
+							fan*) _hxu="RPM"
+								[ -f "$h/pwm${_hxch#fan}" ] && read_file _hxd "$h/pwm${_hxch#fan}" -1 ;;
 							power*) _hxu="W" ;;
 							curr*) _hxu="A" ;;
+							pwm*) [ -f "$h/fan${_hxch#pwm}_input" ] && continue
+								_hxu="%"; _hxd=$_hxv ;;
 							*) continue ;;
 						esac
-						read_file _hxl "${_hxi%_input}_label" ""
-						json_esc "${_hxl:-$_hx_name $_hxch}"
+						read_file _hxl "$h/${_hxch}_label" ""
+						if [ -z "$_hxl" ]; then
+							case "$_hxch" in
+								in*)
+									if [ $_hxsio -eq 1 ]; then
+										case "$_hx_name:$_hxch" in
+											nct677*:in0|nct679*:in0) _hxl="CPU Vcore" ;;
+											nct677*:in2|nct679*:in2) _hxl="AVCC" ;;
+											nct677*:in3|nct679*:in3) _hxl="+3.3V" ;;
+											nct677*:in7|nct679*:in7) _hxl="+3.3V Standby" ;;
+											nct677*:in8|nct679*:in8) _hxl="CMOS Battery" ;;
+											nct6779:in9|nct679*:in9) _hxl="VTT" ;;
+											*) continue ;;
+										esac
+									else
+										_hxl="$_hx_name $_hxch"
+									fi ;;
+								fan*) _hxl="Fan ${_hxch#fan}" ;;
+								pwm*) _hxl="Fan ${_hxch#pwm} Duty" ;;
+								*) _hxl="$_hx_name $_hxch" ;;
+							esac
+							case "$_hxch" in fan*|pwm*)
+								[ $_hxsio -eq 0 ] && case "$_hx_name" in *fan*) ;; *) _hxl="$_hx_name $_hxl" ;; esac ;;
+							esac
+						fi
+						case "$_hxd" in ''|*[!0-9]*) _hxd=-1 ;; esac
+						[ "$_hxd" -ge 0 ] && _hxd=$(( (_hxd * 100 + 127) / 255 ))
+						# A limit counts as set when any limit file is non-zero,
+						# or when there are none (the alarm is then the chip's own).
+						_hxlim=-1
+						for _hxlf in "$h/$_hxch"_min "$h/$_hxch"_max "$h/$_hxch"_crit "$h/$_hxch"_lcrit; do
+							[ -f "$_hxlf" ] || continue
+							read_file _hxlv "$_hxlf" 0
+							case "$_hxlv" in ''|0|-0) [ $_hxlim -lt 0 ] && _hxlim=0 ;; *) _hxlim=1 ;; esac
+						done
+						_hxa=0
+						if [ $_hxlim -ne 0 ]; then
+							for _hxaf in "$h/$_hxch"_*alarm; do
+								[ -f "$_hxaf" ] || continue
+								read_file _hxav "$_hxaf" 0
+								[ "$_hxav" = "1" ] && _hxa=1
+							done
+						fi
+						[ $_hxsio -eq 1 ] && [ "$_hxu" = "RPM" ] && [ "$_hxv" = "0" ] && [ $_hxa -eq 0 ] && continue
+						json_esc "$_hxl"
 						[ $_HX_FIRST -eq 0 ] && HWMON_EXTRA="$HWMON_EXTRA,"
-						HWMON_EXTRA="$HWMON_EXTRA{\"name\":\"$JSV\",\"val\":$_hxv,\"unit\":\"$_hxu\"}"
+						HWMON_EXTRA="$HWMON_EXTRA{\"name\":\"$JSV\",\"val\":$_hxv,\"unit\":\"$_hxu\",\"duty\":$_hxd,\"alarm\":$_hxa}"
 						_HX_FIRST=0
 					done
 				done
