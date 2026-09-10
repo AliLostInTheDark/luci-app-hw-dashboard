@@ -675,9 +675,11 @@ EOF
 					read_file _rpn "$_rp/name" "rapl"
 					read_file _rpe "$_rp/energy_uj" 0
 					case "$_rpe" in ''|*[!0-9]*) continue ;; esac
+					read_file _rpm "$_rp/max_energy_range_uj" 0
+					case "$_rpm" in ''|*[!0-9]*) _rpm=0 ;; esac
 					json_esc "$_rpn"
 					[ $_RP_FIRST -eq 0 ] && RAPL="$RAPL,"
-					RAPL="$RAPL{\"name\":\"$JSV\",\"energy_uj\":$_rpe}"
+					RAPL="$RAPL{\"name\":\"$JSV\",\"energy_uj\":$_rpe,\"max_uj\":$_rpm}"
 					_RP_FIRST=0
 				done
 				RAPL="$RAPL]"

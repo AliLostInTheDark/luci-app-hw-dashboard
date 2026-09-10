@@ -1064,6 +1064,7 @@ return view.extend({
         self.hiddenCards = Array.isArray(savedCfg.hidden) ? savedCfg.hidden : loadLS('hwdash.hiddenCards', []);
         self.pingTargets = Array.isArray(savedCfg.targets) ? savedCfg.targets : loadLS('hwdash.pingTargets', []);
         self.disabledPings = Array.isArray(savedCfg.disabledPings) ? savedCfg.disabledPings : [];
+        self.disabledFams = Array.isArray(savedCfg.disabledFams) ? savedCfg.disabledFams : [];
         self.hiddenWanIfaces = cleanWanList(Array.isArray(savedCfg.wanHidden) ? savedCfg.wanHidden : loadLS('hwdash.hiddenWanIfaces', []));
         self.wanTarget4 = typeof savedCfg.wanTarget4 === 'string' && savedCfg.wanTarget4 ? savedCfg.wanTarget4 : '1.1.1.1';
         self.wanTarget6 = typeof savedCfg.wanTarget6 === 'string' && savedCfg.wanTarget6 ? savedCfg.wanTarget6 : '2606:4700:4700::1111';
@@ -1094,6 +1095,7 @@ return view.extend({
                 hidden: self.hiddenCards,
                 targets: self.pingTargets,
                 disabledPings: self.disabledPings,
+                disabledFams: self.disabledFams,
                 wanHidden: self.hiddenWanIfaces,
                 wanTarget4: self.wanTarget4,
                 wanTarget6: self.wanTarget6,
@@ -1127,11 +1129,19 @@ return view.extend({
             { host: 'youtube.com', fam: 4 }, { host: 'youtube.com', fam: 6 }
         ];
         var expandFams = function(t) { return String(t.fam) === 'both' ? [4, 6] : [parseInt(t.fam) === 6 ? 6 : 4]; };
+        // A whole family can be switched off on top of the per-target
+        // choices. It is kept apart from disabledPings on purpose: switching
+        // the family back on restores exactly the targets that were enabled
+        // before, instead of re-enabling every one of them.
+        var isFamDisabled = function(fam) {
+            fam = parseInt(fam, 10);
+            return (self.disabledFams || []).some(function(f) { return parseInt(f, 10) === fam; });
+        };
         var isPingDisabled = function(host, fam) {
-            return self.disabledPings.indexOf(host + '|' + fam) !== -1;
+            return isFamDisabled(fam) || self.disabledPings.indexOf(host + '|' + fam) !== -1;
         };
         var isGwDisabled = function(fam) {
-            return self.disabledPings.indexOf('__gateway|' + fam) !== -1;
+            return isFamDisabled(fam) || self.disabledPings.indexOf('__gateway|' + fam) !== -1;
         };
         // The RPC never sees this -- a custom target's friendly name exists
         // only in settings, so anything that displays a target (the Ping
@@ -1528,7 +1538,26 @@ return view.extend({
                 // the checkbox list -- the name (when given) replaces it
                 // there too, not just on the card itself.
                 group('Custom', cust.map(function(c) { return makePingToggle(c.host, fam, c.name || c.host, true, c.idx); }));
-                var kids = [E('div', { style: 'font-weight: 700; font-size: 0.9em; letter-spacing: 0.5px;' }, 'IPv' + fam)];
+                // Master switch for the family. Applied in place rather than by
+                // rebuilding the list, so the per-target boxes keep their state
+                // and simply grey out while the family is off.
+                var body = E('div', {});
+                var setBodyState = function(off) {
+                    body.style.opacity = off ? '0.45' : '';
+                    Array.prototype.forEach.call(body.querySelectorAll('input[type="checkbox"]'), function(x) { x.disabled = off; });
+                };
+                var famCb = E('input', {
+                    type: 'checkbox',
+                    change: function(ev) {
+                        self.disabledFams = (self.disabledFams || []).filter(function(f) { return parseInt(f, 10) !== fam; });
+                        if (!ev.target.checked) self.disabledFams.push(fam);
+                        setBodyState(!ev.target.checked);
+                        markDirty();
+                        self.pingHist = {};
+                    }
+                });
+                famCb.checked = !isFamDisabled(fam);
+                var kids = [E('label', { style: 'display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 0.9em; letter-spacing: 0.5px; cursor: pointer;', title: 'Probe the IPv' + fam + ' targets below' }, [famCb, 'IPv' + fam])];
                 // Say it plainly when the family cannot work at all, rather
                 // than leaving a box of targets that will only ever report as
                 // down and look like a fault in the dashboard.
@@ -1536,7 +1565,9 @@ return view.extend({
                     kids.push(E('div', { style: 'font-size: 0.76em; color: #ffb300; margin-top: 4px; line-height: 1.35;' },
                         'No IPv6 WAN interface was detected on this router. These targets are unreachable and will be reported as such.'));
                 }
-                rows.forEach(function(r) { kids.push(r); });
+                rows.forEach(function(r) { body.appendChild(r); });
+                kids.push(body);
+                setBodyState(!famCb.checked);
                 return E('div', { style: 'flex: 1 1 240px; min-width: 0; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; padding: 10px 12px;' }, kids);
             };
             targetList.appendChild(E('div', { style: 'display: flex; gap: 12px; flex-wrap: wrap;' }, [famBox(4), famBox(6)]));
@@ -1574,7 +1605,7 @@ return view.extend({
             renderTargetList();
         };
         settingsPanel.appendChild(cbiSection('Ping Targets',
-            'The hosts probed by the Ping Latency card, grouped by address family.',
+            'The hosts probed by the Ping Latency card, grouped by address family. Untick IPv4 or IPv6 to pause that whole family; the individual choices underneath are kept for when it is switched back on.',
             [
                 targetList,
                 E('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;' }, [
@@ -1586,6 +1617,7 @@ return view.extend({
                         click: function() {
                             self.pingTargets = [];
                             self.disabledPings = [];
+                            self.disabledFams = [];
                             markDirty();
                             self.pingHist = {};
                             renderTargetList();
@@ -1930,6 +1962,7 @@ return view.extend({
                 self.hiddenCards = Array.isArray(cfg.hidden) ? cfg.hidden : [];
                 self.pingTargets = Array.isArray(cfg.targets) ? cfg.targets : [];
                 self.disabledPings = Array.isArray(cfg.disabledPings) ? cfg.disabledPings : [];
+                self.disabledFams = Array.isArray(cfg.disabledFams) ? cfg.disabledFams : [];
                 self.hiddenWanIfaces = cleanWanList(Array.isArray(cfg.wanHidden) ? cfg.wanHidden : []);
                 if (typeof cfg.wanTarget4 === 'string' && cfg.wanTarget4) {
                     self.wanTarget4 = cfg.wanTarget4;
@@ -1958,6 +1991,7 @@ return view.extend({
             self.hiddenCards = [];
             self.pingTargets = [];
             self.disabledPings = [];
+            self.disabledFams = [];
             self.hiddenWanIfaces = [];
             self.wanTarget4 = '1.1.1.1';
             self.wanTarget6 = '2606:4700:4700::1111';
@@ -5096,15 +5130,21 @@ return view.extend({
                             var raplLabels = { 'package-0': 'Package Power', 'package-1': 'Package Power (1)', core: 'Core Power', dram: 'DRAM Power' };
                             res.rapl.forEach(function(rz) {
                                 var prev = self.prevRapl[rz.name];
-                                var watts = 0;
+                                var watts = null;
                                 if (prev) {
                                     var tDiff = (raplNow - prev.time) / 1000.0;
-                                    if (tDiff > 0) watts = Math.max(0, (rz.energy_uj - prev.energy_uj) / 1e6 / tDiff);
+                                    // The counter wraps at max_energy_range_uj (roughly
+                                    // hourly at 65 W), which used to read as 0 W for a
+                                    // poll. Unwrap it instead.
+                                    var dE = rz.energy_uj - prev.energy_uj;
+                                    if (dE < 0 && rz.max_uj > 0) dE += rz.max_uj;
+                                    if (tDiff > 0 && dE >= 0) watts = dE / 1e6 / tDiff;
                                 }
                                 self.prevRapl[rz.name] = { energy_uj: rz.energy_uj, time: raplNow };
-                                if (prev) {
-                                    hxItems.push({ name: raplLabels[rz.name] || (rz.name + ' Power'), val: watts * 1e6, unit: 'W' });
-                                }
+                                // Listed from the first poll with a placeholder, so
+                                // the card does not appear a poll late and shift the
+                                // layout under the reader.
+                                hxItems.push({ name: raplLabels[rz.name] || (rz.name + ' Power'), val: watts === null ? null : watts * 1e6, unit: 'W' });
                             });
                         }
                         hxShown = hxItems.length;
@@ -5117,7 +5157,7 @@ return view.extend({
                             var txt = '';
                             if (hx.unit === 'V') txt = (hx.val / 1000).toFixed(2) + ' V';
                             else if (hx.unit === 'RPM') txt = hx.val + ' RPM';
-                            else if (hx.unit === 'W') txt = (hx.val / 1e6).toFixed(2) + ' W';
+                            else if (hx.unit === 'W') txt = hx.val === null ? '\u2014' : (hx.val / 1e6).toFixed(2) + ' W';
                             else if (hx.unit === 'A') txt = (hx.val / 1000).toFixed(2) + ' A';
                             entry.val.textContent = txt;
                         });
