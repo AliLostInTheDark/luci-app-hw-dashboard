@@ -941,7 +941,6 @@ return view.extend({
         });
         var thermGraphNode = E('div', { id: 'hw-therm-graph-wrapper', style: 'width: 100%;' });
         var ethCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Ports Topology'), E('div', { id: 'hw-eth-links', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
-        var pcieCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'PCI-e Topology'), E('div', { id: 'hw-pcie', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0; display: flex; flex-direction: column; gap: 8px;' })]);
         var pingGraphWrapper = E('div', { style: 'width: 100%;' });
         var pingTableWrapper = E('div', { style: 'width: 100%;' });
         var pingGraphNode = E('div', { id: 'hw-ping', style: 'width: 100%;' }, [pingGraphWrapper, pingTableWrapper]);
@@ -1016,8 +1015,6 @@ return view.extend({
             E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
         ]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-        var irqCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Interrupts'), E('div', { id: 'hw-irq', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
-        var eventsCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Hardware Events'), E('div', { id: 'hw-events', style: 'width: 100%; display: flex; flex-direction: column; gap: 5px;' })]);
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
         sysCard.appendChild(E('div', {id: 'hw-sysinfo-grid', style: 'width: 100%;'}));
@@ -1030,7 +1027,6 @@ return view.extend({
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
         container.appendChild(coresCard);
-        container.appendChild(irqCard);
         container.appendChild(hwmonCard);
         container.appendChild(dskCard.node);
         container.appendChild(extCard);
@@ -1040,7 +1036,6 @@ return view.extend({
         });
         container.appendChild(myExtWrapper);
         container.appendChild(ethCard);
-        container.appendChild(pcieCard);
         container.appendChild(pingCard);
         container.appendChild(wanQualityCard);
         container.appendChild(apStatsCard);
@@ -1048,7 +1043,6 @@ return view.extend({
         container.appendChild(wifiStaCard);
         container.appendChild(wanIpCard);
         container.appendChild(thermWrapper);
-        container.appendChild(eventsCard);
         var self = this;
         var loadLS = function(key, dflt) {
             try {
@@ -1364,12 +1358,9 @@ return view.extend({
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
             cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
-            irq: { nodes: [irqCard], label: 'Interrupts', show: null },
-            events: { nodes: [eventsCard], label: 'Hardware Events', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
             ext: { nodes: [extCard, myExtWrapper], label: 'External Storage', show: null },
             ports: { nodes: [ethCard], label: 'Ports Topology', show: null },
-            pcie: { nodes: [pcieCard], label: 'PCI-e', show: null },
             ping: { nodes: [pingCard], label: 'Ping Latency', show: null },
             wan_quality: { nodes: [wanQualityCard], label: 'WAN Uptime Status', show: null },
             ap_stats: { nodes: [apStatsCard], label: 'AP Mode', show: null },
@@ -3545,8 +3536,8 @@ return view.extend({
         // when there is nothing left on screen that it produces. At 253ms of
         // router CPU per call it is by far the most expensive tick to run for
         // nobody's benefit.
-        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'irq',
-            'events', 'storage', 'ext', 'ports', 'pcie', 'thermal', 'wifi', 'alerts'];
+        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'storage',
+            'ext', 'ports', 'thermal', 'wifi', 'alerts'];
         // Registered further down by the phased dispatcher, not here -- see the
         // comment next to it for why all three ticks share one poll entry.
         var infoTick = function() {
@@ -4759,12 +4750,8 @@ return view.extend({
                     if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                 }
                 var portsNode = document.getElementById('hw-eth-links');
-                var validPcie = [];
-                if (res.pcie_devs) {
-                    validPcie = res.pcie_devs.filter(function(p){ var n = p.name.toLowerCase(); return p.speed && p.speed !== 'Unknown' && n.indexOf('unknown device')===-1 && n.indexOf('controller')===-1 && n.indexOf('bridge')===-1 && n.indexOf('root')===-1; });
-                }
-                // Host controllers, one row each, rated at the fastest bus the
-                // controller offers -- the backend folds an xHCI's USB 2.0 and
+                // Host controllers, one row each, with the slowest and fastest bus
+                // the controller offers -- the backend folds an xHCI's USB 2.0 and
                 // USB 3.x root hubs into a single entry. Peripherals are listed
                 // separately and only while something is actually plugged in.
                 var usbGen = function(v) {
@@ -4777,10 +4764,11 @@ return view.extend({
                 var usbCtlNames = {};
                 usbCtlRaw.forEach(function(c) { var n = c.product || 'USB Host Controller'; usbCtlNames[n] = (usbCtlNames[n] || 0) + 1; });
                 var usbCtls = usbCtlRaw.map(function(c, i) {
-                    var n = c.product || 'USB Host Controller', v = parseFloat(c.speed) || 0;
+                    var n = c.product || 'USB Host Controller', v = parseFloat(c.speed) || 0, lo = parseFloat(c.min) || 0;
                     // Two identical controllers (IPQ and Filogic boards carry a
                     // pair) are told apart by their device node.
-                    return { key: c.ctl || (n + '|' + i), name: usbCtlNames[n] > 1 && c.ctl ? n + ' (' + c.ctl + ')' : n, speed: v, label: usbGen(v) };
+                    return { key: c.ctl || (n + '|' + i), name: usbCtlNames[n] > 1 && c.ctl ? n + ' (' + c.ctl + ')' : n, speed: v, label: usbGen(v),
+                        minSpeed: lo, minLabel: lo > 0 && lo < v ? usbGen(lo) : '' };
                 });
                 var usbDevs = (res.usb_devs || []).filter(function(u){ var n = (u.name || '').trim(); return n && n !== 'Unknown' && n !== 'Unknown Device'; })
                     .map(function(u, i) { var v = parseFloat(u.speed) || 0; return { key: u.name + '|' + i, name: u.name, speed: v, label: usbRate(v) }; });
@@ -4899,21 +4887,28 @@ return view.extend({
                             entry.macRow.style.display = 'none';
                         }
                     });
-                    // Name and one speed line only: a controller's rated maximum,
+                    // Name and speed only: a controller's slowest and fastest bus,
                     // or the rate a peripheral actually negotiated.
                     var usbRowBuild = function(label) {
                         return function() {
+                            var mk = function(l) {
+                                var v = E('span', {});
+                                return { v: v, row: E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, l), v]) };
+                            };
                             var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' });
-                            var speedVal = E('span', {});
-                            var speedRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, label), speedVal]);
-                            var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [nameDiv, speedRow]);
-                            return { el: el, nameDiv: nameDiv, speedRow: speedRow, speedVal: speedVal };
+                            var lo = mk('Min Speed:'), hi = mk(label);
+                            var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [nameDiv, lo.row, hi.row]);
+                            return { el: el, nameDiv: nameDiv, minRow: lo.row, minVal: lo.v, speedRow: hi.row, speedVal: hi.v };
                         };
                     };
+                    var usbCol = function(v) { return v >= 5000 ? '#00bcd4' : v >= 480 ? '#ffea00' : '#9e9e9e'; };
                     var usbRowPatch = function(entry, u) {
                         entry.nameDiv.textContent = u.name;
+                        entry.minRow.style.display = u.minLabel ? 'flex' : 'none';
+                        entry.minVal.style.color = usbCol(u.minSpeed);
+                        entry.minVal.textContent = u.minLabel || '';
                         entry.speedRow.style.display = u.label ? 'flex' : 'none';
-                        entry.speedVal.style.color = u.speed >= 5000 ? '#00bcd4' : u.speed >= 480 ? '#ffea00' : '#9e9e9e';
+                        entry.speedVal.style.color = usbCol(u.speed);
                         entry.speedVal.textContent = u.label;
                     };
                     var usbKey = function(u) { return u.key; };
@@ -4922,29 +4917,6 @@ return view.extend({
                 } else {
                     ethCard.style.display = 'none';
                     self._portsRefs = null;
-                }
-                if (validPcie.length > 0) {
-                    pcieCard.style.display = 'flex';
-                    var pcNode = document.getElementById('hw-pcie');
-                    if (pcNode) {
-                        if (!self._pcieCache) self._pcieCache = {};
-                        syncRows(pcNode, self._pcieCache, validPcie, function(p, i) { return p.name + '|' + i; }, function(p) {
-                            var nameDiv = E('div', { style: 'font-weight: bold; margin-bottom: 4px;' }, p.name);
-                            var speedVal = E('span', {});
-                            var el = E('div', { style: 'padding: 10px; background: rgba(128,128,128,0.05); border-radius: 6px; margin-bottom: 6px;' }, [
-                                nameDiv,
-                                E('div', { style: 'display: flex; justify-content: space-between; font-size: 0.85em; opacity: 0.8;' }, [E('span', {}, 'Link Speed:'), speedVal])
-                            ]);
-                            return { el: el, speedVal: speedVal };
-                        }, function(entry, p) {
-                            var speedStr = p.speed + ' ' + p.width;
-                            if (p.max_speed && p.max_speed !== 'Unknown' && p.speed !== p.max_speed) speedStr += ' (Max: ' + p.max_speed + ')';
-                            entry.speedVal.style.color = p.speed !== p.max_speed ? '#ffea00' : '';
-                            entry.speedVal.textContent = speedStr;
-                        });
-                    }
-                } else {
-                    pcieCard.style.display = 'none';
                 }
                 if (res.wifi_radios && res.wifi_radios.length > 0) {
                     var wfNode = document.getElementById('hw-wifi-radios');
@@ -5105,115 +5077,6 @@ return view.extend({
                     }
                 } else {
                     wifiCard.style.display = 'none';
-                }
-                if (res.irqs && res.irqs.length > 0) {
-                    var irqNode = document.getElementById('hw-irq');
-                    if (!self.prevIrqs) self.prevIrqs = {};
-                    var CORE_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292'];
-                    var irqRates = [];
-                    res.irqs.forEach(function(q) {
-                        var pk = q.n + '|' + q.d;
-                        var prev = self.prevIrqs[pk];
-                        if (prev) {
-                            var rate = (q.t - prev.t) / 3;
-                            if (rate >= 1) {
-                                var coreD = q.c.map(function(v, ci) { return Math.max(0, v - (prev.c[ci] || 0)); });
-                                var parts = q.d.split(/\s+/);
-                                var iname = parts[parts.length - 1] || q.d;
-                                if (/^interrupts?$/i.test(iname)) iname = q.d.length > 24 ? q.d.slice(0, 23) + '\u2026' : q.d;
-                                irqRates.push({ name: iname, rate: rate, cores: coreD });
-                            }
-                        }
-                        self.prevIrqs[pk] = q;
-                    });
-                    irqRates.sort(function(a, b) { return b.rate - a.rate; });
-                    if (irqNode && irqRates.length > 0) {
-                        if (!self._irqRefs) {
-                            irqNode.innerHTML = '';
-                            var irqListWrap = E('div', {});
-                            var legendCores = E('div', { style: 'display: flex; gap: 10px; justify-content: center; font-size: 0.72em; opacity: 0.6; margin: 4px 0 8px 0; flex-wrap: wrap;' });
-                            var snVal = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
-                            var softnetRow = E('div', { class: 'hw-stat-row', style: 'border-top: 1px solid var(--border-color, rgba(128,128,128,0.15)); padding-top: 8px; display: none;' }, [
-                                E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, 'Backlog Drops / Squeezed'),
-                                snVal
-                            ]);
-                            irqNode.appendChild(irqListWrap);
-                            irqNode.appendChild(legendCores);
-                            irqNode.appendChild(softnetRow);
-                            self._irqRefs = { irqListWrap: irqListWrap, legendCores: legendCores, snVal: snVal, softnetRow: softnetRow, cache: {}, legendCoreCount: -1 };
-                        }
-                        var ir = self._irqRefs;
-                        syncRows(ir.irqListWrap, ir.cache, irqRates.slice(0, 6), function(q) { return q.name; }, function(q) {
-                            var val = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
-                            var barBg = E('div', { class: 'hw-bar-bg', style: 'height: 5px; display: flex;' });
-                            var el = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 8px;' }, [
-                                E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label', style: 'font-size: 0.9em;' }, q.name), val]),
-                                barBg
-                            ]);
-                            return { el: el, val: val, barBg: barBg };
-                        }, function(entry, q) {
-                            entry.val.textContent = Math.round(q.rate) + ' /s';
-                            entry.barBg.innerHTML = '';
-                            var total = q.cores.reduce(function(a, b) { return a + b; }, 0) || 1;
-                            q.cores.forEach(function(cv, ci) {
-                                if (cv <= 0) return;
-                                entry.barBg.appendChild(E('div', { style: 'height: 100%; width: ' + (cv / total * 100) + '%; background: ' + CORE_COLORS[ci % CORE_COLORS.length] + ';' }));
-                            });
-                        });
-                        var coreCount = Math.min(res.cpus.length - 1, 8);
-                        if (ir.legendCoreCount !== coreCount) {
-                            ir.legendCoreCount = coreCount;
-                            ir.legendCores.innerHTML = '';
-                            for (var lc = 0; lc < coreCount; lc++) {
-                                ir.legendCores.appendChild(E('span', { style: 'display: inline-flex; align-items: center; gap: 4px;' }, [
-                                    E('span', { style: 'width: 8px; height: 8px; border-radius: 2px; background: ' + CORE_COLORS[lc % CORE_COLORS.length] + ';' }),
-                                    'C' + lc
-                                ]));
-                            }
-                        }
-                        if (res.softnet && res.softnet.length > 0) {
-                            var snD = 0, snS = 0;
-                            if (self.prevSoftnet) {
-                                res.softnet.forEach(function(sn, si) {
-                                    var p = self.prevSoftnet[si];
-                                    if (p) { snD += Math.max(0, sn.d - p.d); snS += Math.max(0, sn.s - p.s); }
-                                });
-                                var snColor = snD > 0 ? '#ff5252' : snS > 0 ? '#ffb300' : 'currentColor';
-                                ir.softnetRow.style.display = '';
-                                ir.snVal.style.color = snColor;
-                                ir.snVal.textContent = snD + ' / ' + snS + ' per 3s';
-                            }
-                            self.prevSoftnet = res.softnet;
-                        }
-                        irqCard.style.display = 'flex';
-                    }
-                } else {
-                    irqCard.style.display = 'none';
-                }
-                if (res.hw_events && res.hw_events.length > 0) {
-                    var evNode = document.getElementById('hw-events');
-                    if (evNode) {
-                        if (!self._evCache) self._evCache = {};
-                        syncRows(evNode, self._evCache, res.hw_events.slice().reverse(), function(line) { return line; }, function(line) {
-                            var relSpan = E('span', { style: 'flex-shrink: 0; min-width: 62px; opacity: 0.55; font-size: 0.9em;' });
-                            var msgSpan = E('span', { style: 'font-family: monospace; font-size: 0.92em; opacity: 0.85; word-break: break-word; min-width: 0;' });
-                            var el = E('div', { style: 'display: flex; gap: 10px; align-items: baseline; font-size: 0.85em; padding: 4px 8px; background: rgba(128,128,128,0.05); border-radius: 4px;' }, [relSpan, msgSpan]);
-                            return { el: el, relSpan: relSpan, msgSpan: msgSpan };
-                        }, function(entry, line) {
-                            var rel = '';
-                            var m = line.match(/^\[\s*(\d+)\./);
-                            if (m && res.uptime) {
-                                var ago = res.uptime - parseInt(m[1]);
-                                if (ago < 0) ago = 0;
-                                rel = ago < 60 ? ago + 's ago' : ago < 3600 ? Math.floor(ago / 60) + 'm ago' : ago < 86400 ? Math.floor(ago / 3600) + 'h ago' : Math.floor(ago / 86400) + 'd ago';
-                            }
-                            entry.relSpan.textContent = rel;
-                            entry.msgSpan.textContent = line.replace(/^\[\s*[\d.]+\]\s*/, '');
-                        });
-                    }
-                    eventsCard.style.display = 'flex';
-                } else {
-                    eventsCard.style.display = 'none';
                 }
                 if ((res.hwmon_extra && res.hwmon_extra.length > 0) || (res.rapl && res.rapl.length > 0)) {
                     var hxNode = document.getElementById('hw-hwmon');
@@ -5685,8 +5548,8 @@ return view.extend({
         // the global tick counter, so info(3s), ping(2s) and wanQuality(2s)
         // coincided on every sixth tick -- and, worse, all three fired together
         // on the very first one. That is the most expensive moment info ever
-        // has: while the page was closed its caches (events 30s, wifi 20s,
-        // ethtool 30s) all expired, so the first call regenerates
+        // has: while the page was closed its caches (wifi 20s, ethtool 30s)
+        // all expired, so the first call regenerates
         // every one of them. Measured on a 4-core aarch64 router, that first
         // info costs 2-3x a warm one -- and it was landing on the same tick as
         // the other two calls.

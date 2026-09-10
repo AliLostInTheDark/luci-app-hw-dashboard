@@ -772,89 +772,6 @@ EOF_DMI
 				# pass above.
 
 
-				# --- IRQ table: number, per-CPU counters, description. The
-				# frontend computes rates and the per-core distribution from
-				# deltas.
-				#
-				# This was a fork-free builtin-read loop, but /proc/interrupts is
-				# the largest table the poll touches (94 rows x 4 CPUs here, 106 x
-				# 12 on x86) and the per-row `set --` + inner shift loop made it the
-				# single most expensive block on Qualcomm at ~39ms. One awk pass
-				# does the same job for the price of one fork: 39ms -> 22ms there,
-				# 12.5ms -> 1.7ms on x86. Verified to emit byte-identical JSON to
-				# the shell version on all three targets against a static snapshot.
-				# Never-fired IRQs are still dropped — they can't rank in the
-				# frontend's top-rate list and only bloat the payload.
-				IRQS="[]"
-				_ncpu=${LOGICAL_CPUS:-1}
-				if [ -f /proc/interrupts ]; then
-					IRQS="[$(awk -v ncpu="$_ncpu" '
-						BEGIN { first = 0 }
-						{
-							if ($1 !~ /:$/) next
-							num = substr($1, 1, length($1) - 1)
-							cnts = ""; tot = 0; n = 0; i = 2
-							while (n < ncpu && i <= NF) {
-								if ($i !~ /^[0-9]+$/) break
-								cnts = cnts (n ? "," : "") $i
-								tot += $i; i++; n++
-							}
-							if (n == 0 || tot == 0) next
-							desc = ""
-							for (j = i; j <= NF; j++) desc = desc (j > i ? " " : "") $j
-							gsub(/\\/, "\\\\", desc); gsub(/"/, "\\\"", desc)
-							# %.0f, not %d: totals can exceed a 32-bit int.
-							printf "%s{\"n\":\"%s\",\"t\":%.0f,\"c\":[%s],\"d\":\"%s\"}", (first ? "," : ""), num, tot, cnts, desc
-							first = 1
-						}' /proc/interrupts 2>/dev/null)]"
-				fi
-
-				# --- softnet backlog: processed/dropped/time_squeeze per CPU
-				# (hex in /proc/net/softnet_stat). dropped > 0 means the CPU
-				# could not keep up with packet input.
-				SOFTNET="["
-				_SNF=1
-				if [ -f /proc/net/softnet_stat ]; then
-					while read -r _sp _sd _ss _; do
-						case "$_sp" in ''|*[!0-9a-fA-F]*) continue ;; esac
-						[ $_SNF -eq 0 ] && SOFTNET="$SOFTNET,"
-						SOFTNET="$SOFTNET{\"p\":$((0x$_sp)),\"d\":$((0x${_sd:-0})),\"s\":$((0x${_ss:-0}))}"
-						_SNF=0
-					done < /proc/net/softnet_stat
-				fi
-				SOFTNET="$SOFTNET]"
-
-				# --- hardware events: interesting dmesg lines (thermal, ECC,
-				# link flaps, USB, OOM, voltage). dmesg+grep forks only run
-				# once per 10s window; the result is TTL-cached.
-				# dmesg dumps the whole kernel ring buffer — large and slow on
-				# Qualcomm. Background SWR so it never blocks the request.
-				_events_refresh() {
-					local _ev="[" _ef=1 _el
-					while read -r _el; do
-						[ -z "$_el" ] && continue
-						json_esc "$_el"
-						[ $_ef -eq 0 ] && _ev="$_ev,"
-						_ev="$_ev\"$JSV\""
-						_ef=0
-					done <<EOF
-$(dmesg 2>/dev/null | grep -iE 'thermal|throttl|bad block|bad eraseblock| ecc |uncorrectable|link is (up|down)|over-?current|out of memory|oom-killer|under-?voltage|crc error|i/o error|new (high|full|low|super)-speed usb|usb disconnect' | tail -n 12)
-EOF
-					_ev="$_ev]"
-					_cache_write /tmp/hwdash_events.cache 30 "$_ev"
-				}
-				HW_EVENTS="[]"
-				if _cache_read /tmp/hwdash_events.cache; then
-					HW_EVENTS=$C_VAL
-				else
-					[ -n "$C_VAL" ] && HW_EVENTS=$C_VAL
-					if ! _cache_read /tmp/hwdash_events.lock; then
-						_cache_write /tmp/hwdash_events.lock 30 refreshing
-						( _events_refresh ) >/dev/null 2>&1 &
-					fi
-				fi
-				[ -z "$HW_EVENTS" ] && HW_EVENTS="[]"
-
 				# --- ethtool PHY details: autoneg, NEGOTIATED flow control
 				# (the real state — config RX/TX are often off while the link
 				# negotiates pause anyway) and EEE. 3 ethtool forks per port,
@@ -1183,12 +1100,12 @@ EOF
 				done
 				BLOCK_DEVS="$BLOCK_DEVS]"
 
-				# One row per physical host controller, rated at the fastest bus
-				# it offers. An xHCI controller registers two root hubs (a USB
-				# 2.0 bus and a USB 3.x bus), so listing root hubs showed every
-				# controller twice. Root hubs are grouped by their parent device,
-				# which `cd -P` resolves without forking readlink. USB/IP and
-				# dummy_hcd are software controllers with no port behind them.
+				# One row per physical host controller, with the slowest and fastest
+				# bus it offers. An xHCI controller registers two root hubs (a USB 2.0
+				# bus and a USB 3.x bus), so listing root hubs showed every controller
+				# twice. Root hubs are grouped by their parent device, which `cd -P`
+				# resolves without forking readlink. USB/IP and dummy_hcd are software
+				# controllers with no port behind them.
 				USB_PORTS="["
 				FIRST_USB=1
 				_usb_seen=" "
@@ -1200,17 +1117,18 @@ EOF
 					case "$_uctl" in vhci_hcd*|dummy_hcd*) continue ;; esac
 					case "$_usb_seen" in *" $_uctl "*) continue ;; esac
 					_usb_seen="$_usb_seen$_uctl "
-					_umax=0
+					_umax=0; _umin=0
 					for _uh in "$PWD"/usb*; do
 						read_file speed "$_uh/speed" "0"
 						case "$speed" in ''|*[!0-9]*) continue ;; esac
 						[ "$speed" -gt "$_umax" ] && _umax=$speed
+						{ [ "$_umin" -eq 0 ] || [ "$speed" -lt "$_umin" ]; } && _umin=$speed
 					done
 					read_file product "$usb/product" "USB Host Controller"
 					if [ $FIRST_USB -eq 0 ]; then USB_PORTS="$USB_PORTS,"; fi
 					json_esc "$product"; _n=$JSV
 					json_esc "$_uctl"
-					USB_PORTS="$USB_PORTS{\"speed\":\"$_umax\",\"product\":\"$_n\",\"ctl\":\"$JSV\"}"
+					USB_PORTS="$USB_PORTS{\"speed\":\"$_umax\",\"min\":\"$_umin\",\"product\":\"$_n\",\"ctl\":\"$JSV\"}"
 					FIRST_USB=0
 				done
 				cd "$_usb_owd" 2>/dev/null
@@ -1248,25 +1166,6 @@ EOF
 					FIRST_USB=0
 				done
 				USB_DEVS="$USB_DEVS]"
-
-				PCIE_DEVS="["
-				FIRST_PCIE=1
-				for pci in /sys/bus/pci/devices/*; do
-					if [ -f "$pci/current_link_speed" ]; then
-						read_file vendor "$pci/vendor" "Unknown"
-						read_file device "$pci/device" "Unknown"
-						read_file speed "$pci/current_link_speed" "Unknown"
-						read_file width "$pci/current_link_width" "Unknown"
-						read_file max_speed "$pci/max_link_speed" "Unknown"
-						read_file max_width "$pci/max_link_width" "Unknown"
-						name="PCIe Device ($vendor:$device)"
-
-						if [ $FIRST_PCIE -eq 0 ]; then PCIE_DEVS="$PCIE_DEVS,"; fi
-						PCIE_DEVS="$PCIE_DEVS{\"name\":\"$name\",\"speed\":\"$speed\",\"width\":\"$width\",\"max_speed\":\"$max_speed\",\"max_width\":\"$max_width\"}"
-						FIRST_PCIE=0
-					fi
-				done
-				PCIE_DEVS="$PCIE_DEVS]"
 
 				# WiFi radio info is the single biggest CPU cost (dozens of
 				# iwinfo/iw/uci/awk forks per radio). Channel/txpower/bitrate
@@ -2045,7 +1944,7 @@ EOF_LSCPU
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"irqs\":$IRQS, \"softnet\":$SOFTNET, \"hw_events\":$HW_EVENTS, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"pcie_devs\":$PCIE_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"slab\":$MEM_SLAB, \"pagetables\":$MEM_PAGETABLES, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"cooling\":$COOLING, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

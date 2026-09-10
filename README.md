@@ -13,7 +13,7 @@ A real-time hardware & network monitoring dashboard for OpenWrt LuCI, built from
 
 ---
 
-Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negotiated link state, per-radio WiFi PHY capabilities, or which WAN link actually belongs to which ISP. This dashboard does — and it's tuned to spawn as few processes as an embedded router can get away with, so leaving it open costs almost nothing.
+Standard LuCI status pages don't show CPU cache topology, NAND wear, per-radio WiFi PHY capabilities, or which WAN link actually belongs to which ISP. This dashboard does — and it's tuned to spawn as few processes as an embedded router can get away with, so leaving it open costs almost nothing.
 
 ## Contents
 
@@ -29,9 +29,9 @@ Standard LuCI status pages don't show CPU cache topology, NAND wear, PCIe negoti
 
 | | |
 |---|---|
-| **CPU & Memory** | Per-core load, cache topology (even without kernel support), frequency residency, context switches, top IRQs by rate |
+| **CPU & Memory** | Per-core load, cache topology (even without kernel support), frequency residency, context switches |
 | **Storage** | NAND/UBI wear & ECC trend, SquashFS + overlay breakdown, real disk I/O throughput, NVMe/SATA SMART health |
-| **Topology** | PCIe, USB and Ethernet link state — negotiated speed/width shown next to the hardware's rated maximum |
+| **Topology** | Ethernet and USB link state — negotiated speed per port, and the speed range each USB controller supports |
 | **WiFi** | Per-band PHY details (channel, TX power, NSS, bitrate, noise floor) straight from `iwinfo`/`iw` |
 | **Ping Latency** | Realtime graph with **true packet-level loss and jitter**, not a poll-level guess |
 | **WAN Uptime Status** | Per-link uptime/downtime and latency, with the **ISP correctly identified** even behind `mwan3`, carrier-grade NAT, or 464xlat/NAT64 tunnels |
@@ -133,7 +133,7 @@ On x86/x86_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family
 <details>
 <summary><b>CPU & Per-Core Usage</b></summary>
 
-Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts, top IRQ sources by per-core rate, softnet backlog drops, active connections vs. the conntrack limit, and cumulative frequency residency.
+Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts, active connections vs. the conntrack limit, and cumulative frequency residency.
 </details>
 
 <details>
@@ -169,9 +169,9 @@ Voltage/current/fan/power rails from `hwmon`, plus Intel RAPL package/core/DRAM 
 </details>
 
 <details>
-<summary><b>Ports & PCIe Topology</b></summary>
+<summary><b>Ports Topology</b></summary>
 
-Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers with the fastest speed each supports (one row per controller, not per root hub), plus any plugged-in peripherals with the speed they negotiated; hubs are left out. PCIe devices with negotiated link speed/width shown next to the controller's rated maximum, so a device running below capability is obvious at a glance.
+Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers, one row each (not one per root hub) with the slowest and fastest speed the controller supports, plus any plugged-in peripherals with the speed they negotiated; hubs are left out.
 </details>
 
 <details>
@@ -208,12 +208,6 @@ One row per associated station — hostname/MAC, signal strength with a live bar
 <summary><b>Alerts</b></summary>
 
 A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong.
-</details>
-
-<details>
-<summary><b>Hardware Events</b></summary>
-
-A filtered `dmesg` view — thermal, ECC, link-flap, USB, OOM and voltage events with relative timestamps.
 </details>
 
 <details>
