@@ -258,20 +258,6 @@ return view.extend({
             }
             return memTotalKb;
         };
-        var drawUsageSpark = function(el, data, color) {
-            if (!el || data.length < 2) return;
-            var W = 300, H = 46, P = 2;
-            var pts = data.map(function(v, i) {
-                var x = P + i * (W - 2 * P) / (data.length - 1);
-                var y = H - P - Math.max(0, Math.min(100, v)) * (H - 2 * P) / 100;
-                return x.toFixed(1) + ',' + y.toFixed(1);
-            });
-            var poly = pts.join(' ');
-            var area = (P) + ',' + (H - P) + ' ' + poly + ' ' + (W - P) + ',' + (H - P);
-            el.innerHTML = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
-                '<polygon points="' + area + '" fill="' + color + '22"/>' +
-                '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" points="' + poly + '"/></svg>';
-        };
         var PING_COLORS = ['#00bcd4', '#ffb300', '#e91e63', '#8bc34a', '#b388ff', '#ff7043', '#4dd0e1', '#f06292', '#ffd54f'];
         var PING_WINDOW = 120;
         var PING_AGG_KEEP = 1080;
@@ -884,13 +870,6 @@ return view.extend({
         };
         var cpuCard = createDial('cpu', 'CPU');
         var ramCard = createDial('ram', 'MEMORY');
-        ramCard.node.appendChild(E('div', {
-            style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
-        }));
-        ramCard.node.appendChild(E('h4', {
-            style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'
-        }, 'USAGE HISTORY (3 MIN)'));
-        ramCard.node.appendChild(E('div', { id: 'hw-mem-spark', style: 'width: 100%; line-height: 0;' }));
         var _dskNode = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'});
         _dskNode.appendChild(E('h3', {}, 'Internal Storage'));
         _dskNode.appendChild(E('div', {id: 'stats-dsk', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;'}));
@@ -919,13 +898,6 @@ return view.extend({
             style: 'margin-top: 0; padding-top: 0;'
         });
         cpuCard.node.appendChild(cpuMetaNode);
-        cpuCard.node.appendChild(E('div', {
-            style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
-        }));
-        cpuCard.node.appendChild(E('h4', {
-            style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;'
-        }, 'USAGE HISTORY (3 MIN)'));
-        cpuCard.node.appendChild(E('div', { id: 'hw-cpu-spark', style: 'width: 100%; line-height: 0;' }));
         var advCard = E('div', {
             class: 'hw-card',
             style: 'justify-content: flex-start;'
@@ -1025,6 +997,13 @@ return view.extend({
             E('h3', {}, 'Wi-Fi Clients'),
             E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
         ]);
+        // Frequency residency (cpufreq time_in_state since boot) has a card of
+        // its own: it is a long-run profile rather than live load, and it made
+        // CPU Detailed Load the tallest card in the top row.
+        var freqCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
+            E('h3', {}, 'CPU Frequency Residency'),
+            E('div', { id: 'hw-freq', style: 'width: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 24px;' })
+        ]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
@@ -1037,6 +1016,7 @@ return view.extend({
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
+        container.appendChild(freqCard);
         container.appendChild(coresCard);
         container.appendChild(hwmonCard);
         container.appendChild(dskCard.node);
@@ -1377,6 +1357,7 @@ return view.extend({
             cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
             ram: { nodes: [ramCard.node], label: 'Memory', show: 'flex' },
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
+            freq: { nodes: [freqCard], label: 'CPU Frequency Residency', show: null },
             cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
@@ -3684,7 +3665,7 @@ return view.extend({
         // when there is nothing left on screen that it produces. At 253ms of
         // router CPU per call it is by far the most expensive tick to run for
         // nobody's benefit.
-        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'storage',
+        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'freq', 'cores', 'hwmon', 'storage',
             'ext', 'ports', 'thermal', 'wifi', 'alerts'];
         // Registered further down by the phased dispatcher, not here -- see the
         // comment next to it for why all three ticks share one poll entry.
@@ -3727,10 +3708,6 @@ return view.extend({
                         pct = Math.max(0, Math.min(100, pct));
                         if (stat.name === 'cpu') {
                             var pctRound = Math.round(pct);
-                            if (!self.cpuHist) self.cpuHist = [];
-                            self.cpuHist.push(pct);
-                            if (self.cpuHist.length > 60) self.cpuHist.shift();
-                            drawUsageSpark(document.getElementById('hw-cpu-spark'), self.cpuHist, '#00bcd4');
                             updateDial('cpu', pctRound, cpuCard.circ);
                             document.getElementById('dial-sub-cpu').textContent = (res.cpus.length - 1) + ' Cores';
                             var calcPct = function(key) {
@@ -3871,23 +3848,6 @@ return view.extend({
                             var connPct = Math.min((connCount / connMax) * 100, 100);
                             advRows.push({ k: 'conn', type: 'bar2', label: 'Active Connections', val: connPct, valStr: connCount + ' / ' + connMax, color: getDynColor(connPct, false) });
                         }
-                        if (res.freq_stats && res.freq_stats.length > 1) {
-                            var fsTotal = 0;
-                            res.freq_stats.forEach(function(p) { fsTotal += p[1]; });
-                            if (fsTotal > 0) {
-                                advRows.push({ k: 'freqhdr', type: 'header', label: 'Freq Residency (since boot)' });
-                                var fsList = res.freq_stats;
-                                if (fsList.length > 10) {
-                                    fsList = fsList.slice().sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10)
-                                        .sort(function(a, b) { return a[0] - b[0]; });
-                                }
-                                fsList.forEach(function(p) {
-                                    var pctF = p[1] / fsTotal * 100;
-                                    var fLbl = p[0] >= 1000000 ? (p[0] / 1000000).toFixed(2) + ' GHz' : Math.round(p[0] / 1000) + ' MHz';
-                                    advRows.push({ k: 'freq:' + p[0], type: 'freqbar', label: fLbl, val: pctF });
-                                });
-                            }
-                        }
                         if (!self._advCache) self._advCache = {};
                         syncRows(advNode, self._advCache, advRows, function(r) { return r.k; }, function(r) {
                             if (r.type === 'bar') {
@@ -3934,6 +3894,42 @@ return view.extend({
                         });
                     }
                 }
+                // CPU frequency residency: share of time at each frequency since
+                // boot. Long lists keep the ten busiest states, in frequency order.
+                var fsRows = [];
+                if (res.freq_stats && res.freq_stats.length > 1) {
+                    var fsTotal = 0;
+                    res.freq_stats.forEach(function(p) { fsTotal += p[1]; });
+                    if (fsTotal > 0) {
+                        var fsList = res.freq_stats;
+                        if (fsList.length > 10) {
+                            fsList = fsList.slice().sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10)
+                                .sort(function(a, b) { return a[0] - b[0]; });
+                        }
+                        fsList.forEach(function(p) {
+                            fsRows.push({ k: 'freq:' + p[0], label: p[0] >= 1000000 ? (p[0] / 1000000).toFixed(2) + ' GHz' : Math.round(p[0] / 1000) + ' MHz', val: p[1] / fsTotal * 100 });
+                        });
+                    }
+                }
+                var freqNode = document.getElementById('hw-freq');
+                if (fsRows.length && freqNode) {
+                    if (!self._freqCache) self._freqCache = {};
+                    syncRows(freqNode, self._freqCache, fsRows, function(r) { return r.k; }, function(r) {
+                        var val = E('span', { class: 'hw-stat-value', style: 'font-size: 0.9em;' });
+                        var fill = E('div', { class: 'hw-bar-fill', style: 'background: #00bcd4;' });
+                        var el = E('div', { class: 'hw-progress-item', style: 'margin-bottom: 6px;' }, [
+                            E('div', { class: 'hw-progress-header' }, [E('span', { class: 'hw-stat-label' }, r.label), val]),
+                            E('div', { class: 'hw-bar-bg' }, [fill])
+                        ]);
+                        return { el: el, val: val, fill: fill };
+                    }, function(entry, r) {
+                        entry.val.textContent = r.val.toFixed(1) + '%';
+                        entry.fill.style.width = r.val + '%';
+                    });
+                    freqCard.style.display = 'flex';
+                } else {
+                    freqCard.style.display = 'none';
+                }
                 var mem = res.mem;
                 if (mem && mem.total > 0) {
                     var used = mem.total - mem.avail;
@@ -3966,8 +3962,6 @@ return view.extend({
                         var ratio = mem.zram_used > 0 ? (mem.zram_orig / mem.zram_used).toFixed(2) : 1.0;
                         ramRows.push({ k: 'zram_ratio', type: 'centertext', val: 'Compression: ' + ratio + 'x' });
                     }
-                    if (mem.slab > 0) addMemBarRow('slab', 'Slab Kernel', mem.slab / 1024, mem.total / 1024);
-                    if (mem.pagetables > 0) addMemBarRow('pagetables', 'PageTables', mem.pagetables / 1024, mem.total / 1024);
                     if (mem.dirty > 0 || mem.writeback > 0) {
                         ramRows.push({ k: 'dirty', type: 'stat', label: 'Dirty / Writeback', val: (mem.dirty / 1024).toFixed(1) + ' MB / ' + (mem.writeback / 1024).toFixed(1) + ' MB', color: mem.writeback > 1024 ? '#ffb300' : '' });
                     }
@@ -4002,10 +3996,6 @@ return view.extend({
                             entry.el.textContent = r.val;
                         }
                     });
-                    if (!self.memHist) self.memHist = [];
-                    self.memHist.push(pct);
-                    if (self.memHist.length > 60) self.memHist.shift();
-                    drawUsageSpark(document.getElementById('hw-mem-spark'), self.memHist, '#b388ff');
                 }
                 if (res.df && Array.isArray(res.df)) {
                     var totalSpace = 0;
@@ -4825,12 +4815,10 @@ return view.extend({
                         tGraph = self.tempPanel.el;
                         self.tempPanelData = tHistMap;
                     }
-                    var validCooling = (res.cooling || []).filter(function(c) { return c.max; });
-                    var thermSig = sensors.map(function(s) { return s.name; }).join('|') + '|g' + (tGraph ? 1 : 0) + '|cool:' + validCooling.map(function(c) { return c.type; }).join(',');
+                    var thermSig = sensors.map(function(s) { return s.name; }).join('|') + '|g' + (tGraph ? 1 : 0);
                     if (sigGate(self._sig, 'therm', thermSig)) {
                         thermWrap.innerHTML = '';
                         self._thermRefs = {};
-                        self._coolRefs = {};
                         var nCols = Math.min(3, sensors.length);
                         var cols = [];
                         for (var ci = 0; ci < nCols; ci++) cols.push([]);
@@ -4870,30 +4858,10 @@ return view.extend({
                             class: 'hw-card wide'
                         }, cardKids);
                         thermWrap.appendChild(thermCard);
-                        if (validCooling.length > 0) {
-                            var coolRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color, rgba(128,128,128,0.15));' });
-                            coolRow.appendChild(E('span', { style: 'font-size: 0.75em; opacity: 0.55; text-transform: uppercase; letter-spacing: 1px; align-self: center;' }, 'Cooling'));
-                            validCooling.forEach(function(c) {
-                                var chip = E('span', { style: 'font-size: 0.75em; padding: 3px 8px; border-radius: 4px; white-space: nowrap;' });
-                                self._coolRefs[c.type] = chip;
-                                coolRow.appendChild(chip);
-                            });
-                            thermCard.appendChild(coolRow);
-                        }
                     }
                     sensors.forEach(function(s) {
                         var entry = self._thermRefs && self._thermRefs[s.name];
                         if (entry) patchSensorRow(entry, s);
-                    });
-                    validCooling.forEach(function(c) {
-                        var chip = self._coolRefs && self._coolRefs[c.type];
-                        if (chip) {
-                            var cc = c.cur >= c.max ? '#ff1744' : c.cur > 0 ? '#ffb300' : '#00bcd4';
-                            chip.style.border = '1px solid ' + cc + '44';
-                            chip.style.color = cc;
-                            chip.style.background = cc + '18';
-                            chip.textContent = c.type + ': ' + (c.cur > 0 ? c.cur + '/' + c.max : 'idle');
-                        }
                     });
                     if (self.tempPanel && self.tempPanelData) self.tempPanel.update(self.tempPanelData);
                 }

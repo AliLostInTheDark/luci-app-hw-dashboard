@@ -136,13 +136,13 @@ On x86/x86_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family
 <details>
 <summary><b>CPU & Per-Core Usage</b></summary>
 
-Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts, active connections vs. the conntrack limit, and cumulative frequency residency.
+Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts and active connections vs. the conntrack limit. Cumulative frequency residency since boot has a card of its own, just below the top row.
 </details>
 
 <details>
 <summary><b>Memory</b></summary>
 
-Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used/free/cached/buffers, swap, ZRAM with live compression ratio, and kernel slab/page-table overhead.
+Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used/free/cached/buffers, swap, and ZRAM with live compression ratio.
 </details>
 
 <details>
@@ -168,7 +168,7 @@ USB mass storage devices with format and mount state shown separately (an unform
 <details>
 <summary><b>Power, Fans & Thermal Sensors</b></summary>
 
-Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fans (shown even when the fan has no speed sensor) and red highlighting of any reading the sensor driver flags as an alarm, plus Intel RAPL package/core/DRAM power on x86. On x86, motherboard fans and voltages need the Super I/O driver — install it from **⚙ Settings → Optional Packages**. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and a cooling-device row showing active throttling plus the peak temperature seen since boot.
+Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fans (shown even when the fan has no speed sensor) and red highlighting of any reading the sensor driver flags as an alarm, plus Intel RAPL package/core/DRAM power on x86. On x86, motherboard fans and voltages need the Super I/O driver — install it from **⚙ Settings → Optional Packages**. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and the peak temperature seen since boot.
 </details>
 
 <details>

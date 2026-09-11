@@ -190,6 +190,36 @@ is_public_ip6() {
 	return 1
 }
 
+# Globally routable IPv4, as far as a string can tell: not RFC 1918, not
+# the shared CGNAT block (RFC 6598), loopback, link-local, the IETF and
+# benchmarking blocks, multicast or reserved space.
+is_public_ip4() {
+	case "$1" in
+		''|*[!0-9.]*) return 1 ;;
+		0.*|10.*|127.*|169.254.*|192.168.*|192.0.0.*|198.1[89].*) return 1 ;;
+		172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 1 ;;
+		100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) return 1 ;;
+		22[4-9].*|2[3-5][0-9].*) return 1 ;;
+	esac
+	return 0
+}
+
+# An interface's IPv4 next hop: netifd's default route for it (the PPPoE
+# peer, the DHCP router), else the kernel's default through its device --
+# mwan3 keeps one per routing table.
+iface_gateway4() {
+	_ig=""
+	read -r _ig <<EOF
+$(ubus call network.interface."$1" status 2>/dev/null | jsonfilter -e '@.route[@.target="0.0.0.0"].nexthop' 2>/dev/null)
+EOF
+	case "$_ig" in ''|0.0.0.0) ;; *) printf '%s' "$_ig"; return ;; esac
+	while read -r _ig_d _ig_v _ig_g _; do
+		[ "$_ig_d" = "default" ] && [ "$_ig_v" = "via" ] && { printf '%s' "$_ig_g"; return; }
+	done <<EOF
+$(ip -4 route show table all default dev "$2" 2>/dev/null)
+EOF
+}
+
 # Cymru's origin6 zone keys on the fully expanded, nibble-reversed address,
 # same shape as ip6.arpa. Handles the compressed "::" form, and avoids
 # strtonum() so it runs on busybox awk as well as gawk.
@@ -1069,55 +1099,42 @@ resolve_isp() {
 		return
 	fi
 	_try_file="$RINGDIR/${_ifn}.isp.try"
+	# A stand-in answer (see below) is re-checked less often than a failed
+	# first attempt: there is already something sensible on screen.
+	_iv=$ISP_RETRY_INTERVAL
+	[ -f "$_isp_file" ] && _iv=300
 	if [ -f "$_try_file" ]; then
 		read -r _try_time < "$_try_file" 2>/dev/null
-		if [ "$(( _now - ${_try_time:-0} ))" -lt "$ISP_RETRY_INTERVAL" ]; then
+		if [ "$(( _now - ${_try_time:-0} ))" -lt "$_iv" ]; then
 			return
 		fi
 	fi
 	printf '%d\n' "$_now" > "$_try_file"
 	_nsf="$RINGDIR/.probe.${_ifn}.ns"
+	# The public exit address is the ground truth: it is what the rest of
+	# the internet sees, so it is always really routed. When it can't be
+	# fetched, the interface's gateway stands in -- never the interface's
+	# own address, because a CGNAT operator is free to number its side with
+	# someone else's space. Airtel hands out 100.230.x.x, which is T-Mobile
+	# USA's 100.128.0.0/9, and the lookup said exactly that. A stand-in
+	# answer writes no .pubip, so the exit address keeps being retried
+	# until it replaces it.
 	_pub=$(get_public_ip4 "$_dev" "$_srcip" "$_mark" "$_ifn")
-	if [ -z "$_pub" ]; then
-		case "$_srcip" in
-			10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|127.*|169.254.*|'') ;;
-			*) _pub="$_srcip" ;;
-		esac
+	is_public_ip4 "$_pub" || _pub=""
+	_lookup=$_pub
+	if [ -z "$_lookup" ]; then
+		_gw=$(iface_gateway4 "$_ifn" "$_dev")
+		is_public_ip4 "$_gw" && _lookup=$_gw
 	fi
-	if [ -z "$_pub" ]; then
-		_gw=$(ubus call network.interface."$_ifn" status 2>/dev/null | jsonfilter -e '@.route[0].target' -e '@.dns_server[0]' 2>/dev/null | head -1)
-		case "$_gw" in
-			10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|127.*|169.254.*|'') ;;
-			*) _pub="$_gw" ;;
-		esac
+	_asn=""
+	if [ -n "$_lookup" ]; then
+		_o1=${_lookup%%.*}; _r1=${_lookup#*.}; _o2=${_r1%%.*}; _r2=${_r1#*.}; _o3=${_r2%%.*}; _o4=${_r2#*.}
+		asn_txt "${_o4}.${_o3}.${_o2}.${_o1}.origin.asn.cymru.com" "$_nsf"
+		_asn=$(asn_pick "$_nsf")
 	fi
-	if [ -z "$_pub" ]; then
-		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
-		case "$_lower_ifn" in
-			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
-			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
-			*bsnl*)            _syn="AS9829 | BSNL" ;;
-			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
-			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
-			*vodafone*|*idea*) _syn="AS55410 | Vodafone Idea" ;;
-			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
-			*verizon*)         _syn="AS701 | Verizon" ;;
-			*att*)             _syn="AS7018 | AT&T" ;;
-			*)                 _syn="" ;;
-		esac
-		if [ -n "$_syn" ]; then
-			printf '%s' "$_syn" > "$_isp_file"
-			[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
-			rm -f "$_try_file"
-			return
-		fi
-		return
-	fi
-	_o1=${_pub%%.*}; _r1=${_pub#*.}; _o2=${_r1%%.*}; _r2=${_r1#*.}; _o3=${_r2%%.*}; _o4=${_r2#*.}; _rev="${_o4}.${_o3}.${_o2}.${_o1}"
-	asn_txt "${_rev}.origin.asn.cymru.com" "$_nsf"
-	_asn=$(asn_pick "$_nsf")
 	if [ -z "$_asn" ]; then
+		# Nothing routable to look up, or no answer: fall back on the
+		# interface name when it names a known operator.
 		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
 		case "$_lower_ifn" in
 			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
@@ -1136,7 +1153,7 @@ resolve_isp() {
 			printf '%s' "$_syn" > "$_isp_file"
 			[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
 		fi
-		rm -f "$_nsf" "$_try_file"
+		rm -f "$_nsf"
 		return
 	fi
 	asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
@@ -1147,8 +1164,12 @@ resolve_isp() {
 	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
 	[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
 	printf '%s' "$_srcip" > "$_ip_file"
-	printf '%s' "$_pub" > "$RINGDIR/${_ifn}.pubip"
-	rm -f "$_try_file"
+	if [ -n "$_pub" ]; then
+		printf '%s' "$_pub" > "$RINGDIR/${_ifn}.pubip"
+		rm -f "$_try_file"
+	else
+		rm -f "$RINGDIR/${_ifn}.pubip"
+	fi
 }
 
 # Add one observation to a rolling 24-hour counter. Reusing a bucket slot
