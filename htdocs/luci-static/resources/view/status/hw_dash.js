@@ -3823,27 +3823,41 @@ return view.extend({
                 }
                 var mem = res.mem;
                 if (mem && mem.total > 0) {
+                    // MiB/GiB with a decimal, the way btop and LuCI print them. The
+                    // values were always 1024-based but were labelled "MB" and
+                    // rounded to whole numbers, so they never read the same.
+                    var fmtMem = function(mib) { return mib >= 1024 ? (mib / 1024).toFixed(2) + ' GiB' : mib.toFixed(1) + ' MiB'; };
+                    var fmtPhys = function(mib) { return mib >= 1024 ? +(mib / 1024).toFixed(2) + ' GiB' : Math.round(mib) + ' MiB'; };
+                    // Used is Total minus Available, as btop counts it. LuCI's
+                    // status page uses Total minus Free instead, which counts the
+                    // page cache as used; the tooltip on the row says so.
                     var used = mem.total - mem.avail;
                     var pct = Math.round((used / mem.total) * 100);
                     updateDial('ram', pct, ramCard.circ);
-                    document.getElementById('dial-sub-ram').textContent = (used / 1024).toFixed(0) + ' MB';
+                    document.getElementById('dial-sub-ram').textContent = fmtMem(used / 1024);
                     var _dtMb = res.sys_info && res.sys_info.mem_phys_mb;
                     var physRamKB = (_dtMb > 0) ? _dtMb * 1024 : getPhysicalRamTotal(mem.total);
                     var ramStats = document.getElementById('stats-ram');
                     var ramRows = [];
-                    ramRows.push({ k: 'phys', type: 'stat', mb: '5px', label: 'Physical Total', val: (physRamKB / 1024).toFixed(0) + ' MB' });
+                    ramRows.push({ k: 'phys', type: 'stat', mb: '5px', label: 'Physical Total', val: fmtPhys(physRamKB / 1024) });
                     if (mem.speed) ramRows.push({ k: 'speed', type: 'stat', mb: '5px', label: 'Memory Speed', val: mem.speed });
-                    ramRows.push({ k: 'usable', type: 'stat', mb: '15px', label: 'Usable Total', val: (mem.total / 1024).toFixed(0) + ' MB' });
-                    var addMemBarRow = function(k, label, valueMb, totalMb) {
+                    ramRows.push({ k: 'usable', type: 'stat', mb: '15px', label: 'Usable Total', val: fmtMem(mem.total / 1024) });
+                    var addMemBarRow = function(k, label, valueMb, totalMb, title, single) {
                         var pct = totalMb > 0 ? (valueMb / totalMb) * 100 : 0;
-                        var colorMem = getDynColor(pct, label === 'Free');
-                        var valStr = (label === 'Used' || label === 'Free' || label === 'Cached' || label === 'Buffers') ? valueMb.toFixed(0) + ' MB' : valueMb.toFixed(0) + ' / ' + totalMb.toFixed(0) + ' MB';
-                        ramRows.push({ k: k, type: 'membar', label: label, pct: pct, valStr: valStr, color: colorMem });
+                        var colorMem = getDynColor(pct, label === 'Free' || label === 'Available');
+                        var valStr = single ? fmtMem(valueMb) : fmtMem(valueMb) + ' / ' + fmtMem(totalMb);
+                        ramRows.push({ k: k, type: 'membar', label: label, pct: pct, valStr: valStr, color: colorMem, title: title || '' });
                     };
-                    addMemBarRow('used', 'Used', used / 1024, mem.total / 1024);
-                    addMemBarRow('free', 'Free', mem.free / 1024, mem.total / 1024);
-                    addMemBarRow('cached', 'Cached', mem.cached / 1024, mem.total / 1024);
-                    addMemBarRow('buffers', 'Buffers', mem.buffers / 1024, mem.total / 1024);
+                    addMemBarRow('used', 'Used', used / 1024, mem.total / 1024,
+                        'Total minus Available — how btop counts it. LuCI’s status page counts the page cache as used (Total minus Free), so its Used reads higher.', true);
+                    addMemBarRow('avail', 'Available', mem.avail / 1024, mem.total / 1024,
+                        'MemAvailable: what programs can still claim without swapping, including cache the kernel can drop. LuCI shows this as Total Available.', true);
+                    addMemBarRow('free', 'Free', mem.free / 1024, mem.total / 1024,
+                        'MemFree: RAM holding nothing at all. A low figure is normal — Linux fills idle RAM with cache, which counts towards Available instead.', true);
+                    addMemBarRow('cached', 'Cached', mem.cached / 1024, mem.total / 1024,
+                        'Page cache (Cached in /proc/meminfo), the same figure btop and LuCI show.', true);
+                    addMemBarRow('buffers', 'Buffers', mem.buffers / 1024, mem.total / 1024,
+                        'Block-device buffers (Buffers in /proc/meminfo).', true);
                     if (mem.swap_total > 0) {
                         var swapUsed = mem.swap_total - mem.swap_free;
                         addMemBarRow('swap', 'Swap', swapUsed / 1024, mem.swap_total / 1024);
@@ -3854,7 +3868,7 @@ return view.extend({
                         ramRows.push({ k: 'zram_ratio', type: 'centertext', val: 'Compression: ' + ratio + 'x' });
                     }
                     if (mem.dirty > 0 || mem.writeback > 0) {
-                        ramRows.push({ k: 'dirty', type: 'stat', label: 'Dirty / Writeback', val: (mem.dirty / 1024).toFixed(1) + ' MB / ' + (mem.writeback / 1024).toFixed(1) + ' MB', color: mem.writeback > 1024 ? '#ffb300' : '' });
+                        ramRows.push({ k: 'dirty', type: 'stat', label: 'Dirty / Writeback', val: (mem.dirty / 1024).toFixed(1) + ' MiB / ' + (mem.writeback / 1024).toFixed(1) + ' MiB', color: mem.writeback > 1024 ? '#ffb300' : '' });
                     }
                     var memPsi = res.cpu_meta && res.cpu_meta.psi;
                     if (memPsi && (memPsi.mem > 0 || memPsi.mem_full > 0)) {
@@ -3880,6 +3894,7 @@ return view.extend({
                             entry.val.textContent = r.val;
                             entry.val.style.color = r.color || '';
                         } else if (r.type === 'membar') {
+                            entry.el.title = r.title || '';
                             entry.val.textContent = r.valStr;
                             entry.fill.style.width = r.pct + '%';
                             entry.fill.style.background = r.color;

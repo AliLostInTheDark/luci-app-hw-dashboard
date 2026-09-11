@@ -142,7 +142,7 @@ Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved 
 <details>
 <summary><b>Memory</b></summary>
 
-Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used/free/cached/buffers, swap, and ZRAM with live compression ratio.
+Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used, available, free, cached and buffers in MiB/GiB (Used is Total − Available, as btop counts it; each row's tooltip says what it measures), swap, and ZRAM with live compression ratio.
 </details>
 
 <details>
