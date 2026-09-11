@@ -4989,6 +4989,11 @@ return view.extend({
                                     var stale = psv && curAct === psv.active;
                                     var dA, dB, dT, dR;
                                     if (live)       { dA = curAct - psv.active; dB = curBusy - psv.busy; dT = curTx - psv.tx; dR = curRx - psv.rx; }
+                                    // Same counters as the last poll: the backend holds the
+                                    // survey for 9 s, so keep showing the last live sample.
+                                    // The since-boot average is only for drivers whose
+                                    // counters never advance at all.
+                                    else if (stale && psv.lastD) { dA = psv.lastD[0]; dB = psv.lastD[1]; dT = psv.lastD[2]; dR = psv.lastD[3]; }
                                     else if (stale) { dA = curAct; dB = curBusy; dT = curTx; dR = curRx; }
                                     if (dA > 0) {
                                         busyPct = Math.max(0, Math.min(100, Math.round(dB / dA * 100)));
@@ -4997,7 +5002,7 @@ return view.extend({
                                         surveyStr = busyPct + '% busy (' + txPct + '% tx / ' + rxPct + '% rx)';
                                     }
                                 }
-                                self.prevSurvey[w.iface] = { active: curAct, busy: curBusy, tx: curTx, rx: curRx };
+                                self.prevSurvey[w.iface] = { active: curAct, busy: curBusy, tx: curTx, rx: curRx, lastD: (psv && curAct > psv.active) ? [curAct - psv.active, curBusy - psv.busy, curTx - psv.tx, curRx - psv.rx] : (psv && psv.lastD) || null };
                             }
                             wifiRendered++;
                             var bandKey = bandGroups[w.band] ? w.band : 'Other';

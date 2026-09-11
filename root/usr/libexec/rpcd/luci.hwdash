@@ -545,6 +545,7 @@ EOF
 						FIRST=0
 					fi
 				done
+				_th_owd=$PWD
 				for h in /sys/class/hwmon/hwmon*; do
 					[ -d "$h" ] || continue
 					read_file TYPE_BASE "$h/name" "Unknown"
@@ -555,8 +556,13 @@ EOF
 
 						read_file LABEL "${tinput%_input}_label" ""
 						if [ -z "$LABEL" ] && [ -L "$h/device" ]; then
-							_dev_target=$(readlink "$h/device" 2>/dev/null)
-							_phy_name=${_dev_target##*/}
+							# cd -P rather than a readlink fork: this runs for every
+							# unlabelled hwmon on every poll -- 15 of them on an
+							# IPQ9554, which made it the costliest block in the whole
+							# poll -- only to spot the one or two ath11k radios.
+							_phy_name=""
+							cd -P "$h/device" 2>/dev/null && _phy_name=${PWD##*/}
+							cd "$_th_owd" 2>/dev/null
 							case "$_phy_name" in
 								phy*) LABEL="$_phy_name" ;;
 							esac
@@ -1394,9 +1400,11 @@ EOF
 
 
 
-				# Channel survey (noise + airtime) is computed fresh every poll — NOT
-				# cached with the rest of the WiFi block — so the frontend can show a
-				# live, between-poll busy% like the other live metrics.
+				# Channel survey (noise + airtime). Kept apart from the WiFi radio
+				# cache so busy% stays live, but held for 9 s: probing every radio
+				# on every 3 s poll was the second-costliest block, and the airtime
+				# counters only need a fresh sample every few polls. The frontend
+				# keeps the last live busy% when a poll repeats the same counters.
 				#
 				# `iw survey dump` reports the *PHY's* channel, so every VAP on a
 				# radio returns byte-identical output. Probing per netdev therefore
@@ -1405,52 +1413,57 @@ EOF
 				# the single most expensive block in the whole poll. Probe once per
 				# phy and fan the result back out to that phy's netdevs, which are
 				# what the frontend keys on.
-				WIFI_SURVEY="{"
-				FIRST_SV=1
-				if command -v iw >/dev/null; then
-					_sv_seen=""
-					for _nd in /sys/class/net/*; do
-						[ -e "$_nd/phy80211" ] || continue
-						_ifn=${_nd##*/}
-						read_file _sphy "$_nd/phy80211/name" ""
-						# No phy name: treat the netdev as its own radio rather
-						# than collapsing every unnamed one onto a shared key.
-						[ -z "$_sphy" ] && _sphy=$_ifn
-						case " $_sv_seen" in
-							*" $_sphy="*)
-								_sv_rest=${_sv_seen#* $_sphy=}
-								_sv_vals=${_sv_rest%% *}
-								;;
-							*)
-								_inblk=0; _ns=0; _ac=0; _bs=0; _rx=0; _tx=0
-								while read -r _t1 _t2 _t3 _t4 _t5; do
-									case "$_t1 $_t2" in
-										"frequency:"*)
-											case "$_t1 $_t2 $_t3 $_t4 $_t5" in *\[in\ use\]*) _inblk=1 ;; *) _inblk=0 ;; esac ;;
-										"noise:"*) [ $_inblk -eq 1 ] && _ns=$_t2 ;;
-										"channel active") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _ac=$_t4 ;;
-										"channel busy") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _bs=$_t4 ;;
-										"channel receive") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _rx=$_t4 ;;
-										"channel transmit") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _tx=$_t4 ;;
-									esac
-								done <<EOF
+				if _cache_read /tmp/hwdash_survey.cache; then
+					WIFI_SURVEY=$C_VAL
+				else
+					WIFI_SURVEY="{"
+					FIRST_SV=1
+					if command -v iw >/dev/null; then
+						_sv_seen=""
+						for _nd in /sys/class/net/*; do
+							[ -e "$_nd/phy80211" ] || continue
+							_ifn=${_nd##*/}
+							read_file _sphy "$_nd/phy80211/name" ""
+							# No phy name: treat the netdev as its own radio rather
+							# than collapsing every unnamed one onto a shared key.
+							[ -z "$_sphy" ] && _sphy=$_ifn
+							case " $_sv_seen" in
+								*" $_sphy="*)
+									_sv_rest=${_sv_seen#* $_sphy=}
+									_sv_vals=${_sv_rest%% *}
+									;;
+								*)
+									_inblk=0; _ns=0; _ac=0; _bs=0; _rx=0; _tx=0
+									while read -r _t1 _t2 _t3 _t4 _t5; do
+										case "$_t1 $_t2" in
+											"frequency:"*)
+												case "$_t1 $_t2 $_t3 $_t4 $_t5" in *\[in\ use\]*) _inblk=1 ;; *) _inblk=0 ;; esac ;;
+											"noise:"*) [ $_inblk -eq 1 ] && _ns=$_t2 ;;
+											"channel active") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _ac=$_t4 ;;
+											"channel busy") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _bs=$_t4 ;;
+											"channel receive") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _rx=$_t4 ;;
+											"channel transmit") [ $_inblk -eq 1 ] && [ "$_t3" = "time:" ] && _tx=$_t4 ;;
+										esac
+									done <<EOF
 $(iw dev "$_ifn" survey dump 2>/dev/null)
 EOF
-								_sv_vals="${_ns:-0}:${_ac:-0}:${_bs:-0}:${_rx:-0}:${_tx:-0}"
-								_sv_seen="$_sv_seen $_sphy=$_sv_vals"
-								;;
-						esac
-						sv_noise=${_sv_vals%%:*};  _sv_r=${_sv_vals#*:}
-						sv_act=${_sv_r%%:*};       _sv_r=${_sv_r#*:}
-						sv_busy=${_sv_r%%:*};      _sv_r=${_sv_r#*:}
-						sv_rx=${_sv_r%%:*};        sv_tx=${_sv_r#*:}
+									_sv_vals="${_ns:-0}:${_ac:-0}:${_bs:-0}:${_rx:-0}:${_tx:-0}"
+									_sv_seen="$_sv_seen $_sphy=$_sv_vals"
+									;;
+							esac
+							sv_noise=${_sv_vals%%:*};  _sv_r=${_sv_vals#*:}
+							sv_act=${_sv_r%%:*};       _sv_r=${_sv_r#*:}
+							sv_busy=${_sv_r%%:*};      _sv_r=${_sv_r#*:}
+							sv_rx=${_sv_r%%:*};        sv_tx=${_sv_r#*:}
 
-						[ $FIRST_SV -eq 0 ] && WIFI_SURVEY="$WIFI_SURVEY,"
-						WIFI_SURVEY="$WIFI_SURVEY\"$_ifn\":{\"noise\":${sv_noise:-0},\"active\":${sv_act:-0},\"busy\":${sv_busy:-0},\"rx\":${sv_rx:-0},\"tx\":${sv_tx:-0}}"
-						FIRST_SV=0
-					done
+							[ $FIRST_SV -eq 0 ] && WIFI_SURVEY="$WIFI_SURVEY,"
+							WIFI_SURVEY="$WIFI_SURVEY\"$_ifn\":{\"noise\":${sv_noise:-0},\"active\":${sv_act:-0},\"busy\":${sv_busy:-0},\"rx\":${sv_rx:-0},\"tx\":${sv_tx:-0}}"
+							FIRST_SV=0
+						done
+					fi
+					WIFI_SURVEY="$WIFI_SURVEY}"
+					_cache_write /tmp/hwdash_survey.cache 9 "$WIFI_SURVEY"
 				fi
-				WIFI_SURVEY="$WIFI_SURVEY}"
 
 
 				# UBI device tree + MTD partition table are hardware inventory:
