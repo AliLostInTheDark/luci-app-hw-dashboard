@@ -81,7 +81,7 @@ If you flashed a firmware image built from the same tree, you already have this 
 Still want the old behaviour? `apk add --allow-untrusted ./luci-app-hw-dashboard-<version>.apk` continues to work and skips verification entirely.
 </details>
 
-Depends on `ethtool-full` (pulled in automatically) for per-port PHY details, and `curl`. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
+Its only dependency beyond LuCI is `curl` (pulled in automatically). Everything else is optional — see below. The post-install script restarts `rpcd` for you — reload LuCI and open **Status → Hardware Dashboard**.
 
 ### Optional packages
 
