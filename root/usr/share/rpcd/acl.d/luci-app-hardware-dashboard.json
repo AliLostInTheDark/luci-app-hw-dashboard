@@ -8,7 +8,7 @@
 				"luci.hwdash.wan": [ "wan_quality", "ap_stats" ],
 				"luci.hwdash.wanip": [ "wan_ips" ],
 				"luci.hwdash.wifi": [ "wifi_clients" ],
-				"luci.hwdash.ctl": [ "get_config", "get_cpu_perf", "nat_test", "pkg_status" ]
+				"luci.hwdash.ctl": [ "get_config", "nat_test", "pkg_status" ]
 			},
 			"file": {
 				"/proc/stat": [ "read" ]
@@ -16,7 +16,7 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.hwdash.ctl": [ "set_config", "set_cpu_perf", "nat_test", "pkg_action" ]
+				"luci.hwdash.ctl": [ "set_config", "nat_test", "pkg_action" ]
 			}
 		}
 	}

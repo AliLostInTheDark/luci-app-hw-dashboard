@@ -262,7 +262,7 @@ _nat_parse_out() {
 
 case "$1" in
 	list)
-		echo '{ "get_config": { }, "set_config": { "config": {} }, "get_cpu_perf": { }, "set_cpu_perf": { "perf": {} }, "nat_test": { "iface": "" }, "pkg_status": { }, "pkg_action": { "pkg": "", "op": "" } }'
+		echo '{ "get_config": { }, "set_config": { "config": {} }, "nat_test": { "iface": "" }, "pkg_status": { }, "pkg_action": { "pkg": "", "op": "" } }'
 		;;
 	call)
 		case "$2" in
@@ -303,68 +303,6 @@ case "$1" in
 				else
 					echo '{"result":"invalid"}'
 				fi
-				;;
-			get_cpu_perf)
-				# Reported as a single global "profile" off cpu0's cpufreq
-				# policy — every board this package targets so far (Qualcomm
-				# ARM, x86 desktop-class) exposes one uniform policy across
-				# all cores, so cpu0 is representative. Read straight from
-				# /sys each call (cheap, no caching needed) so it never lags
-				# behind a change made outside the dashboard.
-				_CF=/sys/devices/system/cpu/cpu0/cpufreq
-				CPF_GOV="unknown"; CPF_AVAIL=""; CPF_MIN=0; CPF_MAX=0; CPF_IMIN=0; CPF_IMAX=0; CPF_CUR=0
-				if [ -d "$_CF" ]; then
-					read_file CPF_GOV "$_CF/scaling_governor" "unknown"
-					read_file CPF_AVAIL "$_CF/scaling_available_governors" ""
-					read_file CPF_MIN "$_CF/scaling_min_freq" 0
-					read_file CPF_MAX "$_CF/scaling_max_freq" 0
-					read_file CPF_IMIN "$_CF/cpuinfo_min_freq" 0
-					read_file CPF_IMAX "$_CF/cpuinfo_max_freq" 0
-					read_file CPF_CUR "$_CF/scaling_cur_freq" 0
-				fi
-				CPF_AVAIL_JSON="["
-				_first=1
-				for _g in $CPF_AVAIL; do
-					[ $_first -eq 0 ] && CPF_AVAIL_JSON="$CPF_AVAIL_JSON,"
-					CPF_AVAIL_JSON="$CPF_AVAIL_JSON\"$_g\""
-					_first=0
-				done
-				CPF_AVAIL_JSON="$CPF_AVAIL_JSON]"
-				# Turbo/boost lives behind two incompatible sysfs knobs
-				# depending on the driver: intel_pstate's "no_turbo" is
-				# inverted (0 = turbo on), the generic cpufreq core (e.g.
-				# cpufreq-dt) exposes a plain "boost" (1 = on). Normalize
-				# both into one boolean for the frontend.
-				CPF_TURBO_AVAIL=0; CPF_TURBO_ON=0
-				if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
-					CPF_TURBO_AVAIL=1
-					read_file _nt /sys/devices/system/cpu/intel_pstate/no_turbo 1
-					[ "$_nt" = "0" ] && CPF_TURBO_ON=1
-				elif [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
-					# The GLOBAL knob, not the per-policy one. Both exist on
-					# cpufreq-dt, but the per-policy cpuN/cpufreq/boost rejects
-					# writes (-EINVAL) on this driver while the global one works
-					# -- and after toggling the global, per-policy still reads 0,
-					# so reading it reported turbo as off right after enabling it.
-					CPF_TURBO_AVAIL=1
-					read_file _bo /sys/devices/system/cpu/cpufreq/boost 0
-					[ "$_bo" = "1" ] && CPF_TURBO_ON=1
-				elif [ -f "$_CF/boost" ]; then
-					CPF_TURBO_AVAIL=1
-					read_file _bo "$_CF/boost" 0
-					[ "$_bo" = "1" ] && CPF_TURBO_ON=1
-				fi
-				CPF_PERSIST=0
-				[ -f /etc/config/cpu-perf ] && CPF_PERSIST=1
-				# Explicit availability flag. A board with no OPP table has no
-				# cpufreq directory at all -- governor reads back as the literal
-				# string "unknown", which is truthy in JS, so the UI was building
-				# a scaling form with an empty governor list and a 0-0 MHz range
-				# instead of saying scaling is unavailable. MediaTek MT7986a is
-				# one such board.
-				CPF_AVAIL_FLAG=0
-				[ -d "$_CF" ] && [ "$CPF_GOV" != "unknown" ] && [ "${CPF_IMAX:-0}" -gt 0 ] && CPF_AVAIL_FLAG=1
-				echo "{\"available\":$CPF_AVAIL_FLAG,\"governor\":\"$CPF_GOV\",\"available_governors\":$CPF_AVAIL_JSON,\"min_freq\":$CPF_MIN,\"max_freq\":$CPF_MAX,\"cpuinfo_min_freq\":$CPF_IMIN,\"cpuinfo_max_freq\":$CPF_IMAX,\"cur_freq\":$CPF_CUR,\"turbo_available\":$CPF_TURBO_AVAIL,\"turbo_enabled\":$CPF_TURBO_ON,\"persist_available\":$CPF_PERSIST}"
 				;;
 			pkg_status)
 				_pkg_arch
@@ -632,91 +570,6 @@ EOF
 				printf '{"available":true,"iface":"%s","v4":' "$_nat_ifj"
 				if [ -n "$_nat_v4" ]; then _nat_json 4 "$_nat_v4" "$_nat_s4" "$_nat_m4" "$_nat_f4" "$_nat_p4"; else printf 'null'; fi
 				echo '}'
-				;;
-			set_cpu_perf)
-				_IN=""
-				IFS= read -r _IN 2>/dev/null
-				_GOV=""; _MIN=""; _MAX=""; _TURBO=""
-				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					eval "$(printf '%s' "$_IN" | head -c 2048 | jsonfilter -e '_GOV=@.perf.governor' -e '_MIN=@.perf.min_freq' -e '_MAX=@.perf.max_freq' -e '_TURBO=@.perf.turbo_enabled' 2>/dev/null)"
-				fi
-				_CF=/sys/devices/system/cpu/cpu0/cpufreq
-				_OK=1
-				[ -d "$_CF" ] || _OK=0
-				if [ $_OK -eq 1 ] && [ -n "$_GOV" ]; then
-					read_file _AVAIL "$_CF/scaling_available_governors" ""
-					case " $_AVAIL " in
-						*" $_GOV "*) ;;
-						*) _OK=0 ;;
-					esac
-				fi
-				case "$_MIN" in ''|*[!0-9]*) _OK=0 ;; esac
-				case "$_MAX" in ''|*[!0-9]*) _OK=0 ;; esac
-				if [ $_OK -eq 1 ]; then
-					read_file _IMIN "$_CF/cpuinfo_min_freq" 0
-					read_file _IMAX "$_CF/cpuinfo_max_freq" 0
-					if [ "$_MIN" -lt "$_IMIN" ] || [ "$_MAX" -gt "$_IMAX" ] || [ "$_MIN" -gt "$_MAX" ]; then
-						_OK=0
-					fi
-				fi
-				if [ $_OK -eq 1 ]; then
-					for _pf in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
-						[ -d "$_pf" ] || continue
-						[ -w "$_pf/scaling_governor" ] && echo "$_GOV" > "$_pf/scaling_governor" 2>/dev/null
-						[ -w "$_pf/scaling_min_freq" ] && echo "$_MIN" > "$_pf/scaling_min_freq" 2>/dev/null
-						[ -w "$_pf/scaling_max_freq" ] && echo "$_MAX" > "$_pf/scaling_max_freq" 2>/dev/null
-					done
-					case "$_TURBO" in
-						true|1) _TWANT=on ;;
-						false|0) _TWANT=off ;;
-						*) _TWANT="" ;;
-					esac
-					if [ -n "$_TWANT" ]; then
-						_TBOOST=""
-						if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
-							[ "$_TWANT" = on ] && echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
-							[ "$_TWANT" = off ] && echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null
-						elif [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
-							_TBOOST=/sys/devices/system/cpu/cpufreq/boost
-						elif [ -f "$_CF/boost" ]; then
-							_TBOOST="$_CF/boost"
-						fi
-						if [ -n "$_TBOOST" ]; then
-							[ "$_TWANT" = on ] && echo 1 > "$_TBOOST" 2>/dev/null
-							[ "$_TWANT" = off ] && echo 0 > "$_TBOOST" 2>/dev/null
-							# Verify rather than assume: the per-policy knob
-							# accepts the open() and then rejects the write, so a
-							# silent failure here used to look like success.
-							read_file _tnow "$_TBOOST" ""
-							case "$_TWANT" in
-								on)  [ "$_tnow" = "1" ] || _TURBO_FAIL=1 ;;
-								off) [ "$_tnow" = "0" ] || _TURBO_FAIL=1 ;;
-							esac
-						fi
-					fi
-					# Best-effort persistence: only touch /etc/config/cpu-perf if
-					# it's already there (that package owns its own defaults and
-					# init script; we just keep it in sync so a reboot doesn't
-					# silently revert what was just applied here). Never create
-					# the file — that's the package's job if the user installs it.
-					if [ -f /etc/config/cpu-perf ]; then
-						uci -q show cpu-perf 2>/dev/null | grep '=cpu_freq_policy$' | cut -d. -f2 | cut -d= -f1 |
-						while read -r _sec; do
-							[ -z "$_sec" ] && continue
-							uci -q set cpu-perf."$_sec".scaling_governor="$_GOV"
-							uci -q set cpu-perf."$_sec".scaling_min_freq="$_MIN"
-							uci -q set cpu-perf."$_sec".scaling_max_freq="$_MAX"
-						done
-						uci -q commit cpu-perf
-					fi
-					if [ "${_TURBO_FAIL:-0}" = "1" ]; then
-						echo '{"result":"ok","turbo":"unsupported"}'
-					else
-						echo '{"result":"ok"}'
-					fi
-				else
-					echo '{"result":"invalid"}'
-				fi
 				;;
 		esac
 		;;

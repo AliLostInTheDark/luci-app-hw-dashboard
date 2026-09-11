@@ -136,7 +136,7 @@ On x86/x86_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family
 <details>
 <summary><b>CPU & Per-Core Usage</b></summary>
 
-Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts and active connections vs. the conntrack limit. Cumulative frequency residency since boot has a card of its own, just below the top row.
+Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts and active connections vs. the conntrack limit. Cumulative frequency residency since boot sits under the per-core grid, in the same card.
 </details>
 
 <details>
@@ -221,7 +221,7 @@ One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, con
 
 ## Settings
 
-Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), adjust CPU governor/frequency limits, or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
 
 **⇕ Rearrange Cards** (next to the gear icon) turns on drag handles and a size-cycle button on every card — drag to reorder, or click the size button to step through Small → Half → Full width. Works with touch as well as mouse. Layout and sizing are saved the same way as every other setting.
 

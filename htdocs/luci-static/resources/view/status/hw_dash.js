@@ -36,17 +36,6 @@ var callHwSetConfig = rpc.declare({
     params: ['config'],
     expect: {}
 });
-var callHwGetCpuPerf = rpc.declare({
-    object: 'luci.hwdash.ctl',
-    method: 'get_cpu_perf',
-    expect: {}
-});
-var callHwSetCpuPerf = rpc.declare({
-    object: 'luci.hwdash.ctl',
-    method: 'set_cpu_perf',
-    params: ['perf'],
-    expect: {}
-});
 var callHwWifiClients = rpc.declare({
     object: 'luci.hwdash.wifi',
     method: 'wifi_clients',
@@ -115,7 +104,7 @@ return view.extend({
             id: 'hw-dashboard',
             class: 'hw-dashboard'
         });
-        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card.half { flex: 1 1 calc(50% - 10px); } @media (max-width: 480px) { .hw-card { padding: 15px; } .hw-card.half { flex-basis: 100%; } } .hw-card-placeholder { opacity: 0.35; } .hw-card-editbar { position: absolute; top: 6px; right: 6px; z-index: 5; display: none; gap: 4px; align-items: center; } .hw-card-handle { cursor: grab; touch-action: none; user-select: none; font-size: 1.1em; opacity: 0.6; padding: 3px 6px; border-radius: 6px; background: rgba(128,128,128,0.18); } .hw-card-handle:active { cursor: grabbing; opacity: 1; } .hw-card-sizebtn { cursor: pointer; font-size: 0.68em; font-weight: 700; letter-spacing: 0.3px; padding: 3px 7px; border-radius: 6px; background: rgba(128,128,128,0.18); border: none; opacity: 0.75; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; width: 100%; } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; } .btn, .cbi-button, button, input[type=button], input[type=submit], input[type=reset] { white-space: nowrap !important; text-overflow: clip !important; max-width: none !important; min-width: max-content !important; box-sizing: border-box !important; }  .cbi-page-actions, .right, .hw-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; } }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  #hw-wanip .hw-kv-k { opacity: 1; font-weight: 700; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; } .hw-wanq-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; flex: 1 1 100% !important; max-width: 100% !important; margin-top: 8px; } } @media (max-width: 480px) { .hw-wanq-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .hw-kv { flex-direction: column; align-items: flex-start; gap: 2px; } .hw-kv-v { text-align: left; word-break: break-all; } .hw-wifi-card-body > div { font-size: 0.85em; } } .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
+        var style = E('style', {}, ' .hw-dashboard { display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px; padding: 15px; font-family: system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; overflow: hidden; } .hw-dashboard * { box-sizing: border-box; } .hw-thermals-container { display: flex; flex-direction: row; width: 100%; height: 100%; } #hw-nand-row { height: auto; } #hw-nand-row > .hw-thermals-divider { align-self: stretch; } .hw-thermals-col { flex: 1; } .hw-thermals-col-left { padding-right: 15px; } .hw-thermals-col-mid { padding: 0 15px; } .hw-thermals-col-right { padding-left: 15px; } .hw-thermals-title { font-size: 0.85em; opacity: 0.6; margin-bottom: 10px; text-align: center; } .hw-thermals-divider { width: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 10px 15px 30px 15px; } @media (max-width: 768px) { .hw-thermals-container { flex-direction: column; } .hw-thermals-col { padding: 0 !important; } .hw-thermals-divider { width: auto; height: 1px; margin: 25px 0; } } .hw-meta-grid { margin-top: 15px; font-size: 0.8em; color: currentColor; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; opacity: 0.8; width: 75%; margin-left: auto; margin-right: auto; } @media (max-width: 480px) { .hw-meta-grid { width: 100%; font-size: 0.75em; } .hw-dial { transform: scale(0.9); } } .hw-card { flex: 1 1 280px; background: var(--background-color-high, rgba(128, 128, 128, 0.05)); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-color, inherit); position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 100%; overflow: hidden; } .hw-card.wide { flex: 1 1 100%; align-items: stretch; } .hw-card.half { flex: 1 1 calc(50% - 10px); } @media (max-width: 480px) { .hw-card { padding: 15px; } .hw-card.half { flex-basis: 100%; } } .hw-card-placeholder { opacity: 0.35; } .hw-card-editbar { position: absolute; top: 6px; right: 6px; z-index: 5; display: none; gap: 4px; align-items: center; } .hw-card-handle { cursor: grab; touch-action: none; user-select: none; font-size: 1.1em; opacity: 0.6; padding: 3px 6px; border-radius: 6px; background: rgba(128,128,128,0.18); } .hw-card-handle:active { cursor: grabbing; opacity: 1; } .hw-card-sizebtn { cursor: pointer; font-size: 0.68em; font-weight: 700; letter-spacing: 0.3px; padding: 3px 7px; border-radius: 6px; background: rgba(128,128,128,0.18); border: none; opacity: 0.75; } .hw-card h3 { margin: 0 0 20px 0; font-size: 1.1em; color: var(--text-color, inherit); opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; text-align: center; word-break: break-word; line-height: 1.3; }.hw-dial { position: relative; width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; margin: 0 auto; } .hw-dial svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); } .hw-dial-bg { fill: none; stroke: rgba(128, 128, 128, 0.2); stroke-width: 10; } .hw-dial-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; } .hw-dial-text { font-size: 2.2em; font-weight: 600; z-index: 1; } .hw-dial-subtext { position: absolute; bottom: 25px; font-size: 0.9em; opacity: 0.7; z-index: 1; } .hw-stats-list { width: 100%; display: flex; flex-direction: column; gap: 12px; } .hw-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; width: 100%; } .hw-stat-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; } .hw-stat-label { opacity: 0.8; font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; margin-right: 10px; } .hw-stat-value { font-weight: bold; font-size: 0.95em; white-space: nowrap; flex-shrink: 0; } .hw-progress-item { display: flex; flex-direction: column; margin-bottom: 15px; width: 100%; } .hw-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; width: 100%; min-width: 0; } .hw-bar-bg { width: 100%; height: 6px; background: var(--border-color, rgba(128, 128, 128, 0.2)); border-radius: 3px; overflow: hidden; margin-top: 6px; } .hw-bar-fill { height: 100%; transition: width 0.5s ease; } .hw-temp-badge { padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; white-space: nowrap; } .hw-temp-crit { animation: hwTempPulse 1.1s ease-in-out infinite; } @keyframes hwTempPulse { 0%, 100% { box-shadow: 0 0 3px rgba(255,23,68,0.5); } 50% { box-shadow: 0 0 14px rgba(255,23,68,0.95); } } #hw-nand-row { align-items: flex-start; } @media (max-width: 768px) { #hw-nand-row { align-items: stretch; } #hw-nand-row > .hw-thermals-col { width: 100%; min-width: 0; } #hw-nand-row > .hw-thermals-divider { margin: 12px 0; } } .hw-core-grid { display: grid; grid-template-columns: repeat(var(--hw-core-cols, 4), minmax(0, 1fr)); gap: 10px; width: 100%; } .hw-freq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); column-gap: 20px; width: 100%; } @media (max-width: 600px) { .hw-core-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } } .hw-core-cell { background: rgba(128, 128, 128, 0.05); border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15)); border-radius: 8px; padding: 10px 14px; } .hw-core-cell .hw-progress-header { margin-bottom: 6px; } .cbi-value { min-width: 0; } .cbi-value .cbi-value-title { flex-shrink: 0; }  .hw-dashboard .cbi-map > .cbi-section { margin-bottom: 14px; }  .hw-dashboard .cbi-section > h3 { margin-top: 0; }  .hw-dashboard .cbi-value-field > input, .hw-dashboard .cbi-value-field > select { max-width: 100%; }  .hw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }  @media (max-width: 600px) {  .hw-dashboard .cbi-value-field > input[type=text], .hw-dashboard .cbi-value-field > select { width: 100%; box-sizing: border-box; min-width: 0; }  .hw-stat-label { white-space: normal; overflow: visible; text-overflow: clip; } .btn, .cbi-button, button, input[type=button], input[type=submit], input[type=reset] { white-space: nowrap !important; text-overflow: clip !important; max-width: none !important; min-width: max-content !important; box-sizing: border-box !important; }  .cbi-page-actions, .right, .hw-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; } }  .hw-sta-row { display: flex; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid var(--border-color, rgba(128,128,128,0.22)); border-radius: 8px; }  .hw-sta-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; flex: 1 1 200px; }  .hw-sta-metrics { display: flex; gap: 16px; flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }  .hw-sta-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }  .hw-sta-val { font-family: monospace; font-weight: 700; line-height: 1.2; white-space: nowrap; }  .hw-sta-lbl { font-size: 0.62em; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }  .hw-kv { display: flex; align-items: baseline; gap: 10px; width: 100%; }  .hw-kv-k { flex: 0 0 auto; font-size: 0.72em; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.5px; }  #hw-wanip .hw-kv-k { opacity: 1; font-weight: 700; }  .hw-kv-v { flex: 1 1 auto; min-width: 0; text-align: right; font-family: monospace; font-size: 0.85em; word-break: break-all; }  @media (max-width: 640px) {  .hw-sta-metrics { flex-direction: column; width: 100%; margin-left: 0; gap: 7px; }  .hw-sta-cell { flex-direction: row-reverse; justify-content: space-between; align-items: center; width: 100% !important; flex: 1 1 auto !important; }  .hw-sta-lbl { font-size: 0.72em; } .hw-wanq-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; flex: 1 1 100% !important; max-width: 100% !important; margin-top: 8px; } } @media (max-width: 480px) { .hw-wanq-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .hw-kv { flex-direction: column; align-items: flex-start; gap: 2px; } .hw-kv-v { text-align: left; word-break: break-all; } .hw-wifi-card-body > div { font-size: 0.85em; } } .hw-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 14px; } .hw-tgt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 1px 14px; }  .hw-tgt { display: flex; align-items: center; gap: 7px; font-size: 0.88em; cursor: pointer; min-width: 0; padding: 2px 0; }  .hw-tgt input { flex: 0 0 auto; margin: 0; }  .hw-tgt-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  .hw-dashboard .hw-tgt-x { flex: 0 0 auto; width: 17px; height: 17px; padding: 0; margin: 0; border: 0; border-radius: 4px; background: transparent; color: #ff5252; opacity: 1; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease; }  .hw-dashboard .hw-tgt-x:hover, .hw-dashboard .hw-tgt-x:focus-visible { background: rgba(255,82,82,0.18); } ');
         var getDynColor = function(pct, invert) {
             if (invert === true) {
                 if (pct >= 40) return '#00bcd4';
@@ -882,9 +871,18 @@ return view.extend({
             id: 'hw-cores',
             class: 'hw-core-grid'
         });
+        // Frequency residency lives in the same card, under the cores: both
+        // describe the same silicon, and a card of its own for a handful of
+        // bars was more chrome than content.
+        var freqSection = E('div', { style: 'width: 100%; display: none;' }, [
+            E('div', { style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 16px 0 12px 0;' }),
+            E('h4', { style: 'text-align: center; font-size: 0.85em; opacity: 0.7; letter-spacing: 1px; margin: 0 0 10px 0; text-transform: uppercase;' }, 'Frequency Residency (since boot)'),
+            E('div', { id: 'hw-freq', class: 'hw-freq-grid' })
+        ]);
         var coresCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start; align-items: stretch;'}, [
             E('h3', {}, 'Per-Core Usage'),
-            coresNode
+            coresNode,
+            freqSection
         ]);
         cpuCard.node.appendChild(E('div', {
             style: 'width: 100%; height: 1px; background: var(--border-color, rgba(128,128,128,0.2)); margin: 15px 0;'
@@ -997,13 +995,6 @@ return view.extend({
             E('h3', {}, 'Wi-Fi Clients'),
             E('div', { id: 'hw-wifi-sta', style: 'width: 100%; display: flex; flex-direction: column; gap: 8px;' })
         ]);
-        // Frequency residency (cpufreq time_in_state since boot) has a card of
-        // its own: it is a long-run profile rather than live load, and it made
-        // CPU Detailed Load the tallest card in the top row.
-        var freqCard = E('div', { class: 'hw-card wide', style: 'justify-content: flex-start; display: none;' }, [
-            E('h3', {}, 'CPU Frequency Residency'),
-            E('div', { id: 'hw-freq', style: 'width: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 24px;' })
-        ]);
         var hwmonCard = E('div', { class: 'hw-card', style: 'justify-content: flex-start; display: none;' }, [E('h3', {}, 'Power & Fans'), E('div', { id: 'hw-hwmon', class: 'hw-stats-list', style: 'margin-top: 0; padding-top: 0;' })]);
         var sysCard = E('div', {class: 'hw-card wide', style: 'justify-content: flex-start;'});
         sysCard.appendChild(E('h3', {}, 'System Info'));
@@ -1016,7 +1007,6 @@ return view.extend({
         container.appendChild(cpuCard.node);
         container.appendChild(ramCard.node);
         container.appendChild(advCard);
-        container.appendChild(freqCard);
         container.appendChild(coresCard);
         container.appendChild(hwmonCard);
         container.appendChild(dskCard.node);
@@ -1357,7 +1347,6 @@ return view.extend({
             cpu: { nodes: [cpuCard.node], label: 'CPU', show: 'flex' },
             ram: { nodes: [ramCard.node], label: 'Memory', show: 'flex' },
             load: { nodes: [advCard], label: 'CPU Detailed Load', show: 'flex' },
-            freq: { nodes: [freqCard], label: 'CPU Frequency Residency', show: null },
             cores: { nodes: [coresCard], label: 'Per-Core Usage', show: 'flex' },
             hwmon: { nodes: [hwmonCard], label: 'Power & Fans', show: null },
             storage: { nodes: [dskCard.node], label: 'Internal Storage', show: 'flex' },
@@ -1759,111 +1748,6 @@ return view.extend({
             'flash. This package does not mount the drive itself.',
             [cbiRow('Directory', persistDirInput), persistDirMsg]));
 
-        var cpuPerfBody = E('div', { style: 'opacity: 0.5;' }, 'Loading…');
-        var cpuPerfSection = E('div', {}, [cpuPerfBody]);
-        settingsPanel.appendChild(cbiSection('CPU Performance', null, cpuPerfSection));
-        var buildCpuPerfForm = function(perf) {
-            cpuPerfBody.innerHTML = '';
-            cpuPerfBody.style.opacity = '1';
-            var mhz = function(khz) { return Math.round(khz / 1000); };
-            var govSel = E('select', { class: 'cbi-input-select' });
-            (perf.available_governors || []).forEach(function(g) {
-                govSel.appendChild(E('option', { value: g }, g));
-            });
-            govSel.value = perf.governor;
-            var infoMinMhz = mhz(perf.cpuinfo_min_freq || 0);
-            var infoMaxMhz = mhz(perf.cpuinfo_max_freq || perf.max_freq || 0);
-            var minInput = E('input', {
-                type: 'number', class: 'cbi-input-text', style: 'width: 100px;',
-                min: infoMinMhz, max: infoMaxMhz, value: mhz(perf.min_freq)
-            });
-            var maxInput = E('input', {
-                type: 'number', class: 'cbi-input-text', style: 'width: 100px;',
-                min: infoMinMhz, max: infoMaxMhz, value: mhz(perf.max_freq)
-            });
-            var turboCb = E('input', { type: 'checkbox' });
-            turboCb.checked = !!perf.turbo_enabled;
-            var msg = E('span', { style: 'font-size: 0.85em; margin-left: 10px;' });
-            var applyBtn = E('button', {
-                class: 'cbi-button cbi-button-apply',
-                click: function() {
-                    var minV = parseInt(minInput.value), maxV = parseInt(maxInput.value);
-                    if (isNaN(minV) || isNaN(maxV) || minV < infoMinMhz || maxV > infoMaxMhz || minV > maxV) {
-                        msg.textContent = 'Invalid range (' + infoMinMhz + '–' + infoMaxMhz + ' MHz, min ≤ max)';
-                        msg.style.color = '#ff5252';
-                        return;
-                    }
-                    applyBtn.disabled = true;
-                    msg.textContent = 'Applying…';
-                    msg.style.color = '';
-                    // rpc.declare({params:['perf']}) already wraps the first
-                    // argument as {perf: <arg>}, so passing {perf:{...}} here
-                    // sent {perf:{perf:{...}}}. The backend reads @.perf.governor,
-                    // found nothing, and rejected every apply as invalid --
-                    // pass the value directly, as set_config does.
-                    callHwSetCpuPerf({
-                        governor: govSel.value,
-                        min_freq: minV * 1000,
-                        max_freq: maxV * 1000,
-                        turbo_enabled: turboCb.checked
-                    }).then(function(res) {
-                        applyBtn.disabled = false;
-                        if (res && res.result === 'ok') {
-                            // The backend verifies the boost write actually took;
-                            // some drivers expose the knob and then refuse it.
-                            if (res.turbo === 'unsupported') {
-                                msg.textContent = '✓ Applied (turbo not supported by this driver)';
-                                msg.style.color = '#ffa726';
-                            } else {
-                                msg.textContent = '✓ Applied';
-                                msg.style.color = '#8bc34a';
-                            }
-                            return callHwGetCpuPerf().then(function(p) { if (p) buildCpuPerfForm(p); });
-                        } else {
-                            msg.textContent = 'Rejected — check governor/frequency range';
-                            msg.style.color = '#ff5252';
-                        }
-                    }).catch(function() {
-                        applyBtn.disabled = false;
-                        msg.textContent = 'Request failed';
-                        msg.style.color = '#ff5252';
-                    });
-                }
-            }, 'Apply');
-            cpuPerfBody.appendChild(cbiRow('Current Frequency', E('span', {}, mhz(perf.cur_freq) + ' MHz')));
-            cpuPerfBody.appendChild(cbiRow('Governor', govSel));
-            cpuPerfBody.appendChild(cbiRow('Min Frequency (MHz)', minInput));
-            cpuPerfBody.appendChild(cbiRow('Max Frequency (MHz)', maxInput));
-            if (perf.turbo_available) {
-                cpuPerfBody.appendChild(cbiRow('Turbo / Boost', turboCb));
-            }
-            cpuPerfBody.appendChild(cbiActions([applyBtn, msg]));
-            cpuPerfBody.appendChild(E('div', { style: 'font-size: 0.78em; opacity: 0.5; margin-top: 4px;' },
-                perf.persist_available
-                    ? 'Applies immediately and persists across reboot (synced to /etc/config/cpu-perf).'
-                    : 'Applies immediately; resets after reboot. Install luci-app-cpu-perf to persist.'));
-        };
-        var cpuPerfLoaded = false;
-        var loadCpuPerf = function() {
-            if (cpuPerfLoaded) return;
-            cpuPerfLoaded = true;
-            callHwGetCpuPerf().then(function(perf) {
-                // Trust the backend's explicit flag rather than inferring from
-                // governor being non-empty: a board with no OPP table reports
-                // the literal string "unknown", which is truthy.
-                var cpfOk = perf && (perf.available !== undefined
-                    ? perf.available === 1
-                    : (perf.governor && perf.governor !== 'unknown' && perf.cpuinfo_max_freq > 0));
-                if (cpfOk) {
-                    buildCpuPerfForm(perf);
-                } else {
-                    cpuPerfBody.textContent = 'CPU frequency scaling not available on this device (no cpufreq/OPP table exposed by the kernel).';
-                    cpuPerfBody.style.opacity = '1';
-                }
-            }).catch(function() {
-                cpuPerfBody.textContent = 'Failed to read CPU performance state.';
-            });
-        };
         // --- Optional packages ------------------------------------------
         // Every card degrades gracefully without these, so this is a list of
         // what more you could see -- not a warning, and not a nag. Each has its
@@ -2122,7 +2006,7 @@ return view.extend({
             style: 'padding: 4px 14px;',
             click: function() {
                 settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
-                if (settingsPanel.style.display !== 'none') { loadCpuPerf(); loadPkgStatus(); }
+                if (settingsPanel.style.display !== 'none') loadPkgStatus();
             }
         }, '\u2699 Settings');
         var settingsRow = E('div', { style: 'width: 100%; display: flex; justify-content: flex-end;' }, [settingsBtn]);
@@ -3665,7 +3549,7 @@ return view.extend({
         // when there is nothing left on screen that it produces. At 253ms of
         // router CPU per call it is by far the most expensive tick to run for
         // nobody's benefit.
-        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'freq', 'cores', 'hwmon', 'storage',
+        var INFO_FED_CARDS = ['sysinfo', 'cpu', 'ram', 'load', 'cores', 'hwmon', 'storage',
             'ext', 'ports', 'thermal', 'wifi', 'alerts'];
         // Registered further down by the phased dispatcher, not here -- see the
         // comment next to it for why all three ticks share one poll entry.
@@ -3693,6 +3577,9 @@ return view.extend({
                     coresNode.innerHTML = '';
                     self._coreEls = {};
                     self._coreCount = nCores;
+                    // Columns follow the core count so the cells span the card:
+                    // up to eight in one row, otherwise balanced rows (12 -> 6x2).
+                    coresNode.style.setProperty('--hw-core-cols', String(nCores <= 8 ? Math.max(1, nCores) : Math.ceil(nCores / Math.ceil(nCores / 8))));
                 }
                 var advStats = null;
                 res.cpus.forEach(function(cpuLine) {
@@ -3798,28 +3685,32 @@ return view.extend({
                             var freqStr = '';
                             if (res.freqs && res.freqs[coreIdx] && res.freqs[coreIdx] !== null) {
                                 var mhz = Math.round(res.freqs[coreIdx] / 1000);
-                                freqStr = mhz + ' MHz | ';
+                                freqStr = mhz >= 1000 ? (mhz / 1000).toFixed(2) + ' GHz' : mhz + ' MHz';
                             }
-                            var coreName = stat.name.toUpperCase().replace('CPU', 'CORE ');
                             var colorCore = getDynColor(pct);
                             var ce = self._coreEls[coreIdx];
                             if (!ce) {
-                                var ceLabel = E('div', { style: 'font-size: 0.8em; opacity: 0.7; letter-spacing: 0.5px; margin-bottom: 4px;' }, coreName);
-                                var ceVal = E('div', { class: 'hw-stat-value', style: 'font-size: 0.9em; white-space: nowrap;' });
+                                // Name and load on one line, the bar under them and the
+                                // clock under that: the header/bar pattern every other
+                                // row on the page uses, so the cells line up with it.
+                                var ceVal = E('span', { class: 'hw-stat-value', style: 'font-variant-numeric: tabular-nums;' });
                                 var ceFill = E('div', { class: 'hw-bar-fill' });
-                                coresNode.appendChild(E('div', {
-                                    class: 'hw-core-cell'
-                                }, [E('div', {
-                                    class: 'hw-progress-item', style: 'margin-bottom: 0;'
-                                }, [ceLabel, ceVal, E('div', {
-                                    class: 'hw-bar-bg'
-                                }, [ceFill])])]));
-                                ce = self._coreEls[coreIdx] = { val: ceVal, fill: ceFill };
+                                var ceFreq = E('div', { style: 'font-size: 0.78em; opacity: 0.55; margin-top: 6px; font-variant-numeric: tabular-nums;' });
+                                coresNode.appendChild(E('div', { class: 'hw-core-cell' }, [
+                                    E('div', { class: 'hw-progress-header', style: 'margin-bottom: 0;' }, [
+                                        E('span', { class: 'hw-stat-label' }, 'Core ' + coreIdx), ceVal
+                                    ]),
+                                    E('div', { class: 'hw-bar-bg' }, [ceFill]),
+                                    ceFreq
+                                ]));
+                                ce = self._coreEls[coreIdx] = { val: ceVal, fill: ceFill, freq: ceFreq };
                             }
-                            ce.val.textContent = freqStr + pct.toFixed(2) + '%';
+                            ce.val.textContent = pct.toFixed(1) + '%';
                             ce.val.style.color = colorCore;
                             ce.fill.style.width = pct + '%';
                             ce.fill.style.background = colorCore;
+                            ce.freq.textContent = freqStr;
+                            ce.freq.style.display = freqStr ? '' : 'none';
                         }
                     }
                     self.prevCpu[stat.name] = stat;
@@ -3926,9 +3817,9 @@ return view.extend({
                         entry.val.textContent = r.val.toFixed(1) + '%';
                         entry.fill.style.width = r.val + '%';
                     });
-                    freqCard.style.display = 'flex';
+                    freqSection.style.display = '';
                 } else {
-                    freqCard.style.display = 'none';
+                    freqSection.style.display = 'none';
                 }
                 var mem = res.mem;
                 if (mem && mem.total > 0) {
