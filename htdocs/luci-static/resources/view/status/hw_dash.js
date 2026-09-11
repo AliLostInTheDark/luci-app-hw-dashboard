@@ -2312,6 +2312,24 @@ return view.extend({
                 else if (pct >= 90) out.push({ sev: 'warn', title: 'Filesystem filling up', detail: d.mount + ' at ' + pct + '% (' + fmtSize(d.avail) + ' free)' });
             });
 
+            var mm = info.mem || {};
+            if (mm.oom_kills > 0)
+                out.push({ sev: 'warn', title: 'Processes killed for lack of memory', detail: mm.oom_kills + ' out-of-memory kill' + (mm.oom_kills === 1 ? '' : 's') + ' since boot' });
+            if (mm.tmp_total > 0) {
+                var tpct = mm.tmp_used / mm.tmp_total * 100;
+                if (tpct >= 90) out.push({ sev: tpct >= 95 ? 'crit' : 'warn', title: 'RAM disk filling up', detail: '/tmp at ' + tpct.toFixed(0) + '% of its ' + fmtSize(mm.tmp_total) + ' limit' });
+            }
+            (info.eth_links || []).forEach(function(l) {
+                var e = info.ethtool && info.ethtool[l.iface];
+                var sp = parseInt(l.speed, 10) || 0, cap = e ? Math.min(e.adv_max || 0, e.lp_max || 0) : 0;
+                if (sp > 0 && cap > sp) out.push({ sev: 'warn', title: 'Port running below its rated speed', detail: l.iface + ' linked at ' + sp + ' Mb/s; both ends support ' + cap + ' Mb/s' });
+            });
+            var si2 = info.sys_info || {};
+            if (si2.ntp && !si2.ntp.synced)
+                out.push({ sev: 'warn', title: 'Clock not synchronised', detail: 'The router clock is not synced to NTP; HTTPS, encrypted DNS and log times depend on it' });
+            if (si2.crash && si2.crash.count > 0)
+                out.push({ sev: 'warn', title: 'Kernel crash log saved', detail: (si2.crash.reason || 'Crash') + ' recorded ' + (si2.crash.time > 0 ? new Date(si2.crash.time * 1000).toLocaleString() : '') + ' \u2014 see /sys/fs/pstore' });
+
             (wq || []).forEach(function(w) {
                 if (isIfaceHidden(w.iface, w.alias_of)) return;
                 var up = parseFloat(w.uptime_pct);
@@ -3858,6 +3876,11 @@ return view.extend({
                         'Page cache (Cached in /proc/meminfo), the same figure btop and LuCI show.', true);
                     addMemBarRow('buffers', 'Buffers', mem.buffers / 1024, mem.total / 1024,
                         'Block-device buffers (Buffers in /proc/meminfo).', true);
+                    if (mem.tmp_total > 0)
+                        addMemBarRow('tmp', 'RAM Disk (/tmp)', mem.tmp_used / 1024, mem.tmp_total / 1024,
+                            'Files in /tmp are held in RAM: logs, downloads and package caches there take memory from everything else. The second figure is the most /tmp may grow to.');
+                    if (mem.oom_kills > 0)
+                        ramRows.push({ k: 'oom', type: 'stat', label: 'OOM Kills (since boot)', val: String(mem.oom_kills), color: '#ff5252' });
                     if (mem.swap_total > 0) {
                         var swapUsed = mem.swap_total - mem.swap_free;
                         addMemBarRow('swap', 'Swap', swapUsed / 1024, mem.swap_total / 1024);
@@ -4830,6 +4853,7 @@ return view.extend({
                         // single port's traffic.
                         var conduitTag = E('span', { style: 'display: none; font-size: 0.62em; font-weight: 700; letter-spacing: 0.4px; padding: 1px 6px; border-radius: 8px; opacity: 0.75; border: 1px solid currentColor;' }, 'SWITCH UPLINK');
                         var statusSpan = E('span', {});
+                        var speedNote = E('div', { style: 'display: none; font-size: 0.78em; color: #ffb300; margin-top: 4px; line-height: 1.4;' });
                         var throughLbl = E('span', {}, 'Throughput:');
                         var throughVal = E('span', { style: 'color:#00bcd4;' });
                         var throughRow = E('div', { style: 'display: none; justify-content: space-between; font-size: 0.85em; opacity: 0.9; margin-top: 6px; border-top: 1px dashed rgba(128,128,128,0.3); padding-top: 6px;' }, [throughLbl, throughVal]);
@@ -4845,9 +4869,9 @@ return view.extend({
                                 E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [dot, ifaceSpan, conduitTag]),
                                 statusSpan
                             ]),
-                            throughRow, conduitNote, errRow, phyRow, macRow
+                            speedNote, throughRow, conduitNote, errRow, phyRow, macRow
                         ]);
-                        return { el: box, dot: dot, conduitTag: conduitTag, statusSpan: statusSpan, throughRow: throughRow, throughLbl: throughLbl, throughVal: throughVal, conduitNote: conduitNote, errRow: errRow, errVal: errVal, phyRow: phyRow, phyVal: phyVal, macRow: macRow, macVal: macVal };
+                        return { el: box, speedNote: speedNote, dot: dot, conduitTag: conduitTag, statusSpan: statusSpan, throughRow: throughRow, throughLbl: throughLbl, throughVal: throughVal, conduitNote: conduitNote, errRow: errRow, errVal: errVal, phyRow: phyRow, phyVal: phyVal, macRow: macRow, macVal: macVal };
                     }, function(entry, l) {
                         var st = l.speed;
                         var col = '#9e9e9e';
@@ -4858,6 +4882,17 @@ return view.extend({
                         entry.dot.style.boxShadow = '0 0 5px ' + col;
                         entry.statusSpan.style.color = col;
                         entry.statusSpan.textContent = st === 'Down' ? 'Disconnected' : st + ' Mbps (' + l.duplex + ')';
+                        // Both ends offer a faster mode than the one they settled on:
+                        // the link has fallen back, which is nearly always a damaged or
+                        // two-pair cable. A 2.5G port on a gigabit device, or a
+                        // 100M-only gadget, is not flagged -- the other end simply
+                        // can't go faster.
+                        var etS = res.ethtool && res.ethtool[l.iface];
+                        var spNum = parseInt(st, 10) || 0;
+                        var capMax = etS ? Math.min(etS.adv_max || 0, etS.lp_max || 0) : 0;
+                        var slowLink = st !== 'Down' && spNum > 0 && capMax > spNum;
+                        entry.speedNote.style.display = slowLink ? '' : 'none';
+                        if (slowLink) entry.speedNote.textContent = 'Linked at ' + spNum + ' Mb/s, but both ends support ' + capMax + ' Mb/s \u2014 usually a damaged or two-pair cable.';
                         entry.conduitTag.style.display = l.conduit ? '' : 'none';
                         var rxErr = parseInt(l.rx_err) || 0, txErr = parseInt(l.tx_err) || 0;
                         var rxDrop = parseInt(l.rx_drop) || 0, txDrop = parseInt(l.tx_drop) || 0;
@@ -5224,6 +5259,21 @@ return view.extend({
                             E('span', {class:'hw-stat-value', style:'font-size:0.88em;' + wbCol}, wbTxt)
                         ]));
                     }
+                    // Coloured rows with a hover note, like Last Boot above.
+                    var addSiNote = function(lbl, val, col, tip) {
+                        siGrid.appendChild(E('div', {class:'hw-stat-row', style:'margin:0;', title: tip || ''}, [
+                            E('span', {class:'hw-stat-label', style:'font-size:0.88em;'}, lbl),
+                            E('span', {class:'hw-stat-value', style:'font-size:0.88em;' + (col ? ' color:' + col + ';' : '')}, val)
+                        ]));
+                    };
+                    if (si.ntp) addSiNote('Clock',
+                        si.ntp.synced ? 'Synced' + (si.ntp.stratum >= 0 ? ' (stratum ' + si.ntp.stratum + ')' : '') : 'Not synced',
+                        si.ntp.synced ? '#8bc34a' : '#ffb300',
+                        'As last reported by the router\u2019s NTP client. HTTPS, encrypted DNS and log timestamps all depend on a correct clock.');
+                    if (si.crash && si.crash.count > 0) addSiNote('Kernel Crash Log',
+                        (si.crash.reason || 'Crash') + ', ' + (si.crash.time > 0 ? new Date(si.crash.time * 1000).toLocaleString() : 'time unknown'),
+                        '#ff5252',
+                        'Saved by pstore in /sys/fs/pstore and kept until deleted, so it marks a crash at that time rather than proving the latest boot crashed. Delete the dmesg-* files there once read to clear it.');
                     if (si.soc_family) addSi('SoC Family', si.soc_family);
                     if (si.soc_machine) addSi('Machine', si.soc_machine);
                     if (si.soc_id) addSi('SoC ID', si.soc_id);

@@ -142,7 +142,7 @@ Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved 
 <details>
 <summary><b>Memory</b></summary>
 
-Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used, available, free, cached and buffers in MiB/GiB (Used is Total − Available, as btop counts it; each row's tooltip says what it measures), swap, and ZRAM with live compression ratio.
+Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), used, available, free, cached and buffers in MiB/GiB (Used is Total − Available, as btop counts it; each row's tooltip says what it measures), swap, ZRAM with live compression ratio, the RAM held by `/tmp`, and — only once it has happened — how many processes the kernel has killed for lack of memory.
 </details>
 
 <details>
@@ -150,7 +150,7 @@ Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), u
 
 Hostname, distro string, kernel version, CPU model, SoC identity (Qualcomm platforms), and CPU vulnerability mitigation status, color-coded by severity.
 
-Also reports CPU detail: ISA level (`ARMv8-A`, distinct from the `aarch64` uname value), core microarchitecture and stepping, vendor, operating modes, byte order, BogoMIPS, virtualization support, and which hardware accelerators the CPU actually has — `aes`, `pmull`, `sha2`, `crc32`, `avx2` and friends, which is what determines VPN and crypto throughput on a router. Richest with the optional `lscpu` package installed (it is the only source of the core name on ARM, e.g. `Cortex-A73`); without it everything else is still derived from `/proc/cpuinfo` and the card says so rather than going blank.
+Also reports CPU detail: ISA level (`ARMv8-A`, distinct from the `aarch64` uname value), core microarchitecture and stepping, vendor, operating modes, byte order, BogoMIPS, virtualization support, and which hardware accelerators the CPU actually has — `aes`, `pmull`, `sha2`, `crc32`, `avx2` and friends, which is what determines VPN and crypto throughput on a router. Richest with the optional `lscpu` package installed (it is the only source of the core name on ARM, e.g. `Cortex-A73`); without it everything else is still derived from `/proc/cpuinfo` and the card says so rather than going blank. Also the clock's NTP sync state and, where the build keeps pstore/ramoops records, any saved kernel crash log with its time and cause (ordinary shutdown records are ignored).
 </details>
 
 <details>
@@ -174,7 +174,7 @@ Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fa
 <details>
 <summary><b>Ports Topology</b></summary>
 
-Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers, one row each (not one per root hub) with the slowest and fastest speed the controller supports, plus any plugged-in peripherals with the speed they negotiated; hubs are left out.
+Per-port Ethernet link speed/duplex, live throughput, error/drop counters and (with `ethtool`) negotiated flow control and EEE state. USB host controllers, one row each (not one per root hub) with the slowest and fastest speed the controller supports, plus any plugged-in peripherals with the speed they negotiated; hubs are left out. A port that has fallen back below the speed both ends support — usually a damaged or two-pair cable — is flagged.
 </details>
 
 <details>
@@ -210,7 +210,7 @@ One row per associated station — hostname/MAC, signal strength with a live bar
 <details>
 <summary><b>Alerts</b></summary>
 
-A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong.
+A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong. Also raised: processes killed for lack of memory, `/tmp` filling its RAM allowance, a port running below its rated speed, an unsynchronised clock, and a saved kernel crash log.
 </details>
 
 <details>

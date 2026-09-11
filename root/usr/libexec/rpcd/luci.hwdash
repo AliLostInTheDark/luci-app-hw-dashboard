@@ -219,6 +219,12 @@ case "$1" in
 						Writeback:) MEM_WRITEBACK=$val ;;
 					esac
 				done < /proc/meminfo
+				# Processes the kernel has killed for lack of memory since boot;
+				# -1 on kernels that predate the counter (4.13).
+				MEM_OOM=-1
+				while read -r _vk _vv; do
+					[ "$_vk" = "oom_kill" ] && { MEM_OOM=$_vv; break; }
+				done < /proc/vmstat
 
 				ZRAM_TOTAL=0
 				ZRAM_USED=0
@@ -321,7 +327,11 @@ case "$1" in
 				DF_JSON="["
 				FIRST_DF=1
 				OV_TOTAL=0; OV_USED=0; OV_FREE=0
+				TMP_TOTAL=0; TMP_USED=0
 				while read -r fs blocks used avail pct mountpoint; do
+					# /tmp is tmpfs and skipped as a disk below, but its size is RAM in
+					# use, so the Memory card reports it.
+					[ "$mountpoint" = "/tmp" ] && { TMP_TOTAL=$blocks; TMP_USED=$used; }
 					[ -z "$fs" ] || [ "$fs" = "Filesystem" ] && continue
 
 					# Harvest overlay usage from this same df pass — this used to
@@ -853,9 +863,28 @@ EOF_DMI
 							# never a wired port.
 							[ -e "$netdev/phy80211" ] && continue
 							[ -f "$netdev/speed" ] || continue
-							_an=""
-							while read -r _k _v _; do
-								case "$_k" in Auto-negotiation:) _an=$_v; break ;; esac
+							# One pass over the settings: autoneg, and the fastest mode each end
+							# advertises. When both ends offer more than they negotiated, the link
+							# has fallen back -- nearly always a damaged or two-pair cable, since
+							# gigabit needs all four pairs.
+							_an=""; _etadv=0; _etlp=0; _etsec=""
+							while IFS= read -r _etl; do
+								case "$_etl" in
+									*"Link partner advertised link modes:"*) _etsec=lp; _etl=${_etl#*modes:} ;;
+									*"Advertised link modes:"*) _etsec=ad; _etl=${_etl#*modes:} ;;
+									*"Auto-negotiation: "*) _an=${_etl##*: }; _etsec=""; continue ;;
+									*:*) _etsec=""; continue ;;
+								esac
+								[ -n "$_etsec" ] || continue
+								for _etw in $_etl; do
+									case "$_etw" in
+										[0-9]*base*)
+											_ets=${_etw%%base*}
+											case "$_ets" in *[!0-9]*) continue ;; esac
+											if [ "$_etsec" = ad ]; then [ "$_ets" -gt "$_etadv" ] && _etadv=$_ets
+											else [ "$_ets" -gt "$_etlp" ] && _etlp=$_ets; fi ;;
+									esac
+								done
 							done <<EOF
 $(ethtool "$eth" 2>/dev/null)
 EOF
@@ -905,7 +934,7 @@ EOF
 							json_esc "$_drv"; _drvj=$JSV
 							json_esc "$_fw"
 							[ $_ETF -eq 0 ] && ETHTOOL_JSON="$ETHTOOL_JSON,"
-							ETHTOOL_JSON="$ETHTOOL_JSON\"$eth\":{\"an\":\"${_an:-?}\",\"pause\":\"$_pause\",\"eee\":\"$_eee\",\"drv\":\"$_drvj\",\"fw\":\"$JSV\"}"
+							ETHTOOL_JSON="$ETHTOOL_JSON\"$eth\":{\"an\":\"${_an:-?}\",\"pause\":\"$_pause\",\"eee\":\"$_eee\",\"drv\":\"$_drvj\",\"fw\":\"$JSV\",\"adv_max\":${_etadv:-0},\"lp_max\":${_etlp:-0}}"
 							_ETF=0
 						done
 						ETHTOOL_JSON="$ETHTOOL_JSON}"
@@ -1999,13 +2028,52 @@ EOF_LSCPU
 				read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
 				read_file WD_BOOTSTATUS /sys/class/watchdog/watchdog0/bootstatus "-1"
 				case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
+				# Clock sync as busybox ntpd last reported it, through the hotplug hook
+				# this package installs (/etc/hotplug.d/ntp/99-hwdash-ntp); procd picks
+				# the new folder up as soon as it appears, so no reboot is needed. Only
+				# synced/stratum go out -- no age -- so System Info is not rebuilt on
+				# every poll. Before the first event the state is unknown, unless the
+				# clock is plainly unset: earlier than 2025.
+				NTP_JSON="null"
+				if [ -f /var/run/hwdash-ntp.state ]; then
+					read -r _nact _nstr _nts < /var/run/hwdash-ntp.state
+					case "$_nstr" in ''|*[!0-9]*) _nstr=-1 ;; esac
+					_nsync=0
+					[ "$_nact" != "unsync" ] && [ "$_nstr" -ge 0 ] && [ "$_nstr" -lt 16 ] && _nsync=1
+					NTP_JSON="{\"synced\":$_nsync,\"stratum\":$_nstr}"
+				elif [ "${HWDASH_NOW:-0}" -gt 0 ] && [ "$HWDASH_NOW" -lt 1735689600 ]; then
+					NTP_JSON="{\"synced\":0,\"stratum\":-1}"
+				fi
+				# Kernel crash records pstore/ramoops kept across a reboot. A dmesg-*
+				# record's first line names why it was written: Panic, Oops and
+				# Emergency are crashes, while Shutdown, Restart, Halt and Poweroff are
+				# ordinary reboots that some builds also log (console-* is simply the
+				# previous boot's console). Records stay until deleted, so this says a
+				# crash log exists and when it was written, not that the latest boot
+				# crashed. Its one fork (date -r) is cached: records only change at boot.
+				CRASH_JSON="null"
+				if _cache_read /tmp/hwdash_pstore.cache; then
+					CRASH_JSON=$C_VAL
+				else
+					_crn=0; _crt=0; _crr=""
+					for _cr in /sys/fs/pstore/dmesg-*; do
+						[ -f "$_cr" ] || continue
+						_crh=""; read -r _crh _ < "$_cr" 2>/dev/null
+						case "$_crh" in Panic*|Oops*|Emergency*) ;; *) continue ;; esac
+						_crn=$((_crn + 1)); _crr=${_crh%%#*}
+						_crm=$(date -r "$_cr" +%s 2>/dev/null)
+						case "$_crm" in ''|*[!0-9]*) ;; *) [ "$_crm" -gt "$_crt" ] && _crt=$_crm ;; esac
+					done
+					[ $_crn -gt 0 ] && CRASH_JSON="{\"count\":$_crn,\"time\":$_crt,\"reason\":\"$_crr\"}"
+					_cache_write /tmp/hwdash_pstore.cache 600 "$CRASH_JSON"
+				fi
 				# OV_TOTAL/OV_USED/OV_FREE were harvested during the df -k pass.
 				json_esc "$SYS_HOSTNAME"
-				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE}"
+				SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE,\"ntp\":$NTP_JSON,\"crash\":$CRASH_JSON}"
 
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"oom_kills\":$MEM_OOM, \"tmp_total\":$TMP_TOTAL, \"tmp_used\":$TMP_USED, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;
