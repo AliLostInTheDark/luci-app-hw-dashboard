@@ -1,0 +1,2258 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: htdocs/luci-static/resources/hwdash/nat.js:30
+msgid ""
+"\"This Network\" Address Space (RFC 1122). Exclusively utilised for local "
+"broadcast communications or during initial dynamic address assignment (DHCP "
+"discovery)."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:292
+msgid "%.1f%% filesystem used"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:208
+msgid "%d Cores"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:48
+msgid "%d bad PEB on UBI"
+msgid_plural "%d bad PEBs on UBI"
+msgstr[0] ""
+msgstr[1] ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:85
+msgid "%d corr"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:86
+msgid "%d fail"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:143
+msgid "%d link flaps"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:56
+msgid "%d of %d (%d%%)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:54
+msgid "%d of %d (%d%%) — new connections will start being dropped"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:70
+msgid "%d out-of-memory kill since boot"
+msgid_plural "%d out-of-memory kills since boot"
+msgstr[0] ""
+msgstr[1] ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:142
+msgid "%d%% (threshold %d%%)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:144
+msgid "%d%% busy (%d%% tx / %d%% rx)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:79
+msgid "%s (%dx%d MIMO @ %s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:230
+msgid "%s (v%d)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:421
+#: htdocs/luci-static/resources/hwdash/storage.js:422
+msgid "%s (via %s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:23
+msgid "%s / %s / %s cycles"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:97
+msgid "%s Mbps (%s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:50
+msgid "%s Power"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:31
+msgid "%s at %.1f °C, 90%% of the %d °C trip"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:29
+msgid "%s at %.1f °C, trip point %d °C"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:101
+msgid "%s at %.2f%% uptime over 24h"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:65
+msgid "%s at %d%% (%s free)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:21
+msgid "%s blocks"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:149
+msgid "%s h (≈%d days)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:97
+msgid "%s has been down for %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:81
+msgid "%s linked at %d Mb/s; both ends support %d Mb/s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:88
+msgid "%s recorded %s — see /sys/fs/pstore"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:39
+msgid "%s used, %s free"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:292
+msgid "(%dR / %dW) IOPS"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:243
+msgid "/mnt/usb1/hwdash (leave empty to disable)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:74
+msgid "/tmp at %d%% of its %s limit"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:46
+msgid "464XLAT (CLAT)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:153
+msgid "95th %ile (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:153
+msgid ""
+"95th percentile round-trip delay, nearest-rank (RFC 2330). Requires at least "
+"20 samples."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:177
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+msgid "AP Mode"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:159
+msgid "AP Uplink"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:61
+msgid "Active"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:139
+msgid "Active Connections"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:219
+msgid "Add Target"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:211
+msgid ""
+"Additional probe targets may be configured under Settings, or in /etc/hwdash-"
+"ping.targets on the router."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:60
+msgid "Address and Port-Dependent"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:59
+msgid "Address-Dependent"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:96
+msgid ""
+"Address-and-port-dependent mapping (RFC 4787, Section 4.1). A distinct "
+"external port is allocated per destination, which prevents inbound "
+"connection establishment; the equivalent TCP requirements are given in RFC "
+"5382."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:111
+#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+msgid "Alerts"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:224
+msgid "Alias of %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:435
+msgid "All settings reset to defaults."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:403
+msgid "All settings saved."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:42
+msgid "Already present on the router outside apk."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:292
+msgid "Already present — not from this package"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:39
+msgid "Another package job is still running."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:56
+msgid "Architecture"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:152
+msgid "Arithmetic mean round-trip delay over the selected range"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:75
+msgid ""
+"As last reported by the router’s NTP client. HTTPS, encrypted DNS and log "
+"timestamps all depend on a correct clock."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:53
+msgid "Available"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:142
+msgid "Available Spare"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:159
+msgid "Backup device failed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:48
+msgid "Bad flash blocks present"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:28
+msgid "Behind upstream NAT"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:32
+msgid ""
+"Benchmarking Address Space (RFC 2544). Officially reserved for network "
+"performance testing, yet frequently repurposed by service providers for "
+"internal private routing."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:29
+msgid "Block %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:191
+msgid "Block Size"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:60
+msgid "Block-device buffers (Buffers in /proc/meminfo)."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:64
+msgid "BogoMIPS"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:59
+msgid "Buffers"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:63
+msgid "Byte Order"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:26
+msgid "CG-NAT"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:65
+#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+msgid "CPU"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:60
+msgid "CPU Core"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:66
+msgid "CPU Detail"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:72
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+msgid "CPU Detailed Load"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:104
+msgid "CPU Features"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:119
+msgid "CPU Governor"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:110
+msgid "CPU Security"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:61
+msgid "CPU Vendor"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:32
+msgid "CPU core name on ARM (e.g. Cortex-A73) — the only source for it"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:65
+msgid "CPU usage"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/thermal.js:55
+msgid "CRIT %d°"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:110
+msgid "Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:57
+msgid "Cached"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/layout.js:101
+msgid "Card width: Small / Half / Full — click to cycle"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:96
+msgid "Cards not selected here are hidden from the dashboard."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:26
+msgid ""
+"Carrier-Grade Network Address Translation (RFC 6598). Ingress traffic is "
+"restricted by the service provider; port forwarding and unsolicited inbound "
+"connections are unsupported."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:81
+msgid ""
+"Carrier-Grade Network Address Translation (RFC 6598). The service provider "
+"translates this address upstream, so unsolicited inbound IPv4 connections "
+"cannot be delivered."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:156
+msgid "Channel Load"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:282
+msgid "Checking the egress address… this can still turn out to be NATed."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:92
+msgid "Chip HW Max"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:346
+msgid "Click again to remove"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:425
+msgid "Click again to reset everything"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:72
+msgid "Clock"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:86
+msgid "Clock not synchronised"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:192
+msgid "Close"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:33
+msgid "Code 0x%s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:121
+msgid "Combined Throughput:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:47
+msgid ""
+"Combined traffic for every port below, not this link alone — packets routed "
+"between two ports both cross it."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:192
+msgid "Compressed Size"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:190
+msgid "Compression"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:70
+msgid "Compression: %sx"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:93
+msgid "Config Max"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:38
+msgid "Connected"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:56
+msgid "Connection table filling"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:54
+msgid "Connection table nearly full"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:135
+msgid "Context Switches / s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:133
+msgid "Continuous"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:89
+msgid "Core %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:27
+msgid "Core Power"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:109
+msgid "Cores / Threads"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:338
+msgid "Could not read package state from the router."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:372
+msgid "Could not read the hardware readout from the router."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:88
+#: htdocs/luci-static/resources/hwdash/system.js:79
+msgid "Crash"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:117
+msgid "Critical"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:161
+msgid "Critical Warning"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:29
+msgid "Critical temperature"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:150
+msgid "Current (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:94
+msgid "Current Channel"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:111
+msgid "Current Freq"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:30
+msgid "Current Network"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:162
+msgid "Custom"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:47
+msgid "DHCP client"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:47
+msgid "DHCPv6 client"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:28
+msgid "DRAM Power"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:155
+msgid "Data Read"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:154
+msgid "Default"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:158
+msgid "Delegated"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:377
+msgid "Diagnostics"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:258
+msgid "Directory"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:73
+msgid "Dirty / Writeback"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:163
+msgid "Disabled (Regdomain): %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:97
+msgid "Disconnected"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:62
+msgid "Down %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:100
+#: htdocs/luci-static/resources/hwdash/wan.js:139
+msgid "Down / Up Rate"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:102
+#: htdocs/luci-static/resources/hwdash/wan.js:141
+msgid "Down 24h"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/layout.js:100
+msgid "Drag to reorder"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:47
+msgid "Dual-Stack Lite (RFC 6333)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:236
+msgid "Dynamic"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:79
+msgid "ECC Alerts"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:78
+msgid "ECC Alerts (+n since %s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:134
+msgid "EEE %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:39
+msgid "Egress Unreachable"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:58
+msgid "Endpoint-Independent"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:93
+msgid ""
+"Endpoint-independent mapping with address-and-port-dependent filtering (RFC "
+"4787, Sections 4.1 and 5). Historically termed a port-restricted cone NAT "
+"under RFC 3489."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:95
+msgid ""
+"Endpoint-independent mapping with address-dependent filtering (RFC 4787, "
+"Sections 4.1 and 5). Historically termed a restricted-cone NAT under RFC "
+"3489."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:91
+msgid ""
+"Endpoint-independent mapping with endpoint-independent filtering (RFC 4787, "
+"Sections 4.1 and 5). Historically termed a full-cone NAT under RFC 3489, "
+"which RFC 4787 supersedes."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:23
+msgid "Erase Count (min / mean / max)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:154
+msgid "Error Log Entries"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:49
+msgid "Errors/Drops:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:81
+msgid "Ethernet"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:362
+msgid ""
+"Everything here is optional. The dashboard works without them and says so "
+"where data is missing — installing one just adds detail to a card."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:10
+#: htdocs/luci-static/resources/hwdash/storage.js:102
+msgid "Exceeded"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:221
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+msgid "External Storage"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:100
+msgid "FW Rev / HW Rev"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:147
+msgid "Family"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:63
+msgid ""
+"Files in /tmp are held in RAM: logs, downloads and package caches there take "
+"memory from everything else. The second figure is the most /tmp may grow to."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:64
+msgid "Filesystem almost full"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:64
+msgid "Filesystem filling up"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:137
+msgid "Filtering"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:129
+msgid "Firmware"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:42
+msgid "Flash bitflips accumulating"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:436
+msgid "Format:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:55
+msgid "Free"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:80
+msgid "Frequency Residency (since boot)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:50
+msgid "GRE over IPv6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:51
+msgid "GRETAP over IPv6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:165
+msgid "GW %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:276
+#: htdocs/luci-static/resources/hwdash/ping.js:283
+#: htdocs/luci-static/resources/hwdash/settings.js:156
+msgid "Gateway"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:156
+msgid "Gateway (auto-detected)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:138
+msgid "Gateway Ping"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:230
+msgid "Gateway v%d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:256
+msgid "Gateway v6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:36
+msgid ""
+"Globally Routable IPv6 Address Space (RFC 4291). Provides direct, end-to-end "
+"Internet reachability without intermediary address translation."
+msgstr ""
+
+#: root/usr/share/rpcd/acl.d/luci-app-hardware-dashboard.json:3
+msgid "Grant access to Hardware Dashboard"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:319
+msgid "Green means installed."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/status/hw_dash.js:148
+msgid "HIDE GRAPH"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:91
+msgid "HW Mode(s)"
+msgstr ""
+
+#: root/usr/share/luci/menu.d/luci-app-hardware-dashboard.json:3
+msgid "Hardware Dashboard"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:136
+msgid "Hardware Interrupts / s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:117
+msgid "Healthy"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:154
+msgid "Highest round-trip delay observed in the selected range"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:156
+msgid "Host Read / Write Commands"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:188
+msgid "Host name or IP address (for example, quad9.net)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:54
+msgid "Hostname"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:215
+msgid "I/O Wait"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:31
+msgid ""
+"IETF Protocol Assignments (RFC 6890). Designated for specialised networking "
+"protocols, frequently deployed for Dual-Stack Lite (DS-Lite) IPv4-in-IPv6 "
+"tunneling."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:169
+msgid "INET %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:430
+msgid "IOPS:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:149
+msgid "IP Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:231
+msgid "IP or domain (e.g. 1.1.1.1 or dns.google)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:232
+msgid "IP or domain (e.g. 2606:4700:4700::1111)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:203
+msgid "IPv4 NAT Behaviour (RFC 4787)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:236
+msgid "IPv4 Quality Target"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:47
+msgid "IPv4 over IPv6 (RFC 2473)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:237
+msgid "IPv6 Quality Target"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:277
+msgid "IPv6 link-local"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:46
+msgid "IPv6-in-IPv4 (RFC 4213)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:46
+msgid "IPv6-over-IPv4 (6rd)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:46
+msgid "IPv6-over-IPv4 (6to4)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:216
+msgid "IRQ"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:59
+msgid "ISA"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:32
+msgid "ISP Private Routing"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:211
+msgid "Idle"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:308
+msgid "Inodes Used"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:313
+msgid "Install"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:304
+msgid "Install failed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:179
+msgid ""
+"Install stuntman-client (Settings → Optional Packages) to test your NAT type."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:252
+msgid "Install stuntman-client to enable on-demand STUN NAT type testing."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:286
+msgid "Installed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:319
+msgid "Installed from this router’s own apk feeds"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:288
+#: htdocs/luci-static/resources/hwdash/settings.js:349
+msgid "Installing…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:188
+msgid ""
+"Interface %s is being probed using the STUN behaviour discovery procedure "
+"(RFC 5780), which determines the IPv4 mapping and filtering behaviour of the "
+"address translation on this link as classified by RFC 4787."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:219
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+msgid "Internal Storage"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:147
+msgid "Internet Protocol version used for this probe"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:155
+msgid "Jitter (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:55
+msgid "Kernel"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:78
+msgid "Kernel Crash Log"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:88
+msgid "Kernel crash log saved"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:88
+msgid "L0 Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:93
+msgid "L1 Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:95
+msgid "L2 Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:96
+msgid "L3 Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:97
+msgid "L4 Cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:69
+msgid "Last Boot"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:99
+msgid "Latency"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:107
+msgid "Lifetime"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:104
+msgid "Lifetime Type A"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:105
+msgid "Lifetime Type B"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:199
+msgid "Lifetime Written"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:37
+msgid ""
+"Link-Local Address Space (RFC 3927). Valid exclusively for communication "
+"within the local network segment; signifies the absence of a globally "
+"routable prefix."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:37
+msgid "Link-local only"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:106
+msgid ""
+"Linked at %d Mb/s, but both ends support %d Mb/s — usually a damaged or two-"
+"pair cable."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:116
+msgid "Load Average"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:134
+msgid "Local Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:29
+msgid "Localhost (Loopback)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:29
+msgid ""
+"Loopback Address Space (RFC 1122). A virtual interface utilised for routing "
+"traffic strictly back to the local host system."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:151
+msgid "Lowest round-trip delay observed in the selected range"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:51
+msgid "MAC / MTU:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:48
+msgid "MAP / LW4over6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:166
+msgid "MGMT %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:89
+msgid "MIMO / Antennas"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:93
+msgid "MODERATE · PORT RESTRICTED"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:95
+msgid "MODERATE · RESTRICTED CONE"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:65
+msgid "MTD Partition Table"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:358
+msgid "MTD Partitions"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:84
+msgid "Machine"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:98
+msgid "Manufacturer"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:136
+msgid "Mapping"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:97
+msgid "Max Channel Width"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:112
+msgid "Max Freq"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:175
+msgid "Max Speed:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:98
+msgid "Max TX Power"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:154
+msgid "Maximum (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:152
+msgid "Mean (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:155
+msgid ""
+"Mean absolute difference between consecutive round-trip samples (cf. RFC "
+"3393)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:152
+msgid "Media Errors"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:159
+msgid "Media read-only"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:54
+msgid ""
+"MemAvailable: what programs can still claim without swapping, including "
+"cache the kernel can drop. LuCI shows this as Total Available."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:56
+msgid ""
+"MemFree: RAM holding nothing at all. A low figure is normal — Linux fills "
+"idle RAM with cache, which counts towards Available instead."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:26
+#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+msgid "Memory"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:77
+msgid "Memory Pressure (10s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:43
+msgid "Memory Speed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:33
+msgid "Memory speed in the Memory card — x86 only"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:26
+msgid "Memory usage"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:63
+msgid "Min Speed:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:151
+msgid "Minimum (ms)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:113
+msgid "Mitigated"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:448
+msgid "Model:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:150
+msgid "Most recent round-trip delay (RFC 2681)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:35
+msgid ""
+"Motherboard fans, fan duty and voltage rails in Power & Fans — ITE Super I/"
+"O, x86 only"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:34
+msgid ""
+"Motherboard fans, fan duty and voltage rails in Power & Fans — Nuvoton Super "
+"I/O, x86 only"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:437
+msgid "Mounted:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:34
+msgid ""
+"Multicast Address Space (RFC 1112). Reserved for one-to-many communication "
+"flows, predominantly utilised by routing protocols and IPTV distributions."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:34
+msgid "Multicast Network"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:248
+msgid ""
+"Must be an absolute path (e.g. /mnt/usb1/hwdash), without a trailing slash."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:31
+msgid "NAND Geometry"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:83
+#: htdocs/luci-static/resources/hwdash/nat.js:249
+msgid "NAT TYPE · NOT TESTED"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:181
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+msgid "NAT Type"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:191
+msgid "NAT Type Test · %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:29
+msgid "NAT Type Test — the STUN probe behind the TEST NAT TYPE button"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:210
+msgid "NAT probe timed out or was interrupted."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:201
+msgid "NAT test could not run: %s."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:210
+msgid "NAT test error: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:85
+msgid "NOT AVAILABLE"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:87
+msgid "NOT DETERMINED"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:187
+msgid "NVMe Details"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:31
+msgid "NVMe/SATA SMART health: wear, TBW, spare, power-on hours"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:190
+msgid "Name (optional, for example Branch Office Router)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:146
+msgid "Namespace Utilization"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:213
+msgid "Nice"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:419
+msgid "No"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:38
+msgid "No IP address is currently assigned to this logical interface."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:204
+msgid ""
+"No IPv4 address is available on this interface, or its tunnel parent, to "
+"test."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:177
+msgid ""
+"No IPv6 WAN interface was detected on this router. These targets are "
+"unreachable and will be reported as such."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:251
+msgid ""
+"No STUN test has been performed for this interface. Select TEST NAT TYPE to "
+"measure the mapping and filtering behaviour of this link (RFC 4787)."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:57
+msgid "No Translation"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:38
+msgid "No address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:89
+msgid ""
+"No address translation is present on this link. Traffic is routed directly, "
+"providing end-to-end reachability (RFC 4787, Section 4.1)."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:83
+msgid ""
+"No measurement has been performed. Run an on-demand STUN test (RFC 5780) to "
+"determine the mapping and filtering behaviour of this link."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:75
+msgid "No stations associated."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:157
+msgid "Noise Floor"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:167
+msgid "None"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:8
+msgid "Normal"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:34
+msgid "Normal (power-on)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:8
+msgid "Not Defined"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:61
+msgid "Not Determined"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:135
+msgid "Not Supported"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:298
+msgid "Not available for %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:41
+msgid "Not available for this router."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:300
+msgid "Not in this router’s package feeds"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:286
+msgid "Not installed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:107
+msgid "Not reported by device"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:73
+msgid "Not synced"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:113
+msgid "OK"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:65
+msgid "OOM Kills (since boot)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:91
+msgid "OPEN · FULL CONE"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:89
+msgid "OPEN · NO TRANSLATION"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:139
+msgid "Official STUN Server"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:61
+msgid "Offline"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:129
+msgid "On %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:62
+msgid "Op Modes"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:43
+msgid "OpenWrt Device"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:361
+msgid "Optional Packages"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:195
+msgid "Other"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:40
+msgid "Other installed packages still need it."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:32
+msgid "Overheat reset"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:344
+msgid "Overlay Free"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:342
+msgid "Overlay Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:343
+msgid "Overlay Used"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/thermal.js:54
+msgid "PASS %d°"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:25
+msgid "PEB Status"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:50
+msgid "PHY:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:25
+msgid "Package Power"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:26
+msgid "Package Power (1)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:156
+msgid "Packet Loss"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:29
+msgid "Page %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:58
+msgid ""
+"Page cache (Cached in /proc/meminfo), the same figure btop and LuCI show."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:83
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+msgid "Per-Core Usage"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:30
+msgid "Per-port negotiated flow control and EEE state in Ports Topology"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:133
+msgid "Periodic (fstrim)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:256
+msgid "Persistent Storage Directory"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:350
+msgid "Physical Disk Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:339
+msgid "Physical NAND Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:41
+msgid "Physical Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:348
+msgid "Physical eMMC Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:208
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+msgid "Ping Latency"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:214
+msgid "Ping Targets"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:257
+msgid ""
+"Point this at an already-mounted, writable directory — typically on a USB "
+"drive — to keep a second copy of the WAN interface list and NAND wear "
+"baseline there, and to let the WAN Uptime card’s 24-hour history and any "
+"saved NAT type test result survive a real power outage rather than only a "
+"graceful reboot. Internal flash keeps its own copy of everything regardless "
+"of this setting, so an unplugged or missing drive never breaks the dashboard "
+"— it is checked before every write, and anything written here is skipped "
+"rather than silently landing back on internal flash. This package does not "
+"mount the drive itself."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:81
+msgid "Port running below its rated speed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:84
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+msgid "Ports Topology"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:22
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+msgid "Power & Fans"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:150
+msgid "Power Cycles"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:149
+msgid "Power-On Hours"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:286
+msgid "Present, but not installed with apk"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:122
+msgid "Pressure (CPU / IO, 10s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:28
+msgid ""
+"Private Address Space (RFC 1918). Non-routable on the public Internet; "
+"Network Address Translation (NAT) is actively performed by an upstream "
+"gateway."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:175
+msgid "Probe the IPv%d targets below"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:70
+msgid "Processes killed for lack of memory"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:156
+msgid ""
+"Proportion of ICMP echo requests transmitted for which no reply was received "
+"(RFC 7680)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:31
+msgid "Protocol Assignment"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:135
+msgid "Public Egress"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:25
+msgid "Public IPv4"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:36
+msgid "Public IPv6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:25
+msgid ""
+"Publicly routable IPv4 address space. Direct ingress reachability is "
+"available; inbound connections and port forwarding operate without hindrance."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:49
+msgid "QMI Cellular"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:412
+msgid "R: %d / W: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:411
+msgid "R: %s / W: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:291
+msgid "R: %s | W: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:62
+msgid "RAM Disk (/tmp)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:74
+msgid "RAM disk filling up"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:165
+msgid "Radar Detection (DFS): %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:99
+msgid "Regulatory Domain"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:50
+msgid "Relay bridge"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:158
+msgid "Reliability degraded"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:304
+msgid "Removal failed"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:313
+msgid "Remove"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:133
+msgid "Remove target"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:288
+#: htdocs/luci-static/resources/hwdash/settings.js:349
+msgid "Removing…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:355
+#: htdocs/luci-static/resources/hwdash/settings.js:357
+msgid "Request failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:294
+msgid "Required by %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:35
+msgid "Reserved Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:35
+msgid ""
+"Reserved Address Space (RFC 1112). Explicitly restricted from deployment "
+"within active public routing tables."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:382
+msgid "Reset"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:437
+msgid "Reset failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:226
+msgid "Reset to defaults"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:428
+msgid "Resetting…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:381
+msgid "Revert"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:420
+msgid "Revert failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:417
+msgid "Reverted to saved settings."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:411
+msgid "Reverting…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:289
+msgid "Root FS"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:340
+#: htdocs/luci-static/resources/hwdash/storage.js:351
+msgid "Rootfs Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:99
+msgid ""
+"Round-trip delay of the most recent successful probe (RFC 2681). While a "
+"link is failing but not yet declared down, this remains the last good "
+"measurement."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:26
+msgid "Rsv: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:189
+msgid "Running NAT type test…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:128
+msgid "Rx: %d/%d | Tx: %d/%d"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/status/hw_dash.js:148
+msgid "SHOW GRAPH"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:81
+msgid "STRICT · CG-NAT"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:96
+msgid "STRICT · SYMMETRIC"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:44
+msgid "SWITCH UPLINK"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:380
+msgid "Save"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:405
+msgid ""
+"Save failed — the router rejected the settings (%s). Your changes are still "
+"staged here."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:81
+msgid ""
+"Saved by pstore in /sys/fs/pstore and kept until deleted, so it marks a "
+"crash at that time rather than proving the latest boot crashed. Delete the "
+"dmesg-* files there once read to clear it."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:377
+msgid "Saves a full hardware readout as JSON"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:399
+msgid "Saving…"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:156
+msgid "Seen as"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:201
+msgid "Segments (Valid/Dirty/Free)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/graph.js:155
+msgid "Select to show or hide this series"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:128
+msgid "Serial"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:41
+msgid "Signal"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:83
+msgid "SoC Family"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:85
+msgid "SoC ID"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:86
+msgid "SoC Revision"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:87
+msgid "SoC Serial"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:217
+msgid "Soft IRQ"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:158
+msgid "Spare below threshold"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:176
+#: htdocs/luci-static/resources/hwdash/storage.js:430
+msgid "Speed:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:193
+msgid "SquashFS Root Image"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:236
+msgid "Static"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:49
+msgid "Static address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:132
+msgid "Supported (%s granularity)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:161
+msgid "Supported Channels:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:67
+msgid "Swap"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:73
+msgid "Synced"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:73
+msgid "Synced (stratum %d)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:214
+msgid "System"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:126
+#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+msgid "System Info"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:68
+msgid "System Status"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:131
+msgid "System Tasks"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:141
+msgid "TBW (Total Bytes Written)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:154
+msgid "TEST NAT TYPE"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:33
+msgid "TEST-NET (Doc Only)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:33
+msgid ""
+"TEST-NET Documentation Address Space (RFC 5737). Strictly reserved for "
+"utilization within technical documentation and example configurations."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:132
+#: htdocs/luci-static/resources/hwdash/storage.js:135
+msgid "TRIM Support"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:37
+msgid "TX / RX Data"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:36
+msgid "TX / RX Rate"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:148
+msgid "Target"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:113
+msgid "Tasks (Run/Total)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:31
+msgid "Temperature approaching limit"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:158
+msgid "Temperature threshold"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:199
+msgid "The NAT type test is unavailable on this interface."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:85
+msgid ""
+"The STUN server did not complete a binding request (RFC 8489, Section 3), so "
+"no behaviour could be determined."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:87
+msgid ""
+"The STUN server returned an incomplete result. The behaviour discovery "
+"procedure defined in RFC 5780 requires responses that this server did not "
+"supply."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:27
+msgid ""
+"The assigned interface address deviates from the observed Internet egress "
+"address, indicating active translation by an upstream routing device."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:40
+msgid ""
+"The classification of this network address cannot be definitively determined."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ping.js:288
+msgid "The host name could not be resolved; no ICMP packet was transmitted."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:215
+msgid ""
+"The hosts probed by the Ping Latency card, grouped by address family. Untick "
+"IPv4 or IPv6 to pause that whole family; the individual choices underneath "
+"are kept for when it is switched back on."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:68
+msgid "The interface did not report a status and may be down."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:39
+msgid ""
+"The interface is offline or unreachable. Internet egress address and NAT "
+"classification cannot be determined."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:65
+msgid ""
+"The optional stuntman-client package is not installed, so no STUN probe can "
+"be performed."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:318
+msgid ""
+"The package index has not been downloaded since boot, so availability is not "
+"known yet. Install fetches it first."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:66
+msgid "The requested interface name is not valid."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:86
+msgid ""
+"The router clock is not synced to NTP; HTTPS, encrypted DNS and log times "
+"depend on it"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/status/hw_dash.js:249
+msgid "The router is not responding. Showing data from %s."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:43
+msgid "The router rejected the request."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/power.js:60
+msgid "The sensor driver reports an alarm for this reading"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:90
+msgid "Theoretical Max"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/thermal.js:80
+#: htdocs/luci-static/resources/view/status/hw_dash.js:198
+msgid "Thermal Sensors"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:67
+msgid ""
+"This interface is not tracked as a WAN link, so it is not eligible for "
+"testing."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:124
+msgid "This interface shares device %s with %s; the traffic is counted there."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:48
+#: htdocs/luci-static/resources/hwdash/ports.js:121
+msgid "Throughput:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:52
+msgid ""
+"Total minus Available — how btop counts it. LuCI’s status page counts the "
+"page cache as used (Total minus Free), so its Used reads higher."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:26
+msgid "Total: %d Avail: %d Bad: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:27
+msgid "Translated Public Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:130
+msgid "Transport"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:449
+msgid "Type:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:179
+msgid "UBI / NAND Flash"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:83
+msgid "USB Devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:153
+#: htdocs/luci-static/resources/hwdash/ports.js:157
+msgid "USB Host Controller"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:82
+msgid "USB Host Controllers"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:40
+msgid "Uncorrectable flash errors"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:40
+#: htdocs/luci-static/resources/hwdash/storage.js:446
+#: htdocs/luci-static/resources/hwdash/wan.js:61
+msgid "Unknown"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/isp.js:126
+msgid "Unknown ISP"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:48
+msgid "Unmanaged"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:151
+msgid "Unsafe Shutdowns"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:76
+msgid "Unsaved changes — press Save to apply."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:120
+msgid "Uptime"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:101
+#: htdocs/luci-static/resources/hwdash/wan.js:140
+msgid "Uptime 24h"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:8
+msgid "Urgent"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:356
+msgid "Usable Free"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:44
+#: htdocs/luci-static/resources/hwdash/storage.js:355
+msgid "Usable Total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:51
+msgid "Used"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:212
+msgid "User"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:200
+msgid "Utilization"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:167
+msgid "VLAN %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:51
+msgid "VTI over IPv6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:51
+msgid "VXLAN over IPv6"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:65
+msgid "Virtualization"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:96
+msgid "Visible Cards"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:34
+msgid "Volumes"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:113
+msgid "Vulnerable"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:92
+msgid "WAN Link"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:176
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+msgid "WAN Uptime Status"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:100
+msgid "WAN Uptime Status Interfaces"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:235
+msgid "WAN Uptime Status Probing Targets"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:98
+msgid "WAN down"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:101
+msgid "WAN unstable"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:8
+#: htdocs/luci-static/resources/hwdash/storage.js:117
+msgid "Warning"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:31
+msgid "Watchdog reset"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:139
+msgid "Wear (Percentage Used)"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:235
+msgid "What the background collector pings to decide whether each WAN is up."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:100
+msgid "Which WAN interfaces the uptime, NAT type and alert cards report on."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:76
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+msgid "Wi-Fi Clients"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wifi.js:122
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+msgid "Wi-Fi PHY & Spectrum"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:50
+msgid "WireGuard VPN"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:69
+msgid "ZRAM"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/ports.js:133
+msgid "autoneg %s · pause %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:185
+msgid "eMMC / SD Health"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:196
+msgid "f2fs Statistics"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/memory.js:78
+msgid "full %.1f%%"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:66
+msgid "limited — install lscpu for more"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:42
+msgid "mtd%d (%s): %d corrected since baseline, ECC strength %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:40
+msgid "mtd%d (%s): %d uncorrectable since baseline"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:68
+msgid "not authorized"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/graph.js:97
+msgid "now"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/wan.js:123
+msgid "shared"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/nat.js:139
+msgid "then"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:298
+msgid "this architecture"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:79
+msgid "time unknown"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/graph.js:123
+#: htdocs/luci-static/resources/hwdash/ping.js:198
+msgid "timeout"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/clients.js:67
+msgid "tx failed %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/layout.js:112
+#: htdocs/luci-static/resources/hwdash/layout.js:115
+msgid "⇕ Rearrange Cards"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/status/hw_dash.js:218
+msgid "⚙ Settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/layout.js:115
+msgid "✓ Done Arranging"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/settings.js:376
+msgid "⤓ Download diagnostics snapshot"
+msgstr ""

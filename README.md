@@ -221,7 +221,9 @@ One column per band (2.4/5/6 GHz): channel & width, TX power, hardware mode, con
 
 ## Settings
 
-Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), or download a full diagnostics snapshot as JSON. A page-level **Save / Revert / Reset** applies to the whole panel — Revert restores the last saved state, Reset returns everything to defaults. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+Open the gear icon (top right) to show/hide individual cards, show/hide individual WAN row, edit ping targets (each can carry a friendly name, e.g. "Home NAS" instead of a bare IP), or download a full diagnostics snapshot as JSON. Changes preview on the page straight away and reach the router on **Save**; **Revert** restores the last saved state and **Reset** returns everything to defaults. Reset and a package's **Remove** button ask for a second click before they act. Settings persist on the router via UCI (`/etc/config/hwdash`) and survive sysupgrades.
+
+Hiding a card also stops the router collecting what only that card shows, so a dashboard with the Wi-Fi or storage cards hidden costs the router less on every poll.
 
 **⇕ Rearrange Cards** (next to the gear icon) turns on drag handles and a size-cycle button on every card — drag to reorder, or click the size button to step through Small → Half → Full width. Works with touch as well as mouse. Layout and sizing are saved the same way as every other setting.
 
@@ -233,7 +235,9 @@ Open the gear icon (top right) to show/hide individual cards, show/hide individu
 
 **DNS privacy** — every lookup this package makes (ASN queries, egress-IP lookups, reverse-DNS, custom domain targets) is automatically routed around the router's own resolver whenever that resolver is a filtering one (AdGuard Home, Pi-hole, Unbound), so a background dashboard never becomes noise in your DNS log. Plain `dnsmasq` is left alone, since it doesn't log per-query.
 
-**Frontend** — a single LuCI view with two independent poll loops (hardware readout, ping probes) that pause entirely while the browser tab is hidden. Every card is a persistent DOM skeleton patched in place each tick rather than rebuilt, so a tab left open indefinitely stays cheap.
+**Frontend** — a LuCI view (`view/status/hw_dash.js`) that places the cards and runs one phased poll loop, with each card in its own small module under `htdocs/luci-static/resources/hwdash/` and the styling in `hwdash.css`. Polling pauses entirely while the browser tab is hidden, and a notice appears if the router stops answering rather than leaving stale numbers up as if they were live. Every card is a persistent DOM skeleton patched in place each tick rather than rebuilt, so a tab left open indefinitely stays cheap.
+
+**Translations** — every visible string goes through LuCI's `_()`. The template is `po/templates/hw-dashboard.pot`; a language added under `po/<lang>/hw-dashboard.po` is built into a `luci-i18n-hw-dashboard-<lang>` package automatically.
 
 The AWK-based WiFi capability parser and the full data-source list (which `/proc`, `/sys` and `hwmon` paths back each card) are documented inline in `root/usr/libexec/rpcd/luci.hwdash`. Per-release changes and fixes are listed on the [Releases](https://github.com/AliLostInTheDark/luci-app-hw-dashboard/releases) page.
 
