@@ -31,6 +31,30 @@ function collect(info, wans, isIfaceHidden) {
 			add('warn', _('Temperature approaching limit'), _('%s at %.1f °C, 90%% of the %d °C trip').format(t.type, c, Math.round(crit)));
 	});
 
+	// Throttling since boot, and cooling devices holding performance back
+	// now. Devices of one type (x86 has one per CPU) are one alert.
+	var th = info.throttle || {};
+	if (th.core > 0 || th.pkg > 0)
+		add('warn', _('CPU thermal throttling'), _('%d core / %d package throttle events since boot').format(th.core, th.pkg));
+	var cooling = {};
+	(th.cooling || []).forEach(function(c) {
+		if (!cooling[c.type] || c.cur > cooling[c.type].cur)
+			cooling[c.type] = c;
+	});
+	Object.keys(cooling).forEach(function(type) {
+		add('warn', _('Cooling limiting performance'), _('%s held at cooling step %d of %d').format(type, cooling[type].cur, cooling[type].max));
+	});
+
+	// The link retries corrected errors itself; uncorrectable ones are lost
+	// or damaged transfers.
+	(info.pcie_aer || []).forEach(function(p) {
+		var dev = p.dev + (p.driver ? ' (' + p.driver + ')' : '');
+		if (p.fatal > 0 || p.nonfatal > 0)
+			add('crit', _('PCIe uncorrectable errors'), _('%s: %d fatal, %d non-fatal since boot').format(dev, p.fatal, p.nonfatal));
+		else
+			add('warn', _('PCIe link errors'), _('%s: %d corrected since boot').format(dev, p.cor));
+	});
+
 	// Uncorrectable ECC failures mean corrupted data got through. Corrected
 	// bitflips are normal NAND behaviour until they reach the ECC strength.
 	(info.mtd_parts || []).forEach(function(m) {

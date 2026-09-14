@@ -136,7 +136,7 @@ On x86/x86_64 and non-Qualcomm ARM targets, Qualcomm-specific fields (SoC family
 <details>
 <summary><b>CPU & Per-Core Usage</b></summary>
 
-Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts and active connections vs. the conntrack limit. Cumulative frequency residency since boot sits under the per-core grid, in the same card.
+Arc dial for aggregate load, plus cores/threads, cache sizes (L0–L4, resolved from CPU identity when the kernel doesn't expose them directly), live/max frequency, load average, governor and uptime. A dedicated grid card breaks per-core load, frequency and utilization out individually, along with each core's share of received-packet processing (NET_RX softirqs), which shows whether one core is carrying all the network traffic. The advanced panel adds a full CPU-time breakdown, context switches, hardware interrupts and active connections vs. the conntrack limit. Cumulative frequency residency since boot sits under the per-core grid, in the same card.
 </details>
 
 <details>
@@ -150,13 +150,13 @@ Arc dial plus physical/usable totals, memory speed (via optional `dmidecode`), u
 
 Hostname, distro string, kernel version, CPU model, SoC identity (Qualcomm platforms), and CPU vulnerability mitigation status, color-coded by severity.
 
-Also reports CPU detail: ISA level (`ARMv8-A`, distinct from the `aarch64` uname value), core microarchitecture and stepping, vendor, operating modes, byte order, BogoMIPS, virtualization support, and which hardware accelerators the CPU actually has — `aes`, `pmull`, `sha2`, `crc32`, `avx2` and friends, which is what determines VPN and crypto throughput on a router. Richest with the optional `lscpu` package installed (it is the only source of the core name on ARM, e.g. `Cortex-A73`); without it everything else is still derived from `/proc/cpuinfo` and the card says so rather than going blank. Also the clock's NTP sync state and, where the build keeps pstore/ramoops records, any saved kernel crash log with its time and cause (ordinary shutdown records are ignored).
+Also reports CPU detail: ISA level (`ARMv8-A`, distinct from the `aarch64` uname value), core microarchitecture and stepping, vendor, operating modes, byte order, BogoMIPS, virtualization support, and which hardware accelerators the CPU actually has — `aes`, `pmull`, `sha2`, `crc32`, `avx2` and friends, which is what determines VPN and crypto throughput on a router. Richest with the optional `lscpu` package installed (it is the only source of the core name on ARM, e.g. `Cortex-A73`); without it everything else is still derived from `/proc/cpuinfo` and the card says so rather than going blank. Also the hardware watchdog's driver, state and timeout, the clock's NTP sync state and, where the build keeps pstore/ramoops records, any saved kernel crash log with its time and cause (ordinary shutdown records are ignored).
 </details>
 
 <details>
 <summary><b>Internal Storage</b></summary>
 
-Root filesystem usage with real read/write throughput (measured against actual elapsed time between polls, not the nominal poll interval), the read-only SquashFS base image shown separately from writable overlay space, and a summary section that adapts to the underlying storage type — NAND/UBI, eMMC, or SSD/NVMe. NAND details include erase-cycle counts, PEB/bad-block status, geometry and ECC strength; NVMe adds identity, TRIM support, and full SMART health (wear, TBW, spare, power-on hours, error counts) via the optional `smartmontools` package.
+Root filesystem usage with real read/write throughput (measured against actual elapsed time between polls, not the nominal poll interval), the read-only SquashFS base image shown separately from writable overlay space, and a summary section that adapts to the underlying storage type — NAND/UBI, eMMC, or SSD/NVMe. NAND details include erase-cycle counts, PEB/bad-block status, geometry and ECC strength; NVMe adds identity, TRIM support, and full SMART health (wear, TBW, spare, power-on hours, error counts, minutes spent over the drive's warning and critical temperatures) via the optional `smartmontools` package.
 </details>
 
 <details>
@@ -168,7 +168,7 @@ USB mass storage devices with format and mount state shown separately (an unform
 <details>
 <summary><b>Power, Fans & Thermal Sensors</b></summary>
 
-Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fans (shown even when the fan has no speed sensor) and red highlighting of any reading the sensor driver flags as an alarm, plus Intel RAPL package/core/DRAM power on x86. On x86, motherboard fans and voltages need the Super I/O driver — install it from **⚙ Settings → Optional Packages**. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and the peak temperature seen since boot.
+Voltage/current/fan/power rails from `hwmon`, including the duty cycle of PWM fans (shown even when the fan has no speed sensor) and red highlighting of any reading the sensor driver flags as an alarm, plus Intel RAPL package/core/DRAM power on x86. On x86, motherboard fans and voltages need the Super I/O driver — install it from **⚙ Settings → Optional Packages**. All thermal zones are laid out alphabetically with per-sensor sparklines, thresholds taken from the hardware's own trip points where available, and the peak temperature seen since boot. Channels that measure nothing (an unwired input stuck at 0 °C, NVMe sensor slots filled with a fixed 1 °C staircase) are left out, as are the copies the kernel makes of each thermal zone. When something has throttled, a Throttling section lists Intel's core and package throttle counts since boot and any cooling device (a CPU clock cap, a Wi-Fi radio's duty cycle) holding performance back right now.
 </details>
 
 <details>
@@ -210,7 +210,7 @@ One row per associated station — hostname/MAC, signal strength with a live bar
 <details>
 <summary><b>Alerts</b></summary>
 
-A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong. Also raised: processes killed for lack of memory, `/tmp` filling its RAM allowance, a port running below its rated speed, an unsynchronised clock, and a saved kernel crash log.
+A single prioritized card surfacing anything that needs attention right now — a WAN down, an unstable link, critical temperatures, NAND wear, ECC errors and similar — so you don't have to scan every card to notice something's wrong. Also raised: processes killed for lack of memory, `/tmp` filling its RAM allowance, a port running below its rated speed, an unsynchronised clock, a saved kernel crash log, CPU thermal throttling, a cooling device limiting performance, and PCIe errors a device has logged since boot.
 </details>
 
 <details>

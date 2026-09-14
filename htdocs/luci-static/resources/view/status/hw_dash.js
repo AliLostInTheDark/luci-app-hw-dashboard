@@ -54,6 +54,7 @@ var SECTIONS = {
 	ports: ['ports', 'alerts'],
 	usb: ['ports'],
 	hwmon: ['hwmon'],
+	pcie: ['alerts'],
 	ext: ['ext'],
 	wifi: ['wifi']
 };

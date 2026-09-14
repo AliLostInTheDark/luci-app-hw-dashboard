@@ -701,10 +701,25 @@ cpu_load() {
 	fi
 }
 
+# Received-packet softirqs each CPU has run since boot, in CPU order.
+cpu_net_rx() {
+	NET_RX="[]"
+	[ -f /proc/softirqs ] || return
+	while read -r _sk _sv; do
+		[ "$_sk" = "NET_RX:" ] || continue
+		set -- $_sv
+		_ifs=$IFS; IFS=,
+		NET_RX="[$*]"
+		IFS=$_ifs
+		break
+	done < /proc/softirqs
+}
+
 cpu_stats() {
 	cpu_counters
 	cpu_clocks
 	cpu_load
+	cpu_net_rx
 }
 
 mem_usage() {
@@ -1143,7 +1158,9 @@ nvme_smart() {
 						-e '_nv_hreads=@.nvme_smart_health_information_log.host_reads' \
 						-e '_nv_hwrites=@.nvme_smart_health_information_log.host_writes' \
 						-e '_nv_nsutil=@["nvme_namespaces"][0].utilization.bytes' \
-						-e '_nv_nscap=@["nvme_namespaces"][0].capacity.bytes' 2>/dev/null)"
+						-e '_nv_nscap=@["nvme_namespaces"][0].capacity.bytes' \
+						-e '_nv_wtt=@.nvme_smart_health_information_log.warning_temp_time' \
+						-e '_nv_ctt=@.nvme_smart_health_information_log.critical_comp_time' 2>/dev/null)"
 					[ "$_nv_pass" = "1" ] || [ "$_nv_pass" = "true" ] && _nv_pass=1 || _nv_pass=0
 					case "$_nv_tempcur" in ''|*[!0-9]*) _nv_tempcur=0 ;; esac
 					case "$_nv_tempwarn" in ''|*[!0-9]*) _nv_tempwarn=0 ;; esac
@@ -1163,7 +1180,9 @@ nvme_smart() {
 					case "$_nv_hwrites" in ''|*[!0-9]*) _nv_hwrites=0 ;; esac
 					case "$_nv_nsutil" in ''|*[!0-9]*) _nv_nsutil=0 ;; esac
 					case "$_nv_nscap" in ''|*[!0-9]*) _nv_nscap=0 ;; esac
-					NVME_SMART="{\"passed\":$_nv_pass,\"temp_c\":$_nv_tempcur,\"temp_warn\":$_nv_tempwarn,\"temp_crit\":$_nv_tempcrit,\"critical_warning\":$_nv_crit,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr,\"err_log_entries\":$_nv_errlog,\"host_reads\":$_nv_hreads,\"host_writes\":$_nv_hwrites,\"ns_utilization\":$_nv_nsutil,\"ns_capacity\":$_nv_nscap}"
+					case "$_nv_wtt" in ''|*[!0-9]*) _nv_wtt=0 ;; esac
+					case "$_nv_ctt" in ''|*[!0-9]*) _nv_ctt=0 ;; esac
+					NVME_SMART="{\"passed\":$_nv_pass,\"temp_c\":$_nv_tempcur,\"temp_warn\":$_nv_tempwarn,\"temp_crit\":$_nv_tempcrit,\"critical_warning\":$_nv_crit,\"avail_spare\":$_nv_spare,\"spare_thresh\":$_nv_sparethr,\"percent_used\":$_nv_used,\"data_units_read\":$_nv_dread,\"data_units_written\":$_nv_dwrite,\"power_on_hours\":$_nv_poh,\"power_cycles\":$_nv_pcyc,\"unsafe_shutdowns\":$_nv_unsafe,\"media_errors\":$_nv_merr,\"err_log_entries\":$_nv_errlog,\"host_reads\":$_nv_hreads,\"host_writes\":$_nv_hwrites,\"ns_utilization\":$_nv_nsutil,\"ns_capacity\":$_nv_nscap,\"warn_temp_min\":$_nv_wtt,\"crit_temp_min\":$_nv_ctt}"
 				fi
 				_cache_write "$_nvsm_cache" 30 "$NVME_SMART"
 			fi
@@ -1216,44 +1235,65 @@ read_trips() {
 	done
 }
 
-thermal_zones() {
-	for t in /sys/class/thermal/thermal_zone*; do
-		if [ -f "$t/type" ] && [ -f "$t/temp" ]; then
-			read_file TYPE "$t/type" "Unknown"
-			read_file TEMP "$t/temp" "0"
-			CRIT_TEMP="null"
-			PASS_TEMP="null"
-			read_trips "$t"
-			SEEN_TYPES="${SEEN_TYPES}${TYPE} "
-			if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
-			json_esc "$TYPE"
-			THERMALS="$THERMALS{\"type\":\"$JSV\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
-			FIRST=0
-		fi
+# Number of thermal zones and hwmon devices. A sensor map built from another
+# count is stale, so a radio or drive that appears after boot shows at once.
+sensor_key() {
+	SENSOR_KEY=0
+	for _sd in /sys/class/thermal/thermal_zone* /sys/class/hwmon/hwmon*; do
+		[ -e "$_sd" ] && SENSOR_KEY=$((SENSOR_KEY + 1))
 	done
 }
 
-# Every hwmon temperature channel, labelled and made unique.
-hwmon_temps() {
+# Sensor names, labels and limits only change with the hardware, so they are
+# kept in a map and a poll reads nothing but the values. 0 while map $1 is
+# under five minutes old and was built from the same devices.
+map_fresh() {
+	[ -n "$SENSOR_KEY" ] || sensor_key
+	_mexp=""; _mkey=""
+	[ -f "$1" ] && read -r _mexp _mkey < "$1"
+	case "$HWDASH_NOW:$_mexp" in :*|*:|*[!0-9:]*) return 1 ;; esac
+	[ "$HWDASH_NOW" -lt "$_mexp" ] && [ "$_mkey" = "$SENSOR_KEY" ]
+}
+
+# Rebuilds map $1 from the lines function $2 prints, under a header line of
+# "<expiry> <sensor key>".
+map_write() {
+	{ printf '%s %s\n' "$((HWDASH_NOW + 300))" "$SENSOR_KEY"; $2; } > "$1.$$" 2>/dev/null &&
+		mv "$1.$$" "$1" 2>/dev/null
+}
+
+# One line per zone: "z <temp file> <crit> <pass> <name>", the name escaped.
+map_zones() {
+	for t in /sys/class/thermal/thermal_zone*; do
+		[ -f "$t/type" ] && [ -f "$t/temp" ] || continue
+		read_file TYPE "$t/type" "Unknown"
+		CRIT_TEMP="null"
+		PASS_TEMP="null"
+		read_trips "$t"
+		SEEN_TYPES="${SEEN_TYPES}${TYPE} "
+		json_esc "$TYPE"
+		printf 'z %s %s %s %s\n' "$t/temp" "$CRIT_TEMP" "$PASS_TEMP" "$JSV"
+	done
+}
+
+# One line per hwmon temperature channel, "h <input> <crit> <pass> <name>",
+# labelled and made unique. The thermal core mirrors every zone as an hwmon
+# device; those are already listed as zones.
+map_hwmon_temps() {
 	_th_owd=$PWD
 	for h in /sys/class/hwmon/hwmon*; do
 		[ -d "$h" ] || continue
+		_hdev=""
+		cd -P "$h/device" 2>/dev/null && _hdev=$PWD
+		cd "$_th_owd" 2>/dev/null
+		case "$_hdev" in */thermal/thermal_zone*) continue ;; esac
 		read_file TYPE_BASE "$h/name" "Unknown"
 		for tinput in "$h"/temp*_input; do
 			[ -f "$tinput" ] || continue
-			read_file TEMP "$tinput" ""
-			[ -z "$TEMP" ] && continue
-
 			read_file LABEL "${tinput%_input}_label" ""
-			if [ -z "$LABEL" ] && [ -L "$h/device" ]; then
-				# cd -P rather than a readlink fork: every unlabelled channel
-				# passes here on every poll just to spot the ath11k radios.
-				_phy_name=""
-				cd -P "$h/device" 2>/dev/null && _phy_name=${PWD##*/}
-				cd "$_th_owd" 2>/dev/null
-				case "$_phy_name" in
-					phy*) LABEL="$_phy_name" ;;
-				esac
+			# An ath11k radio's channel is unlabelled; its phy names it.
+			if [ -z "$LABEL" ]; then
+				case "${_hdev##*/}" in phy*) LABEL=${_hdev##*/} ;; esac
 			fi
 
 			if [ -n "$LABEL" ]; then
@@ -1286,32 +1326,99 @@ hwmon_temps() {
 				read_trips "$h/device"
 			fi
 
-			if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
 			json_esc "$TYPE"
-			THERMALS="$THERMALS{\"type\":\"$JSV\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
-			FIRST=0
+			printf 'h %s %s %s %s\n' "$tinput" "$CRIT_TEMP" "$PASS_TEMP" "$JSV"
 		done
 	done
 }
 
-thermal_stats() {
+thermal_map() {
+	SEEN_TYPES=" "
+	map_zones
+	map_hwmon_temps
+}
+
+# A zone that fails to read reports 0, as it always has; an hwmon channel is
+# left out until it answers.
+thermal_temps() {
+	_map=/tmp/hwdash_thermal.map
+	map_fresh "$_map" || map_write "$_map" thermal_map
 	THERMALS="["
 	FIRST=1
-	SEEN_TYPES=" "
-	thermal_zones
-	hwmon_temps
+	if [ -f "$_map" ]; then
+		{
+			read -r _
+			while read -r _kind _in CRIT_TEMP PASS_TEMP _name; do
+				TEMP=""
+				read -r TEMP 2>/dev/null < "$_in"
+				if [ -z "$TEMP" ]; then
+					[ "$_kind" = h ] && continue
+					TEMP=0
+				fi
+				[ $FIRST -eq 0 ] && THERMALS="$THERMALS,"
+				THERMALS="$THERMALS{\"type\":\"$_name\",\"temp\":$TEMP,\"crit\":$CRIT_TEMP,\"pass\":$PASS_TEMP}"
+				FIRST=0
+			done
+		} < "$_map"
+	fi
 	THERMALS="$THERMALS]"
 }
 
-# Voltage, fan, power, current and PWM duty channels. A fan without a tach is
-# shown by its duty; where both exist the duty rides on the RPM row. Alarms
-# count only where the channel has a limit set, since a desktop BIOS often
-# leaves Super I/O limits at 0 and every rail then alarms. Unlabelled Super
-# I/O voltages are raw pin readings behind board-specific dividers, so only
-# the few with a fixed meaning are named, and idle fan headers are skipped.
-hwmon_channels() {
-	HWMON_EXTRA="["
-	_HX_FIRST=1
+# Intel's thermal throttle counters since boot. Every CPU keeps its own copy of
+# its core's and its package's count, so the highest is the event count.
+cpu_throttle() {
+	THR_CORE=0; THR_PKG=0; THR_MS=0
+	for _tt in /sys/devices/system/cpu/cpu[0-9]*/thermal_throttle; do
+		[ -d "$_tt" ] || continue
+		read_file _tcc "$_tt/core_throttle_count" 0
+		read_file _tpc "$_tt/package_throttle_count" 0
+		case "$_tcc$_tpc" in *[!0-9]*) continue ;; esac
+		[ "$_tcc" -gt "$THR_CORE" ] && THR_CORE=$_tcc
+		[ "$_tpc" -gt "$THR_PKG" ] && THR_PKG=$_tpc
+		[ "$_tcc" -eq 0 ] && [ "$_tpc" -eq 0 ] && continue
+		for _tf in core_throttle_total_time_ms package_throttle_total_time_ms; do
+			read_file _tms "$_tt/$_tf" 0
+			case "$_tms" in *[!0-9]*) continue ;; esac
+			[ "$_tms" -gt "$THR_MS" ] && THR_MS=$_tms
+		done
+	done
+}
+
+# Cooling devices holding a CPU or radio back right now. Fans are left out: a
+# fan running is cooling, not throttling.
+cooling_state() {
+	COOLING="["
+	_cf=1
+	for _cd in /sys/class/thermal/cooling_device*; do
+		read_file _ccur "$_cd/cur_state" 0
+		case "$_ccur" in ''|0|*[!0-9]*) continue ;; esac
+		read_file _ctype "$_cd/type" ""
+		case "$_ctype" in *[Ff]an*) continue ;; esac
+		read_file _cmax "$_cd/max_state" 0
+		case "$_cmax" in ''|*[!0-9]*) _cmax=0 ;; esac
+		json_esc "$_ctype"
+		[ $_cf -eq 0 ] && COOLING="$COOLING,"
+		COOLING="$COOLING{\"type\":\"$JSV\",\"cur\":$_ccur,\"max\":$_cmax}"
+		_cf=0
+	done
+	COOLING="$COOLING]"
+}
+
+thermal_stats() {
+	thermal_temps
+	cpu_throttle
+	cooling_state
+	THROTTLE="{\"core\":$THR_CORE,\"pkg\":$THR_PKG,\"ms\":$THR_MS,\"cooling\":$COOLING}"
+}
+
+# One line per voltage, fan, power, current or PWM duty channel:
+# "<unit> <input> <pwm file|-> <super I/O 0|1> <alarm files|-> <name>". A fan
+# without a tach is shown by its duty; where both exist the duty rides on the
+# RPM row. Alarms count only where the channel has a limit set, since a desktop
+# BIOS often leaves Super I/O limits at 0 and every rail then alarms; the alarm
+# files are ':'-joined. Unlabelled Super I/O voltages are raw pin readings
+# behind board-specific dividers, so only the few with a fixed meaning are named.
+hwmon_map() {
 	for h in /sys/class/hwmon/hwmon*; do
 		[ -d "$h" ] || continue
 		read_file _hx_name "$h/name" "hwmon"
@@ -1319,19 +1426,17 @@ hwmon_channels() {
 		case "$_hx_name" in nct6*|it87*|it8*|w83*|f71*) _hxsio=1 ;; esac
 		for _hxi in "$h"/in[0-9]*_input "$h"/fan[0-9]*_input "$h"/power[0-9]*_input "$h"/curr[0-9]*_input "$h"/pwm[0-9] "$h"/pwm[0-9][0-9]; do
 			[ -f "$_hxi" ] || continue
-			read_file _hxv "$_hxi" ""
-			case "$_hxv" in ''|*[!0-9-]*) continue ;; esac
 			_hxch=${_hxi##*/}
 			_hxch=${_hxch%_input}
-			_hxd=-1
+			_hxdp="-"
 			case "$_hxch" in
 				in*) _hxu="V" ;;
 				fan*) _hxu="RPM"
-					[ -f "$h/pwm${_hxch#fan}" ] && read_file _hxd "$h/pwm${_hxch#fan}" -1 ;;
+					[ -f "$h/pwm${_hxch#fan}" ] && _hxdp="$h/pwm${_hxch#fan}" ;;
 				power*) _hxu="W" ;;
 				curr*) _hxu="A" ;;
 				pwm*) [ -f "$h/fan${_hxch#pwm}_input" ] && continue
-					_hxu="%"; _hxd=$_hxv ;;
+					_hxu="%" ;;
 				*) continue ;;
 			esac
 			read_file _hxl "$h/${_hxch}_label" ""
@@ -1359,8 +1464,6 @@ hwmon_channels() {
 					[ $_hxsio -eq 0 ] && case "$_hx_name" in *fan*) ;; *) _hxl="$_hx_name $_hxl" ;; esac ;;
 				esac
 			fi
-			case "$_hxd" in ''|*[!0-9]*) _hxd=-1 ;; esac
-			[ "$_hxd" -ge 0 ] && _hxd=$(( (_hxd * 100 + 127) / 255 ))
 			# A limit counts as set when any limit file is non-zero,
 			# or when there are none (the alarm is then the chip's own).
 			_hxlim=-1
@@ -1369,21 +1472,53 @@ hwmon_channels() {
 				read_file _hxlv "$_hxlf" 0
 				case "$_hxlv" in ''|0|-0) [ $_hxlim -lt 0 ] && _hxlim=0 ;; *) _hxlim=1 ;; esac
 			done
-			_hxa=0
+			_hxal=""
 			if [ $_hxlim -ne 0 ]; then
 				for _hxaf in "$h/$_hxch"_*alarm; do
-					[ -f "$_hxaf" ] || continue
-					read_file _hxav "$_hxaf" 0
-					[ "$_hxav" = "1" ] && _hxa=1
+					[ -f "$_hxaf" ] && _hxal="$_hxal${_hxal:+:}$_hxaf"
 				done
 			fi
-			[ $_hxsio -eq 1 ] && [ "$_hxu" = "RPM" ] && [ "$_hxv" = "0" ] && [ $_hxa -eq 0 ] && continue
 			json_esc "$_hxl"
-			[ $_HX_FIRST -eq 0 ] && HWMON_EXTRA="$HWMON_EXTRA,"
-			HWMON_EXTRA="$HWMON_EXTRA{\"name\":\"$JSV\",\"val\":$_hxv,\"unit\":\"$_hxu\",\"duty\":$_hxd,\"alarm\":$_hxa}"
-			_HX_FIRST=0
+			printf '%s %s %s %s %s %s\n' "$_hxu" "$_hxi" "$_hxdp" "$_hxsio" "${_hxal:--}" "$JSV"
 		done
 	done
+}
+
+# Idle Super I/O fan headers are skipped.
+hwmon_channels() {
+	_map=/tmp/hwdash_hwmon.map
+	map_fresh "$_map" || map_write "$_map" hwmon_map
+	HWMON_EXTRA="["
+	_HX_FIRST=1
+	if [ -f "$_map" ]; then
+		{
+			read -r _
+			while read -r _hxu _hxi _hxdp _hxsio _hxal _hxl; do
+				read_file _hxv "$_hxi" ""
+				case "$_hxv" in ''|*[!0-9-]*) continue ;; esac
+				_hxd=-1
+				case "$_hxu" in
+					RPM) [ "$_hxdp" != "-" ] && read_file _hxd "$_hxdp" -1 ;;
+					%) _hxd=$_hxv ;;
+				esac
+				case "$_hxd" in ''|*[!0-9]*) _hxd=-1 ;; esac
+				[ "$_hxd" -ge 0 ] && _hxd=$(( (_hxd * 100 + 127) / 255 ))
+				_hxa=0
+				if [ "$_hxal" != "-" ]; then
+					_ifs=$IFS; IFS=:
+					for _hxaf in $_hxal; do
+						read_file _hxav "$_hxaf" 0
+						[ "$_hxav" = "1" ] && _hxa=1
+					done
+					IFS=$_ifs
+				fi
+				[ "$_hxsio" = "1" ] && [ "$_hxu" = "RPM" ] && [ "$_hxv" = "0" ] && [ $_hxa -eq 0 ] && continue
+				[ $_HX_FIRST -eq 0 ] && HWMON_EXTRA="$HWMON_EXTRA,"
+				HWMON_EXTRA="$HWMON_EXTRA{\"name\":\"$_hxl\",\"val\":$_hxv,\"unit\":\"$_hxu\",\"duty\":$_hxd,\"alarm\":$_hxa}"
+				_HX_FIRST=0
+			done
+		} < "$_map"
+	fi
 	HWMON_EXTRA="$HWMON_EXTRA]"
 }
 
@@ -1409,6 +1544,44 @@ rapl_stats() {
 hwmon_stats() {
 	hwmon_channels
 	rapl_stats
+}
+
+# Sets AER_TOTAL to the TOTAL_ERR_* count in AER counter file $1.
+aer_total() {
+	AER_TOTAL=0
+	[ -f "$1" ] || return
+	while read -r _ak _av; do
+		case "$_ak" in TOTAL_ERR_*) AER_TOTAL=$_av ;; esac
+	done < "$1"
+	case "$AER_TOTAL" in ''|*[!0-9]*) AER_TOTAL=0 ;; esac
+}
+
+# PCIe devices that have logged AER errors since boot. A healthy link logs
+# none and the counts only grow, so the scan is cached for 60 s.
+pcie_stats() {
+	if _cache_read /tmp/hwdash_aer.cache; then
+		PCIE_AER=$C_VAL
+		return
+	fi
+	PCIE_AER="["
+	_pf=1
+	for _pd in /sys/bus/pci/devices/*; do
+		[ -f "$_pd/aer_dev_correctable" ] || continue
+		aer_total "$_pd/aer_dev_correctable"; _acor=$AER_TOTAL
+		aer_total "$_pd/aer_dev_nonfatal"; _anf=$AER_TOTAL
+		aer_total "$_pd/aer_dev_fatal"; _afat=$AER_TOTAL
+		[ $((_acor + _anf + _afat)) -gt 0 ] || continue
+		_adrv=""
+		while IFS='=' read -r _uk _uv; do
+			[ "$_uk" = "DRIVER" ] && _adrv=$_uv
+		done < "$_pd/uevent"
+		json_esc "$_adrv"
+		[ $_pf -eq 0 ] && PCIE_AER="$PCIE_AER,"
+		PCIE_AER="$PCIE_AER{\"dev\":\"${_pd##*/}\",\"driver\":\"$JSV\",\"cor\":$_acor,\"nonfatal\":$_anf,\"fatal\":$_afat}"
+		_pf=0
+	done
+	PCIE_AER="$PCIE_AER]"
+	_cache_write /tmp/hwdash_aer.cache 60 "$PCIE_AER"
 }
 
 # ethtool detail costs four forks per port, so it comes from a 30 s cache
@@ -1982,16 +2155,32 @@ crash_log() {
 	fi
 }
 
+# The hardware watchdog, which reboots the router if it hangs, and its record
+# of why the last boot happened.
+watchdog_state() {
+	WATCHDOG_JSON="null"
+	_wd=/sys/class/watchdog/watchdog0
+	read_file WD_BOOTSTATUS "$_wd/bootstatus" "-1"
+	case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
+	[ -f "$_wd/identity" ] || return
+	read_file _wdid "$_wd/identity" ""
+	read_file _wdst "$_wd/state" ""
+	read_file _wdto "$_wd/timeout" 0
+	case "$_wdto" in ''|*[!0-9]*) _wdto=0 ;; esac
+	json_esc "$_wdst"; _wdstj=$JSV
+	json_esc "$_wdid"
+	WATCHDOG_JSON="{\"name\":\"$JSV\",\"state\":\"$_wdstj\",\"timeout\":$_wdto}"
+}
+
 # Overlay use (OV_*) comes from disk_usage.
 sys_info_stats() {
 	sys_static
 	ntp_state
 	crash_log
+	watchdog_state
 	read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
-	read_file WD_BOOTSTATUS /sys/class/watchdog/watchdog0/bootstatus "-1"
-	case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
 	json_esc "$SYS_HOSTNAME"
-	SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE,\"ntp\":$NTP_JSON,\"crash\":$CRASH_JSON}"
+	SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"watchdog\":$WATCHDOG_JSON,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE,\"ntp\":$NTP_JSON,\"crash\":$CRASH_JSON}"
 }
 
 # True when the page asked for section $1 to be left out.
@@ -2019,7 +2208,8 @@ case "$1" in
 				HWDASH_NOW=$(date +%s 2>/dev/null)
 				HWDASH_PERSIST_DIR=/tmp/hwdash
 
-				THERMALS='[]'; HWMON_EXTRA='[]'; RAPL='[]'
+				THERMALS='[]'; HWMON_EXTRA='[]'; RAPL='[]'; PCIE_AER='[]'; SENSOR_KEY=""
+				THROTTLE='{"core":0,"pkg":0,"ms":0,"cooling":[]}'
 				ETH_LINKS='[]'; ETHTOOL_JSON='{}'; USB_PORTS='[]'; USB_DEVS='[]'
 				BLOCK_DEVS='[]'; WIFI_RADIOS='[]'; WIFI_SURVEY='{}'
 				DF_INODES='{}'; DSK_STATS='{}'; total_phys=0; mtd_phys=0; mtd_count=0; block_count=0
@@ -2033,6 +2223,7 @@ case "$1" in
 				skipped storage || storage_stats
 				skipped thermal || thermal_stats
 				skipped hwmon || hwmon_stats
+				skipped pcie || pcie_stats
 				skipped ports || port_stats
 				skipped usb || usb_stats
 				skipped ext || ext_stats
@@ -2040,7 +2231,7 @@ case "$1" in
 				sys_info_stats
 				json_esc "$CPU_MODEL"; _jm=$JSV
 				json_esc "$BOARD_DETECT"; _jb=$JSV
-				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"oom_kills\":$MEM_OOM, \"tmp_total\":$TMP_TOTAL, \"tmp_used\":$TMP_USED, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
+				echo "{\"model\":\"$_jm\",\"board\":\"$_jb\",\"cpus\":$CPUS, \"cpu_meta\":{\"cores\":$PHYSICAL_CORES, \"threads\":$LOGICAL_CPUS, \"max_freq\":$MAX_FREQ_KHZ, \"tasks\":\"$TASKS\", \"load_1\":\"$LOAD_1\", \"load_5\":\"$LOAD_5\", \"load_15\":\"$LOAD_15\", \"governor\":\"$CPU_GOV\", \"conntrack\":$CONN_COUNT, \"conntrack_max\":$CONN_MAX, \"ctxt\":$CTXT, \"intr\":$INTR, \"sys_ticks\":$CPU_TICKS, \"psi\":$PSI_JSON}, \"freqs\":$CPU_FREQS, \"net_rx\":$NET_RX, \"mem\":{\"total\":$MEM_TOTAL, \"free\":$MEM_FREE, \"avail\":$MEM_AVAIL, \"buffers\":$MEM_BUFF, \"cached\":$MEM_CACH, \"swap_total\":$SWAP_TOTAL, \"swap_free\":$SWAP_FREE, \"zram_total\":$ZRAM_TOTAL, \"zram_used\":$ZRAM_USED, \"zram_orig\":$ZRAM_ORIG, \"dirty\":$MEM_DIRTY, \"writeback\":$MEM_WRITEBACK, \"oom_kills\":$MEM_OOM, \"tmp_total\":$TMP_TOTAL, \"tmp_used\":$TMP_USED, \"speed\":$MEM_SPEED_JSON}, \"df\":$DF_JSON, \"inodes\":$DF_INODES, \"storage_total_phys\":$total_phys, \"mtd_phys\":$mtd_phys, \"mtd_count\":$mtd_count, \"block_count\":$block_count, \"diskstats\":$DSK_STATS, \"thermals\":$THERMALS, \"throttle\":$THROTTLE, \"freq_stats\":$FREQ_STATS, \"uptime\":$UPTIME, \"net\":{\"rx\":0, \"tx\":0}, \"eth_links\":$ETH_LINKS, \"ethtool\":$ETHTOOL_JSON, \"usb_ports\":$USB_PORTS,\"usb_devs\":$USB_DEVS, \"wifi_radios\":$WIFI_RADIOS, \"wifi_survey\":$WIFI_SURVEY, \"ubi_max_ec\":$UBI_MAX_EC, \"ubi_bad_peb\":$UBI_BAD_PEB, \"ubi_devs\":$UBI_DEVS, \"mtd_parts\":$MTD_PARTS, \"ecc_base_date\":${ECC_BASE_DATE:-0}, \"hwmon_extra\":$HWMON_EXTRA, \"rapl\":$RAPL, \"pcie_aer\":$PCIE_AER, \"emmc_info\":$EMMC_INFO, \"squashfs_info\":$SQUASHFS_INFO, \"nvme_info\":$NVME_INFO, \"nvme_smart\":$NVME_SMART, \"f2fs_info\":$F2FS_INFO, \"block_devs\":$BLOCK_DEVS, \"sys_info\":$SYS_INFO_JSON}"
 				;;
 		esac
 		;;

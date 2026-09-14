@@ -68,6 +68,9 @@ function build(info) {
 		var boot = lastBoot(si.wd_bootstatus);
 		add(_('Last Boot'), boot[0], boot[1]);
 	}
+	if (si.watchdog)
+		add(_('Watchdog'), _('%s, %s, %d s timeout').format(si.watchdog.name, si.watchdog.state === 'active' ? _('active') : _('inactive'), si.watchdog.timeout),
+			null, _('The hardware watchdog reboots the router if the system stops responding for longer than the timeout.'));
 	if (si.ntp) {
 		add(_('Clock'),
 			si.ntp.synced ? (si.ntp.stratum >= 0 ? _('Synced (stratum %d)').format(si.ntp.stratum) : _('Synced')) : _('Not synced'),

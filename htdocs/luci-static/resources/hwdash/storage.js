@@ -150,6 +150,10 @@ function nvmeBox(nv, sm) {
 	box.appendChild(ui.statRow(_('Power Cycles'), sm.power_cycles.toLocaleString()));
 	box.appendChild(ui.statRow(_('Unsafe Shutdowns'), sm.unsafe_shutdowns.toLocaleString(), sm.unsafe_shutdowns > 0 ? '#ffb300' : null));
 	box.appendChild(ui.statRow(_('Media Errors'), sm.media_errors.toLocaleString(), sm.media_errors > 0 ? '#ff1744' : null));
+	// Lifetime minutes; the drive slows itself down above the warning level.
+	if (sm.warn_temp_min > 0 || sm.crit_temp_min > 0)
+		box.appendChild(ui.statRow(_('Time Over Temperature'), _('%s min over warning, %s min over critical').format(sm.warn_temp_min.toLocaleString(), sm.crit_temp_min.toLocaleString()),
+			sm.crit_temp_min > 0 ? '#ff1744' : '#ffb300', true));
 	if (sm.err_log_entries > 0)
 		box.appendChild(ui.statRow(_('Error Log Entries'), sm.err_log_entries.toLocaleString(), '#ffb300'));
 	box.appendChild(ui.statRow(_('Data Read'), ui.fmtBytes(sm.data_units_read * 512000)));

@@ -8,19 +8,27 @@ msgid ""
 "discovery)."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:292
+#: htdocs/luci-static/resources/hwdash/storage.js:296
 msgid "%.1f%% filesystem used"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:208
+#: htdocs/luci-static/resources/hwdash/cpu.js:220
 msgid "%d Cores"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:48
+#: htdocs/luci-static/resources/hwdash/alerts.js:72
 msgid "%d bad PEB on UBI"
 msgid_plural "%d bad PEBs on UBI"
 msgstr[0] ""
 msgstr[1] ""
+
+#: htdocs/luci-static/resources/hwdash/thermal.js:113
+msgid "%d core / %d package events since boot, %s in total"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:38
+msgid "%d core / %d package throttle events since boot"
+msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/storage.js:85
 msgid "%d corr"
@@ -34,15 +42,15 @@ msgstr ""
 msgid "%d link flaps"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:56
+#: htdocs/luci-static/resources/hwdash/alerts.js:80
 msgid "%d of %d (%d%%)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:54
+#: htdocs/luci-static/resources/hwdash/alerts.js:78
 msgid "%d of %d (%d%%) — new connections will start being dropped"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:70
+#: htdocs/luci-static/resources/hwdash/alerts.js:94
 msgid "%d out-of-memory kill since boot"
 msgid_plural "%d out-of-memory kills since boot"
 msgstr[0] ""
@@ -64,8 +72,8 @@ msgstr ""
 msgid "%s (v%d)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:421
-#: htdocs/luci-static/resources/hwdash/storage.js:422
+#: htdocs/luci-static/resources/hwdash/storage.js:425
+#: htdocs/luci-static/resources/hwdash/storage.js:426
 msgid "%s (via %s)"
 msgstr ""
 
@@ -89,11 +97,11 @@ msgstr ""
 msgid "%s at %.1f °C, trip point %d °C"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:101
+#: htdocs/luci-static/resources/hwdash/alerts.js:125
 msgid "%s at %.2f%% uptime over 24h"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:65
+#: htdocs/luci-static/resources/hwdash/alerts.js:89
 msgid "%s at %d%% (%s free)"
 msgstr ""
 
@@ -105,15 +113,23 @@ msgstr ""
 msgid "%s h (≈%d days)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:97
+#: htdocs/luci-static/resources/hwdash/alerts.js:121
 msgid "%s has been down for %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:81
+#: htdocs/luci-static/resources/hwdash/alerts.js:45
+msgid "%s held at cooling step %d of %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:105
 msgid "%s linked at %d Mb/s; both ends support %d Mb/s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:88
+#: htdocs/luci-static/resources/hwdash/storage.js:155
+msgid "%s min over warning, %s min over critical"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:112
 msgid "%s recorded %s — see /sys/fs/pstore"
 msgstr ""
 
@@ -121,7 +137,19 @@ msgstr ""
 msgid "%s used, %s free"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:292
+#: htdocs/luci-static/resources/hwdash/system.js:72
+msgid "%s, %s, %d s timeout"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:55
+msgid "%s: %d corrected since boot"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:53
+msgid "%s: %d fatal, %d non-fatal since boot"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:296
 msgid "(%dR / %dW) IOPS"
 msgstr ""
 
@@ -129,7 +157,7 @@ msgstr ""
 msgid "/mnt/usb1/hwdash (leave empty to disable)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:74
+#: htdocs/luci-static/resources/hwdash/alerts.js:98
 msgid "/tmp at %d%% of its %s limit"
 msgstr ""
 
@@ -148,7 +176,7 @@ msgid ""
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/wan.js:177
-#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
 msgid "AP Mode"
 msgstr ""
 
@@ -160,7 +188,7 @@ msgstr ""
 msgid "Active"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:139
+#: htdocs/luci-static/resources/hwdash/cpu.js:140
 msgid "Active Connections"
 msgstr ""
 
@@ -190,8 +218,8 @@ msgid ""
 "5382."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:111
-#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+#: htdocs/luci-static/resources/hwdash/alerts.js:135
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
 msgid "Alerts"
 msgstr ""
 
@@ -227,7 +255,7 @@ msgstr ""
 msgid "Arithmetic mean round-trip delay over the selected range"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:75
+#: htdocs/luci-static/resources/hwdash/system.js:78
 msgid ""
 "As last reported by the router’s NTP client. HTTPS, encrypted DNS and log "
 "timestamps all depend on a correct clock."
@@ -241,11 +269,11 @@ msgstr ""
 msgid "Available Spare"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:159
+#: htdocs/luci-static/resources/hwdash/storage.js:163
 msgid "Backup device failed"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:48
+#: htdocs/luci-static/resources/hwdash/alerts.js:72
 msgid "Bad flash blocks present"
 msgstr ""
 
@@ -264,7 +292,7 @@ msgstr ""
 msgid "Block %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:191
+#: htdocs/luci-static/resources/hwdash/storage.js:195
 msgid "Block Size"
 msgstr ""
 
@@ -289,7 +317,8 @@ msgid "CG-NAT"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/cpu.js:65
-#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+#: htdocs/luci-static/resources/hwdash/thermal.js:113
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
 msgid "CPU"
 msgstr ""
 
@@ -302,19 +331,19 @@ msgid "CPU Detail"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/cpu.js:72
-#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
 msgid "CPU Detailed Load"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:104
+#: htdocs/luci-static/resources/hwdash/system.js:107
 msgid "CPU Features"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:119
+#: htdocs/luci-static/resources/hwdash/cpu.js:120
 msgid "CPU Governor"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:110
+#: htdocs/luci-static/resources/hwdash/system.js:113
 msgid "CPU Security"
 msgstr ""
 
@@ -326,15 +355,19 @@ msgstr ""
 msgid "CPU core name on ARM (e.g. Cortex-A73) — the only source for it"
 msgstr ""
 
+#: htdocs/luci-static/resources/hwdash/alerts.js:38
+msgid "CPU thermal throttling"
+msgstr ""
+
 #: htdocs/luci-static/resources/hwdash/cpu.js:65
 msgid "CPU usage"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/thermal.js:55
+#: htdocs/luci-static/resources/hwdash/thermal.js:75
 msgid "CRIT %d°"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:110
+#: htdocs/luci-static/resources/hwdash/cpu.js:111
 msgid "Cache"
 msgstr ""
 
@@ -384,12 +417,18 @@ msgstr ""
 msgid "Click again to reset everything"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:72
+#: htdocs/luci-static/resources/hwdash/system.js:75
 msgid "Clock"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:86
+#: htdocs/luci-static/resources/hwdash/alerts.js:110
 msgid "Clock not synchronised"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:90
+msgid ""
+"Clock speed, and this core’s share of received-packet processing (NET_RX) "
+"since the last update"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/nat.js:192
@@ -410,11 +449,11 @@ msgid ""
 "between two ports both cross it."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:192
+#: htdocs/luci-static/resources/hwdash/storage.js:196
 msgid "Compressed Size"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:190
+#: htdocs/luci-static/resources/hwdash/storage.js:194
 msgid "Compression"
 msgstr ""
 
@@ -430,20 +469,24 @@ msgstr ""
 msgid "Connected"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:56
+#: htdocs/luci-static/resources/hwdash/alerts.js:80
 msgid "Connection table filling"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:54
+#: htdocs/luci-static/resources/hwdash/alerts.js:78
 msgid "Connection table nearly full"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:135
+#: htdocs/luci-static/resources/hwdash/cpu.js:136
 msgid "Context Switches / s"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/storage.js:133
 msgid "Continuous"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:45
+msgid "Cooling limiting performance"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/cpu.js:89
@@ -454,7 +497,7 @@ msgstr ""
 msgid "Core Power"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:109
+#: htdocs/luci-static/resources/hwdash/cpu.js:110
 msgid "Cores / Threads"
 msgstr ""
 
@@ -466,8 +509,8 @@ msgstr ""
 msgid "Could not read the hardware readout from the router."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:88
-#: htdocs/luci-static/resources/hwdash/system.js:79
+#: htdocs/luci-static/resources/hwdash/alerts.js:112
+#: htdocs/luci-static/resources/hwdash/system.js:82
 msgid "Crash"
 msgstr ""
 
@@ -475,7 +518,7 @@ msgstr ""
 msgid "Critical"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:161
+#: htdocs/luci-static/resources/hwdash/storage.js:165
 msgid "Critical Warning"
 msgstr ""
 
@@ -491,7 +534,7 @@ msgstr ""
 msgid "Current Channel"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:111
+#: htdocs/luci-static/resources/hwdash/cpu.js:112
 msgid "Current Freq"
 msgstr ""
 
@@ -515,7 +558,7 @@ msgstr ""
 msgid "DRAM Power"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:155
+#: htdocs/luci-static/resources/hwdash/storage.js:159
 msgid "Data Read"
 msgstr ""
 
@@ -618,7 +661,7 @@ msgstr ""
 msgid "Erase Count (min / mean / max)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:154
+#: htdocs/luci-static/resources/hwdash/storage.js:158
 msgid "Error Log Entries"
 msgstr ""
 
@@ -641,8 +684,8 @@ msgstr ""
 msgid "Exceeded"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:221
-#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+#: htdocs/luci-static/resources/hwdash/storage.js:225
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
 msgid "External Storage"
 msgstr ""
 
@@ -660,11 +703,11 @@ msgid ""
 "memory from everything else. The second figure is the most /tmp may grow to."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:64
+#: htdocs/luci-static/resources/hwdash/alerts.js:88
 msgid "Filesystem almost full"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:64
+#: htdocs/luci-static/resources/hwdash/alerts.js:88
 msgid "Filesystem filling up"
 msgstr ""
 
@@ -676,11 +719,11 @@ msgstr ""
 msgid "Firmware"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:42
+#: htdocs/luci-static/resources/hwdash/alerts.js:66
 msgid "Flash bitflips accumulating"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:436
+#: htdocs/luci-static/resources/hwdash/storage.js:440
 msgid "Format:"
 msgstr ""
 
@@ -740,7 +783,7 @@ msgstr ""
 msgid "Green means installed."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/status/hw_dash.js:148
+#: htdocs/luci-static/resources/view/status/hw_dash.js:149
 msgid "HIDE GRAPH"
 msgstr ""
 
@@ -752,7 +795,7 @@ msgstr ""
 msgid "Hardware Dashboard"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:136
+#: htdocs/luci-static/resources/hwdash/cpu.js:137
 msgid "Hardware Interrupts / s"
 msgstr ""
 
@@ -760,11 +803,15 @@ msgstr ""
 msgid "Healthy"
 msgstr ""
 
+#: htdocs/luci-static/resources/hwdash/thermal.js:123
+msgid "Held at cooling step %d of %d"
+msgstr ""
+
 #: htdocs/luci-static/resources/hwdash/ping.js:154
 msgid "Highest round-trip delay observed in the selected range"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:156
+#: htdocs/luci-static/resources/hwdash/storage.js:160
 msgid "Host Read / Write Commands"
 msgstr ""
 
@@ -776,7 +823,7 @@ msgstr ""
 msgid "Hostname"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:215
+#: htdocs/luci-static/resources/hwdash/cpu.js:227
 msgid "I/O Wait"
 msgstr ""
 
@@ -791,7 +838,7 @@ msgstr ""
 msgid "INET %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:430
+#: htdocs/luci-static/resources/hwdash/storage.js:434
 msgid "IOPS:"
 msgstr ""
 
@@ -839,7 +886,7 @@ msgstr ""
 msgid "IPv6-over-IPv4 (6to4)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:216
+#: htdocs/luci-static/resources/hwdash/cpu.js:228
 msgid "IRQ"
 msgstr ""
 
@@ -851,11 +898,11 @@ msgstr ""
 msgid "ISP Private Routing"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:211
+#: htdocs/luci-static/resources/hwdash/cpu.js:223
 msgid "Idle"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:308
+#: htdocs/luci-static/resources/hwdash/storage.js:312
 msgid "Inodes Used"
 msgstr ""
 
@@ -896,8 +943,8 @@ msgid ""
 "address translation on this link as classified by RFC 4787."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:219
-#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+#: htdocs/luci-static/resources/hwdash/storage.js:223
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
 msgid "Internal Storage"
 msgstr ""
 
@@ -913,31 +960,31 @@ msgstr ""
 msgid "Kernel"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:78
+#: htdocs/luci-static/resources/hwdash/system.js:81
 msgid "Kernel Crash Log"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:88
+#: htdocs/luci-static/resources/hwdash/alerts.js:112
 msgid "Kernel crash log saved"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:88
+#: htdocs/luci-static/resources/hwdash/system.js:91
 msgid "L0 Cache"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:93
+#: htdocs/luci-static/resources/hwdash/system.js:96
 msgid "L1 Cache"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:95
+#: htdocs/luci-static/resources/hwdash/system.js:98
 msgid "L2 Cache"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:96
+#: htdocs/luci-static/resources/hwdash/system.js:99
 msgid "L3 Cache"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:97
+#: htdocs/luci-static/resources/hwdash/system.js:100
 msgid "L4 Cache"
 msgstr ""
 
@@ -961,7 +1008,7 @@ msgstr ""
 msgid "Lifetime Type B"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:199
+#: htdocs/luci-static/resources/hwdash/storage.js:203
 msgid "Lifetime Written"
 msgstr ""
 
@@ -982,7 +1029,7 @@ msgid ""
 "pair cable."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:116
+#: htdocs/luci-static/resources/hwdash/cpu.js:117
 msgid "Load Average"
 msgstr ""
 
@@ -1032,11 +1079,11 @@ msgstr ""
 msgid "MTD Partition Table"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:358
+#: htdocs/luci-static/resources/hwdash/storage.js:362
 msgid "MTD Partitions"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:84
+#: htdocs/luci-static/resources/hwdash/system.js:87
 msgid "Machine"
 msgstr ""
 
@@ -1052,7 +1099,7 @@ msgstr ""
 msgid "Max Channel Width"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:112
+#: htdocs/luci-static/resources/hwdash/cpu.js:113
 msgid "Max Freq"
 msgstr ""
 
@@ -1082,7 +1129,7 @@ msgstr ""
 msgid "Media Errors"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:159
+#: htdocs/luci-static/resources/hwdash/storage.js:163
 msgid "Media read-only"
 msgstr ""
 
@@ -1099,7 +1146,7 @@ msgid ""
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/memory.js:26
-#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
 msgid "Memory"
 msgstr ""
 
@@ -1127,11 +1174,11 @@ msgstr ""
 msgid "Minimum (ms)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:113
+#: htdocs/luci-static/resources/hwdash/system.js:116
 msgid "Mitigated"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:448
+#: htdocs/luci-static/resources/hwdash/storage.js:452
 msgid "Model:"
 msgstr ""
 
@@ -1151,7 +1198,7 @@ msgid ""
 "I/O, x86 only"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:437
+#: htdocs/luci-static/resources/hwdash/storage.js:441
 msgid "Mounted:"
 msgstr ""
 
@@ -1180,7 +1227,7 @@ msgid "NAT TYPE · NOT TESTED"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/nat.js:181
-#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+#: htdocs/luci-static/resources/view/status/hw_dash.js:198
 msgid "NAT Type"
 msgstr ""
 
@@ -1212,7 +1259,7 @@ msgstr ""
 msgid "NOT DETERMINED"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:187
+#: htdocs/luci-static/resources/hwdash/storage.js:191
 msgid "NVMe Details"
 msgstr ""
 
@@ -1228,11 +1275,11 @@ msgstr ""
 msgid "Namespace Utilization"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:213
+#: htdocs/luci-static/resources/hwdash/cpu.js:225
 msgid "Nice"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:419
+#: htdocs/luci-static/resources/hwdash/storage.js:423
 msgid "No"
 msgstr ""
 
@@ -1330,11 +1377,11 @@ msgstr ""
 msgid "Not reported by device"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:73
+#: htdocs/luci-static/resources/hwdash/system.js:76
 msgid "Not synced"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:113
+#: htdocs/luci-static/resources/hwdash/system.js:116
 msgid "OK"
 msgstr ""
 
@@ -1386,20 +1433,28 @@ msgstr ""
 msgid "Overheat reset"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:344
+#: htdocs/luci-static/resources/hwdash/storage.js:348
 msgid "Overlay Free"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:342
+#: htdocs/luci-static/resources/hwdash/storage.js:346
 msgid "Overlay Total"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:343
+#: htdocs/luci-static/resources/hwdash/storage.js:347
 msgid "Overlay Used"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/thermal.js:54
+#: htdocs/luci-static/resources/hwdash/thermal.js:74
 msgid "PASS %d°"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:55
+msgid "PCIe link errors"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/alerts.js:53
+msgid "PCIe uncorrectable errors"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/storage.js:25
@@ -1432,7 +1487,7 @@ msgid ""
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/cpu.js:83
-#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
 msgid "Per-Core Usage"
 msgstr ""
 
@@ -1448,11 +1503,11 @@ msgstr ""
 msgid "Persistent Storage Directory"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:350
+#: htdocs/luci-static/resources/hwdash/storage.js:354
 msgid "Physical Disk Total"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:339
+#: htdocs/luci-static/resources/hwdash/storage.js:343
 msgid "Physical NAND Total"
 msgstr ""
 
@@ -1460,12 +1515,12 @@ msgstr ""
 msgid "Physical Total"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:348
+#: htdocs/luci-static/resources/hwdash/storage.js:352
 msgid "Physical eMMC Total"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/ping.js:208
-#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
 msgid "Ping Latency"
 msgstr ""
 
@@ -1486,17 +1541,17 @@ msgid ""
 "mount the drive itself."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:81
+#: htdocs/luci-static/resources/hwdash/alerts.js:105
 msgid "Port running below its rated speed"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/ports.js:84
-#: htdocs/luci-static/resources/view/status/hw_dash.js:195
+#: htdocs/luci-static/resources/view/status/hw_dash.js:196
 msgid "Ports Topology"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/power.js:22
-#: htdocs/luci-static/resources/view/status/hw_dash.js:194
+#: htdocs/luci-static/resources/view/status/hw_dash.js:195
 msgid "Power & Fans"
 msgstr ""
 
@@ -1512,7 +1567,7 @@ msgstr ""
 msgid "Present, but not installed with apk"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:122
+#: htdocs/luci-static/resources/hwdash/cpu.js:123
 msgid "Pressure (CPU / IO, 10s)"
 msgstr ""
 
@@ -1527,7 +1582,7 @@ msgstr ""
 msgid "Probe the IPv%d targets below"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:70
+#: htdocs/luci-static/resources/hwdash/alerts.js:94
 msgid "Processes killed for lack of memory"
 msgstr ""
 
@@ -1563,15 +1618,15 @@ msgstr ""
 msgid "QMI Cellular"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:412
+#: htdocs/luci-static/resources/hwdash/storage.js:416
 msgid "R: %d / W: %d"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:411
+#: htdocs/luci-static/resources/hwdash/storage.js:415
 msgid "R: %s / W: %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:291
+#: htdocs/luci-static/resources/hwdash/storage.js:295
 msgid "R: %s | W: %s"
 msgstr ""
 
@@ -1579,8 +1634,12 @@ msgstr ""
 msgid "RAM Disk (/tmp)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:74
+#: htdocs/luci-static/resources/hwdash/alerts.js:98
 msgid "RAM disk filling up"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/cpu.js:94
+msgid "RX %d%%"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/wifi.js:165
@@ -1595,7 +1654,7 @@ msgstr ""
 msgid "Relay bridge"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:158
+#: htdocs/luci-static/resources/hwdash/storage.js:162
 msgid "Reliability degraded"
 msgstr ""
 
@@ -1667,12 +1726,12 @@ msgstr ""
 msgid "Reverting…"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:289
+#: htdocs/luci-static/resources/hwdash/storage.js:293
 msgid "Root FS"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:340
-#: htdocs/luci-static/resources/hwdash/storage.js:351
+#: htdocs/luci-static/resources/hwdash/storage.js:344
+#: htdocs/luci-static/resources/hwdash/storage.js:355
 msgid "Rootfs Total"
 msgstr ""
 
@@ -1695,7 +1754,7 @@ msgstr ""
 msgid "Rx: %d/%d | Tx: %d/%d"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/status/hw_dash.js:148
+#: htdocs/luci-static/resources/view/status/hw_dash.js:149
 msgid "SHOW GRAPH"
 msgstr ""
 
@@ -1721,7 +1780,7 @@ msgid ""
 "staged here."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:81
+#: htdocs/luci-static/resources/hwdash/system.js:84
 msgid ""
 "Saved by pstore in /sys/fs/pstore and kept until deleted, so it marks a "
 "crash at that time rather than proving the latest boot crashed. Delete the "
@@ -1740,7 +1799,7 @@ msgstr ""
 msgid "Seen as"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:201
+#: htdocs/luci-static/resources/hwdash/storage.js:205
 msgid "Segments (Valid/Dirty/Free)"
 msgstr ""
 
@@ -1756,36 +1815,36 @@ msgstr ""
 msgid "Signal"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:83
+#: htdocs/luci-static/resources/hwdash/system.js:86
 msgid "SoC Family"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:85
+#: htdocs/luci-static/resources/hwdash/system.js:88
 msgid "SoC ID"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:86
+#: htdocs/luci-static/resources/hwdash/system.js:89
 msgid "SoC Revision"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:87
+#: htdocs/luci-static/resources/hwdash/system.js:90
 msgid "SoC Serial"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:217
+#: htdocs/luci-static/resources/hwdash/cpu.js:229
 msgid "Soft IRQ"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:158
+#: htdocs/luci-static/resources/hwdash/storage.js:162
 msgid "Spare below threshold"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/ports.js:176
-#: htdocs/luci-static/resources/hwdash/storage.js:430
+#: htdocs/luci-static/resources/hwdash/storage.js:434
 msgid "Speed:"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:193
+#: htdocs/luci-static/resources/hwdash/storage.js:197
 msgid "SquashFS Root Image"
 msgstr ""
 
@@ -1809,20 +1868,20 @@ msgstr ""
 msgid "Swap"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:73
+#: htdocs/luci-static/resources/hwdash/system.js:76
 msgid "Synced"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:73
+#: htdocs/luci-static/resources/hwdash/system.js:76
 msgid "Synced (stratum %d)"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:214
+#: htdocs/luci-static/resources/hwdash/cpu.js:226
 msgid "System"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:126
-#: htdocs/luci-static/resources/view/status/hw_dash.js:193
+#: htdocs/luci-static/resources/hwdash/system.js:129
+#: htdocs/luci-static/resources/view/status/hw_dash.js:194
 msgid "System Info"
 msgstr ""
 
@@ -1830,7 +1889,7 @@ msgstr ""
 msgid "System Status"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:131
+#: htdocs/luci-static/resources/hwdash/cpu.js:132
 msgid "System Tasks"
 msgstr ""
 
@@ -1869,7 +1928,7 @@ msgstr ""
 msgid "Target"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:113
+#: htdocs/luci-static/resources/hwdash/cpu.js:114
 msgid "Tasks (Run/Total)"
 msgstr ""
 
@@ -1877,7 +1936,7 @@ msgstr ""
 msgid "Temperature approaching limit"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:158
+#: htdocs/luci-static/resources/hwdash/storage.js:162
 msgid "Temperature threshold"
 msgstr ""
 
@@ -1907,6 +1966,12 @@ msgstr ""
 #: htdocs/luci-static/resources/hwdash/nat.js:40
 msgid ""
 "The classification of this network address cannot be definitively determined."
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:73
+msgid ""
+"The hardware watchdog reboots the router if the system stops responding for "
+"longer than the timeout."
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/ping.js:288
@@ -1946,13 +2011,13 @@ msgstr ""
 msgid "The requested interface name is not valid."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:86
+#: htdocs/luci-static/resources/hwdash/alerts.js:110
 msgid ""
 "The router clock is not synced to NTP; HTTPS, encrypted DNS and log times "
 "depend on it"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/status/hw_dash.js:249
+#: htdocs/luci-static/resources/view/status/hw_dash.js:250
 msgid "The router is not responding. Showing data from %s."
 msgstr ""
 
@@ -1968,8 +2033,8 @@ msgstr ""
 msgid "Theoretical Max"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/thermal.js:80
-#: htdocs/luci-static/resources/view/status/hw_dash.js:198
+#: htdocs/luci-static/resources/hwdash/thermal.js:102
+#: htdocs/luci-static/resources/view/status/hw_dash.js:199
 msgid "Thermal Sensors"
 msgstr ""
 
@@ -1983,9 +2048,17 @@ msgstr ""
 msgid "This interface shares device %s with %s; the traffic is counted there."
 msgstr ""
 
+#: htdocs/luci-static/resources/hwdash/thermal.js:101
+msgid "Throttling"
+msgstr ""
+
 #: htdocs/luci-static/resources/hwdash/ports.js:48
 #: htdocs/luci-static/resources/hwdash/ports.js:121
 msgid "Throughput:"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/storage.js:155
+msgid "Time Over Temperature"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/memory.js:52
@@ -2006,11 +2079,11 @@ msgstr ""
 msgid "Transport"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:449
+#: htdocs/luci-static/resources/hwdash/storage.js:453
 msgid "Type:"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:179
+#: htdocs/luci-static/resources/hwdash/storage.js:183
 msgid "UBI / NAND Flash"
 msgstr ""
 
@@ -2027,12 +2100,12 @@ msgstr ""
 msgid "USB Host Controllers"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:40
+#: htdocs/luci-static/resources/hwdash/alerts.js:64
 msgid "Uncorrectable flash errors"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/nat.js:40
-#: htdocs/luci-static/resources/hwdash/storage.js:446
+#: htdocs/luci-static/resources/hwdash/storage.js:450
 #: htdocs/luci-static/resources/hwdash/wan.js:61
 msgid "Unknown"
 msgstr ""
@@ -2053,7 +2126,7 @@ msgstr ""
 msgid "Unsaved changes — press Save to apply."
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:120
+#: htdocs/luci-static/resources/hwdash/cpu.js:121
 msgid "Uptime"
 msgstr ""
 
@@ -2066,12 +2139,12 @@ msgstr ""
 msgid "Urgent"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:356
+#: htdocs/luci-static/resources/hwdash/storage.js:360
 msgid "Usable Free"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/memory.js:44
-#: htdocs/luci-static/resources/hwdash/storage.js:355
+#: htdocs/luci-static/resources/hwdash/storage.js:359
 msgid "Usable Total"
 msgstr ""
 
@@ -2079,11 +2152,11 @@ msgstr ""
 msgid "Used"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/cpu.js:212
+#: htdocs/luci-static/resources/hwdash/cpu.js:224
 msgid "User"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:200
+#: htdocs/luci-static/resources/hwdash/storage.js:204
 msgid "Utilization"
 msgstr ""
 
@@ -2111,7 +2184,7 @@ msgstr ""
 msgid "Volumes"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:113
+#: htdocs/luci-static/resources/hwdash/system.js:116
 msgid "Vulnerable"
 msgstr ""
 
@@ -2120,7 +2193,7 @@ msgid "WAN Link"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/wan.js:176
-#: htdocs/luci-static/resources/view/status/hw_dash.js:196
+#: htdocs/luci-static/resources/view/status/hw_dash.js:197
 msgid "WAN Uptime Status"
 msgstr ""
 
@@ -2132,17 +2205,21 @@ msgstr ""
 msgid "WAN Uptime Status Probing Targets"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:98
+#: htdocs/luci-static/resources/hwdash/alerts.js:122
 msgid "WAN down"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:101
+#: htdocs/luci-static/resources/hwdash/alerts.js:125
 msgid "WAN unstable"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/storage.js:8
 #: htdocs/luci-static/resources/hwdash/storage.js:117
 msgid "Warning"
+msgstr ""
+
+#: htdocs/luci-static/resources/hwdash/system.js:72
+msgid "Watchdog"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/system.js:31
@@ -2162,12 +2239,12 @@ msgid "Which WAN interfaces the uptime, NAT type and alert cards report on."
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/clients.js:76
-#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+#: htdocs/luci-static/resources/view/status/hw_dash.js:198
 msgid "Wi-Fi Clients"
 msgstr ""
 
 #: htdocs/luci-static/resources/hwdash/wifi.js:122
-#: htdocs/luci-static/resources/view/status/hw_dash.js:197
+#: htdocs/luci-static/resources/view/status/hw_dash.js:198
 msgid "Wi-Fi PHY & Spectrum"
 msgstr ""
 
@@ -2179,15 +2256,19 @@ msgstr ""
 msgid "ZRAM"
 msgstr ""
 
+#: htdocs/luci-static/resources/hwdash/system.js:72
+msgid "active"
+msgstr ""
+
 #: htdocs/luci-static/resources/hwdash/ports.js:133
 msgid "autoneg %s · pause %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:185
+#: htdocs/luci-static/resources/hwdash/storage.js:189
 msgid "eMMC / SD Health"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/storage.js:196
+#: htdocs/luci-static/resources/hwdash/storage.js:200
 msgid "f2fs Statistics"
 msgstr ""
 
@@ -2195,15 +2276,19 @@ msgstr ""
 msgid "full %.1f%%"
 msgstr ""
 
+#: htdocs/luci-static/resources/hwdash/system.js:72
+msgid "inactive"
+msgstr ""
+
 #: htdocs/luci-static/resources/hwdash/system.js:66
 msgid "limited — install lscpu for more"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:42
+#: htdocs/luci-static/resources/hwdash/alerts.js:66
 msgid "mtd%d (%s): %d corrected since baseline, ECC strength %d"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/alerts.js:40
+#: htdocs/luci-static/resources/hwdash/alerts.js:64
 msgid "mtd%d (%s): %d uncorrectable since baseline"
 msgstr ""
 
@@ -2227,7 +2312,7 @@ msgstr ""
 msgid "this architecture"
 msgstr ""
 
-#: htdocs/luci-static/resources/hwdash/system.js:79
+#: htdocs/luci-static/resources/hwdash/system.js:82
 msgid "time unknown"
 msgstr ""
 
@@ -2245,7 +2330,7 @@ msgstr ""
 msgid "⇕ Rearrange Cards"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/status/hw_dash.js:218
+#: htdocs/luci-static/resources/view/status/hw_dash.js:219
 msgid "⚙ Settings"
 msgstr ""
 

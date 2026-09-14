@@ -21,6 +21,26 @@ function degrees(v) {
 	return v > 1000 ? v / 1000 : v;
 }
 
+// Channels that report a number without measuring anything: an unwired input
+// reading exactly 0 °C with no limits, and NVMe "Sensor N" slots that some
+// firmware fills with a staircase of 1 °C steps (50, 51, 52 …).
+function placeholders(list) {
+	var skip = {}, slots = {};
+	list.forEach(function(t) {
+		if (!t.temp && degrees(t.crit) === null && degrees(t.pass) === null)
+			skip[t.type] = true;
+		var m = /^(.*) \(Sensor (\d+)\)(.*)$/.exec(t.type);
+		if (m)
+			(slots[m[1] + m[3]] = slots[m[1] + m[3]] || []).push({ n: +m[2], t: t });
+	});
+	Object.keys(slots).forEach(function(k) {
+		var s = slots[k].sort(function(a, b) { return a.n - b.n; });
+		if (s.length >= 3 && s.every(function(x, i) { return !i || x.t.temp - s[i - 1].t.temp === 1000; }))
+			s.forEach(function(x) { skip[x.t.type] = true; });
+	});
+	return skip;
+}
+
 function sensorRow() {
 	var r = {
 		dot: E('span', { class: 'hw-dot hw-dot-sm' }),
@@ -77,19 +97,49 @@ return baseclass.extend({
 		var panel = graph.panel({ views: VIEWS, defaultView: '10m', unit: ' °C', height: 170, autoRange: true, csv: exportCsv });
 		var graphBox = E('div', { class: 'hw-therm-graph' }, [panel.el]);
 		var cols = E('div', { class: 'hw-cols hw-sensor-cols' });
-		var node = E('div', { class: 'hw-card wide' }, [ui.cardHead(_('Thermal Sensors'), [toggle]), graphBox, cols]);
-		var hist = {}, rows = {}, layout = null;
+		var throttleList = E('div', { class: 'hw-stats-list' });
+		var throttleBox = E('div', { class: 'hw-throttle', style: 'display:none' }, [ui.divider(), E('h4', { class: 'hw-subhead' }, _('Throttling')), throttleList]);
+		var node = E('div', { class: 'hw-card wide' }, [ui.cardHead(_('Thermal Sensors'), [toggle]), graphBox, cols, throttleBox]);
+		var hist = {}, rows = {}, throttleRows = {}, layout = null;
 
 		node.style.display = 'none';
+
+		// Shown only while something has throttled: x86 counts since boot, and
+		// cooling devices holding a CPU or radio back right now. Devices of one
+		// type (x86 has one per CPU) share a row showing the deepest step.
+		function updateThrottle(th) {
+			var list = [];
+			if (th && (th.core > 0 || th.pkg > 0))
+				list.push({ key: 'cpu', label: _('CPU'), val: _('%d core / %d package events since boot, %s in total')
+					.format(th.core, th.pkg, th.ms < 1000 ? th.ms + ' ms' : ui.fmtDurationFull(th.ms / 1000)) });
+			var byType = {};
+			((th && th.cooling) || []).forEach(function(c) {
+				var g = byType[c.type] || (byType[c.type] = { n: 0, cur: 0, max: c.max });
+				g.n++;
+				g.cur = Math.max(g.cur, c.cur);
+			});
+			Object.keys(byType).forEach(function(type) {
+				var g = byType[type];
+				list.push({ key: type, label: g.n > 1 ? type + ' ×' + g.n : type, val: _('Held at cooling step %d of %d').format(g.cur, g.max) });
+			});
+			throttleBox.style.display = list.length ? '' : 'none';
+			ui.syncRows(throttleList, throttleRows, list, function(r) { return r.key; }, function() {
+				var label = E('span', { class: 'hw-stat-label' }), val = E('span', { class: 'hw-stat-value', style: 'color:#ffb300' });
+				return { el: E('div', { class: 'hw-stat-row hw-row-sm hw-row-wrap' }, [label, val]), label: label, val: val };
+			}, function(e, r) {
+				ui.setText(e.label, r.label);
+				ui.setText(e.val, r.val);
+			});
+		}
 
 		return {
 			cards: { thermal: node },
 			views: { therm_graph: { node: graphBox, button: toggle } },
 			update: function(info) {
-				var sensors = [], seen = {};
+				var sensors = [], seen = {}, skip = placeholders(info.thermals || []);
 				(info.thermals || []).slice().sort(function(a, b) { return a.type.localeCompare(b.type); }).forEach(function(t) {
 					var name = t.type.replace(/_/g, '-').toUpperCase();
-					if (seen[name])
+					if (seen[name] || skip[t.type])
 						return;
 					seen[name] = true;
 					var temp = t.temp > 1000 ? t.temp / 1000 : t.temp;
@@ -126,6 +176,7 @@ return baseclass.extend({
 					sensors.forEach(function(s, i) { lists[i % n].appendChild((rows[s.name] = sensorRow()).el); });
 				}
 				sensors.forEach(function(s) { patchRow(rows[s.name], s); });
+				updateThrottle(info.throttle);
 
 				var plotted = {};
 				sensors.forEach(function(s) { if (hist[s.name].data.length >= 2) plotted[s.name] = hist[s.name]; });

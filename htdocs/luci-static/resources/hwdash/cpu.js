@@ -81,18 +81,19 @@ return baseclass.extend({
 			freqGrid
 		]);
 		var coresCard = ui.card(_('Per-Core Usage'), [coresBox, freqSection], 'wide');
-		var cores = {}, coreCount = -1;
+		var cores = {}, coreCount = -1, prevRx = null;
 
-		function updateCore(idx, pct, khz) {
+		function updateCore(idx, pct, khz, rx) {
 			var c = cores[idx];
 			if (!c) {
 				c = cores[idx] = barItem(_('Core %d').format(idx));
-				c.freq = E('div', { class: 'hw-core-freq' });
+				c.freq = E('div', { class: 'hw-core-freq', title: _('Clock speed, and this core’s share of received-packet processing (NET_RX) since the last update') });
 				coresBox.appendChild(E('div', { class: 'hw-core-cell' }, [c.el, c.freq]));
 			}
 			setBar(c, pct, pct.toFixed(1) + '%', ui.loadColor(pct));
-			ui.setText(c.freq, khz ? ui.fmtKHz(khz) : '');
-			c.freq.style.display = khz ? '' : 'none';
+			var text = [khz ? ui.fmtKHz(khz) : '', rx != null ? _('RX %d%%').format(Math.round(rx)) : ''].filter(Boolean).join(' · ');
+			ui.setText(c.freq, text);
+			c.freq.style.display = text ? '' : 'none';
 		}
 
 		function updateInfo(info) {
@@ -193,6 +194,17 @@ return baseclass.extend({
 				if (info.model)
 					ui.setText(dial.heading, info.model);
 
+				// Each core's share of received-packet processing since the last
+				// poll: one core near 100% is carrying all the traffic.
+				var rx = info.net_rx || [], rxShare = [];
+				if (prevRx && prevRx.length === rx.length && count > 1) {
+					var d = rx.map(function(v, i) { return Math.max(0, v - prevRx[i]); });
+					var sum = d.reduce(function(a, b) { return a + b; }, 0);
+					if (sum > 0)
+						rxShare = d.map(function(v) { return v / sum * 100; });
+				}
+				prevRx = rx;
+
 				info.cpus.forEach(function(line) {
 					var s = parseStat(line), p = prev[s.name];
 					prev[s.name] = s;
@@ -202,7 +214,7 @@ return baseclass.extend({
 					var pct = total > 0 ? Math.max(0, Math.min(100, 100 * (total - idle) / total)) : 0;
 					if (s.name !== 'cpu') {
 						var idx = parseInt(s.name.slice(3), 10);
-						updateCore(idx, pct, info.freqs && info.freqs[idx]);
+						updateCore(idx, pct, info.freqs && info.freqs[idx], rxShare[idx]);
 						return;
 					}
 					dial.set(Math.round(pct), _('%d Cores').format(count));

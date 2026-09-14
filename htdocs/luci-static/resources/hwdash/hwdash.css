@@ -320,6 +320,7 @@
 /* Thermal */
 
 .hw-therm-graph { width: 100%; margin-bottom: 16px; }
+.hw-throttle { width: 100%; }
 .hw-sensor { padding: 5px 0; border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.1)); }
 .hw-sensor:last-child { border-bottom: none; }
 .hw-sensor .hw-stat-row { margin-bottom: 0; }
