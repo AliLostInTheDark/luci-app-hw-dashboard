@@ -2,79 +2,51 @@
 
 . /usr/share/hwdash/rpcd-common.sh
 
+# Builds " mac=name mac=name ..." into _macname with builtin reads only.
+# odhcpd's hosts files are keyed by IP, so a station's MAC reaches its name
+# through the ARP table; a dnsmasq lease carries the MAC directly and wins.
+_station_names() {
+	_ipname=""; _macname=""
+	for _hf in /tmp/hosts/odhcpd.hosts.* /tmp/hosts/odhcpd; do
+		[ -f "$_hf" ] || continue
+		while read -r _hip _hn _; do
+			case "$_hip" in ''|\#*) continue ;; esac
+			[ -n "$_hn" ] && _ipname="$_ipname $_hip=$_hn"
+		done < "$_hf"
+	done
+	if [ -f /tmp/dhcp.leases ]; then
+		while read -r _ _lm _li _ln _; do
+			case "$_ln" in ''|'*') continue ;; esac
+			[ -n "$_lm" ] && _macname="$_macname $_lm=$_ln"
+			[ -n "$_li" ] && _ipname="$_ipname $_li=$_ln"
+		done < /tmp/dhcp.leases
+	fi
+	[ -f /proc/net/arp ] || return
+	while read -r _aip _ _ _amac _ _; do
+		case "$_aip" in ''|IP*) continue ;; esac
+		case "$_amac" in ''|00:00:00:00:00:00) continue ;; esac
+		case "$_macname" in *" $_amac="*) continue ;; esac
+		case "$_ipname" in
+			*" $_aip="*)
+				_t=${_ipname#*" $_aip="}
+				_macname="$_macname $_amac=${_t%% *}"
+				;;
+		esac
+	done < /proc/net/arp
+}
 
-case "$1" in
-	list)
-		echo '{ "wifi_clients": { } }'
-		;;
-	call)
-		case "$2" in
-			wifi_clients)
-				# Associated stations, per VAP.
-				#
-				# `iw station dump` rather than `iwinfo assoclist`: only iw
-				# reports rx/tx bytes, retries, failures and connected time,
-				# which are the numbers that make the card worth having at all.
-				#
-				# Deliberately its own method rather than part of info: this
-				# costs one fork per VAP, and putting that on the 3s info poll
-				# would hand back a good part of the poll-cost work.
-				HWDASH_NOW=$(date +%s 2>/dev/null)
-
-				# Station name lookup, built entirely with builtin reads.
-				# odhcpd -- what these builds use once dnsmasq's DHCP is off --
-				# writes hosts-format files keyed by IP, not MAC, so a station's
-				# MAC has to be resolved through the ARP table to reach a name.
-				# dnsmasq's lease file, where present, carries the MAC directly
-				# and is preferred since it needs no ARP entry to be useful.
-				_ipname=""; _macname=""
-				for _hf in /tmp/hosts/odhcpd.hosts.* /tmp/hosts/odhcpd; do
-					[ -f "$_hf" ] || continue
-					while read -r _hip _hn _; do
-						case "$_hip" in ''|\#*) continue ;; esac
-						[ -n "$_hn" ] && _ipname="$_ipname $_hip=$_hn"
-					done < "$_hf"
-				done
-				if [ -f /tmp/dhcp.leases ]; then
-					while read -r _ _lm _li _ln _; do
-						case "$_ln" in ''|'*') continue ;; esac
-						[ -n "$_lm" ] && _macname="$_macname $_lm=$_ln"
-						[ -n "$_li" ] && _ipname="$_ipname $_li=$_ln"
-					done < /tmp/dhcp.leases
-				fi
-				if [ -f /proc/net/arp ]; then
-					while read -r _aip _ _ _amac _ _; do
-						case "$_aip" in ''|IP*) continue ;; esac
-						case "$_amac" in ''|00:00:00:00:00:00) continue ;; esac
-						# A dnsmasq lease already named this MAC; don't override.
-						case "$_macname" in *" $_amac="*) continue ;; esac
-						case "$_ipname" in
-							*" $_aip="*)
-								_t=${_ipname#*" $_aip="}
-								_macname="$_macname $_amac=${_t%% *}"
-								;;
-						esac
-					done < /proc/net/arp
-				fi
-
-				WC_ITEMS=""; WC_FIRST=1; WC_AVAIL=0
-				if command -v iw >/dev/null; then
-					WC_AVAIL=1
-					for _nd in /sys/class/net/*; do
-						[ -e "$_nd/phy80211" ] || continue
-						_ifn=${_nd##*/}
-						read_file _wphy "$_nd/phy80211/name" ""
-						_frag=$(iw dev "$_ifn" station dump 2>/dev/null | awk -v ifn="$_ifn" -v phy="$_wphy" -v names="$_macname" '
-	BEGIN {
-		mac = ""
-		n = 0
+# JSON objects, comma-separated, for the stations on VAP $1 (radio $2).
+# `iw station dump`, not `iwinfo assoclist`: only iw reports bytes, retries,
+# failures and connected time.
+_vap_stations() {
+	iw dev "$1" station dump 2>/dev/null | awk -v ifn="$1" -v phy="$2" -v names="$_macname" '
+	function reset() {
 		sig = 0; sigavg = 0; inact = 0; conn = 0; rxb = 0; txb = 0; rxp = 0
 		txp = 0; txr = 0; txf = 0; rxrate = 0; txrate = 0
 		rxinfo = ""; txinfo = ""; auth = 0
 	}
 	function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
-	# names is " mac=name mac=name ...", so a leading space anchors the key and
-	# stops one MAC matching inside another.
+	# The leading space anchors the key, so one MAC cannot match inside another.
 	function nameof(m,   p, t) {
 		p = index(names, " " m "=")
 		if (p == 0) return ""
@@ -99,9 +71,7 @@ case "$1" in
 	/^Station / {
 		flush()
 		mac = $2
-		sig = 0; sigavg = 0; inact = 0; conn = 0; rxb = 0; txb = 0; rxp = 0
-		txp = 0; txr = 0; txf = 0; rxrate = 0; txrate = 0
-		rxinfo = ""; txinfo = ""; auth = 0
+		reset()
 		next
 	}
 	{
@@ -126,15 +96,33 @@ case "$1" in
 		else if (k == "rx bitrate") { rxrate = v + 0; rxinfo = modinfo(v) }
 		else if (k == "tx bitrate") { txrate = v + 0; txinfo = modinfo(v) }
 	}
-	END { flush() }')
-						[ -z "$_frag" ] && continue
-						[ $WC_FIRST -eq 0 ] && WC_ITEMS="$WC_ITEMS,"
-						WC_ITEMS="$WC_ITEMS$_frag"
-						WC_FIRST=0
-					done
-				fi
-				echo "{\"available\":$WC_AVAIL,\"clients\":[$WC_ITEMS]}"
-				;;
+	END { flush() }'
+}
+
+# Its own method rather than part of info: one fork per VAP is too much for the
+# 3 s info poll.
+_wifi_clients() {
+	_station_names
+	WC_ITEMS=""; WC_AVAIL=0
+	if command -v iw >/dev/null; then
+		WC_AVAIL=1
+		for _nd in /sys/class/net/*; do
+			[ -e "$_nd/phy80211" ] || continue
+			read_file _wphy "$_nd/phy80211/name" ""
+			_frag=$(_vap_stations "${_nd##*/}" "$_wphy")
+			[ -n "$_frag" ] && WC_ITEMS="$WC_ITEMS${WC_ITEMS:+,}$_frag"
+		done
+	fi
+	echo "{\"available\":$WC_AVAIL,\"clients\":[$WC_ITEMS]}"
+}
+
+case "$1" in
+	list)
+		echo '{ "wifi_clients": { } }'
+		;;
+	call)
+		case "$2" in
+			wifi_clients) _wifi_clients ;;
 		esac
 		;;
 esac

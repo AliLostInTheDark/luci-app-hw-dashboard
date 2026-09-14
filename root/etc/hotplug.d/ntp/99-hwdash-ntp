@@ -1,8 +1,8 @@
 #!/bin/sh
-# Hardware Dashboard: record busybox ntpd's sync state. sysntpd calls its
-# hotplug hook on every stratum change, clock step, loss of sync and
-# periodic poll, passing ACTION and stratum. Written outside /tmp/hwdash*
-# so the cache wipe on a package upgrade does not lose it.
+# Hardware Dashboard: record busybox ntpd's sync state. sysntpd runs this hook,
+# with ACTION and stratum set, on every stratum change, clock step, sync loss
+# and periodic poll. Kept out of /tmp/hwdash* so the cache wipe on a package
+# upgrade does not lose it.
 [ -n "$ACTION" ] && {
 	printf '%s %s %s\n' "$ACTION" "${stratum:--}" "$(date +%s)" > /var/run/hwdash-ntp.state.$$ &&
 		mv /var/run/hwdash-ntp.state.$$ /var/run/hwdash-ntp.state

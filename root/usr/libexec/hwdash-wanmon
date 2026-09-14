@@ -1,103 +1,90 @@
 #!/bin/sh
-# Background WAN-quality collector for luci-app-hw-dashboard.
-# Runs continuously in RAM (/tmp, tmpfs) to track per-WAN latency/
-# uptime statistics since the collector last (re)started -- none of
-# that measurement data ever touches flash.
+# Background WAN-quality collector for luci-app-hw-dashboard. Measurements
+# live only in tmpfs; the tracked-WAN list is the one thing kept on flash.
 #
-# One exception, and only one: the list of which interfaces are WANs
-# (PERSIST_TRACKED below). It is written when that set changes and at
-# no other time, because discovery cannot rediscover a link that is
-# down, so without it a WAN that is offline across a reboot vanishes
-# from the dashboard instead of reporting the outage.
-#
-# On an mwan3-managed router with more than one live WAN, a plain
-# ping/curl bound to a non-default WAN's device or source IP silently
-# fails or (worse) silently routes out the WRONG interface: mwan3's
-# policy routing is driven by an nftables fwmark that's only applied
-# to traffic already matching one of its own rules, not to arbitrary
-# locally-generated packets bound by device/source alone. mwan3 solves
-# this for its own tracker via an LD_PRELOAD shim
-# (libwrap_mwan3_sockopt.so) that sets the correct fwmark on the
-# socket before routing happens; we reuse that same mechanism here
-# instead of reinventing it, but only where it's actually needed -- a
-# single default WAN (no mwan3 at all) has no fwmark to look up and
-# doesn't need the wrapper, so device-bound ping/curl works directly.
+# mwan3's policy routing keys on an fwmark it sets only on traffic matching
+# its own rules, so a probe bound by device or source alone can leave via the
+# wrong WAN. mwan3's LD_PRELOAD shim sets that mark, and is reused wherever an
+# interface has an mwan3 rule.
 
 trap '_j=$(jobs -p); [ -n "$_j" ] && kill $_j 2>/dev/null; exit 0' TERM INT
 
 RINGDIR=/tmp/hwdash_wanmon
 INTERVAL=2
-# A hotplug event forces immediate discovery on a network transition. This
-# long interval is only a safety refresh, so the collector does not parse the
-# full netifd dump every few seconds while the router is idle.
+# Hotplug forces rediscovery on every transition; this is only a safety net.
 DISCOVER_INTERVAL=300
 ISP_RETRY_INTERVAL=60
-# 288 five-minute buckets form a rolling 24-hour availability window.
-# Counts live only in tmpfs, avoiding flash writes and expensive log scans.
+# 288 five-minute buckets: a rolling 24 h availability window.
 WINDOW_BUCKET_SECS=300
 WINDOW_BUCKETS=288
 PING_CAP=4
-# Number of consecutive probe failures required before a link is declared
-# DOWN. A single missed ping on an otherwise-healthy v6 link (ICMP6
-# occasionally filtered by ISP) no longer flicks the status red or clears the
-# latency display.
+# Misses in a row before a link is declared down, so one filtered ICMPv6
+# reply does not flip it red.
 MISS_THRESHOLD=3
-# How often the netifd state of a DOWN interface is re-read to explain WHY it
-# is down. That costs a ubus fork, so it is not done on every tick -- but the
-# answer does change while an outage runs (a cable goes back in before DHCP
-# has handed out a lease), so it cannot be resolved once and cached either.
+# How often a down interface's netifd state is re-read to explain why.
 REASON_INTERVAL=20
-# Built-in fallbacks. Only reached when a user-supplied target list has no
-# distinct second entry to fail over to -- pinging the same host twice
-# proves nothing about the link when that one host is simply unreachable.
+# Fallbacks for a target list with no distinct second entry to fail over to.
 ANCHOR4=1.1.1.1
 BACKUP4=8.8.8.8
 ANCHOR6=2606:4700:4700::1111
 BACKUP6=2001:4860:4860::8888
 WRAP=/lib/mwan3/libwrap_mwan3_sockopt.so.1.0
 
-# Where ASN lookups go when the box's own resolver should not see them.
-# Tried in order; the v6 entry is what makes this work on a v6-only uplink,
-# and is only ever reached if both v4 servers are unreachable.
+# Public resolvers used instead of the local one, in order; the v6 entry keeps
+# a v6-only uplink working.
 ASN_DNS_LIST="1.1.1.1 8.8.8.8 2606:4700:4700::1111"
 ASN_DNS4=1.1.1.1
-# Set by detect_asn_dns() below: empty = use the system resolver.
+# Empty means use the system resolver; set by detect_asn_dns.
 ASN_DNS=""
 
-# Cymru ASN lookups are the only DNS this collector generates, but a
-# filtering/logging resolver charts every single query it sees, so a handful
-# of WANs re-resolving on each reconnect shows up as recurring noise in the
-# user's DNS log. dnsmasq does not log per-query by default, so when it is the
-# resolver we leave the lookups on the system path. Anything else -- AdGuard
-# Home, Pi-hole, Unbound -- gets bypassed in favour of a public recursive
-# resolver, so none of our queries land in its log at all.
-#
-# Resolved once at startup and cached: the resolver on a box does not change
-# without a service restart, and probing per lookup would cost more than the
-# lookup does. Zero per-tick cost.
+PERSIST_DIR=/etc/hwdash
+PERSIST_TRACKED="$PERSIST_DIR/tracked"
+# Optional external mirror (e.g. a USB drive) from Settings, relayed by rpcd
+# through .persist_dir since this daemon does not read UCI per tick.
+PERSISTDIR=""
+PERSIST_SYNC_INTERVAL=600
+LAST_PERSIST_SYNC=0
+
+DEFAULT_TARGETS4="1.1.1.1 8.8.8.8 9.9.9.9 1.0.0.1 8.8.4.4 149.112.112.112"
+DEFAULT_TARGETS6="2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe 2606:4700:4700::1001 2001:4860:4860::8844 2620:fe::9"
+TARGETS4_LIST="$DEFAULT_TARGETS4"
+TARGETS6_LIST="$DEFAULT_TARGETS6"
+# Raw user targets behind the two lists, to spot a settings change.
+RAW_TGT4=""
+RAW_TGT6=""
+# Uptime at which to retry an incomplete resolution. procd starts this long
+# before any resolver is usable, so a failed first attempt is the norm.
+TGT_RETRY_AT=""
+TGT_RETRY_INTERVAL=300
+
+IFACE_LIST=""
+ACTIVE_IFACES=""
+TRACKED_IFACES=""
+LAST_DISCOVER=0
+BIND_IF=""
+
+# A filtering resolver (AdGuard Home, Pi-hole, Unbound) logs every query, so
+# lookups bypass it for a public one; dnsmasq does not log per query and is
+# kept. Resolved once: the resolver does not change without a restart.
 detect_asn_dns() {
 	ASN_DNS=""
 	_owner=""
-	# The listener on :53 is the authoritative answer -- resolv.conf may point
-	# at 127.0.0.1 for either implementation.
+	# The :53 listener is authoritative; resolv.conf says 127.0.0.1 for either.
 	if command -v netstat >/dev/null 2>&1; then
 		_owner=$(netstat -lnp 2>/dev/null | awk '$4 ~ /:53$/ && $NF ~ /\// {
 			n = split($NF, a, "/"); print a[n]; exit }')
 	fi
 	if [ -z "$_owner" ]; then
-		# No usable netstat: fall back to "is dnsmasq the thing that's running".
 		pgrep -x dnsmasq >/dev/null 2>&1 && _owner=dnsmasq
 	fi
 	case "$_owner" in
-		dnsmasq) ;;                 # system resolver is fine, leave ASN_DNS empty
-		*) ASN_DNS="$ASN_DNS4" ;;   # anything else (incl. unknown) -> bypass
+		dnsmasq) ;;
+		*) ASN_DNS="$ASN_DNS4" ;;
 	esac
 }
-detect_asn_dns
 
-# One TXT lookup, kept off the local resolver when detect_asn_dns said so.
-# Falls back to the alternate public server rather than to the system
-# resolver: the whole point is that these queries never reach it.
+# One TXT lookup. When bypassing, it falls back to the next public server,
+# never to the system resolver.
 asn_txt() {
 	_q=$1; _outf=$2
 	if [ -z "$ASN_DNS" ]; then
@@ -110,21 +97,9 @@ asn_txt() {
 	done
 }
 
-# Pick one origin AS out of a Cymru origin lookup.
-#
-# An address can be covered by more than one announcement -- an operator's own
-# /24 sitting inside an upstream's shorter prefix is the ordinary shape -- and
-# Cymru answers with one TXT record per covering prefix. Reading the fields out
-# of every record at once turned a two-record reply into a two-LINE "ASN", and
-# the AS-name lookup built from it then asked for "AS132540\n9498.asn.cymru.com",
-# which cannot resolve. The v4 path returned silently on the empty name and the
-# card read "Unknown ISP" for good; the v6 path rejected the value as
-# non-numeric and gave up just as quietly. Reported from the field against
-# Netplus (AS132540), whose address sits inside a second, larger block.
-#
-# The most specific prefix is the one traffic is actually routed to, so it
-# names the operator the subscriber really buys service from. Falling back to
-# the first record keeps a reply whose prefix field is unparseable usable.
+# Cymru answers one TXT record per covering prefix (an operator's /24 inside
+# its upstream's block). The most specific prefix names the operator actually
+# selling the service; the first record covers an unparseable prefix field.
 asn_pick() {
 	awk -F'|' '
 		BEGIN { len = 0; best = "" }
@@ -142,45 +117,42 @@ asn_pick() {
 		END { gsub(/[^0-9]/, "", best); print best }' "$1" 2>/dev/null
 }
 
-# The operator name from an AS<n>.asn.cymru.com reply. One record is expected,
-# but only ever read the first, so a duplicate answer cannot concatenate two
-# names into one string the same way the origin lookup did above.
+# Only the first record, so a duplicate answer cannot join two names.
 asn_org() {
 	sed -n '/text/{s/.*= "//;s/".*//;s/^\([^|]*|\)\{4\}//p;q}' "$1" 2>/dev/null
 }
 
-# Resolve a hostname to a single address, honouring the same bypass.
-#
-# The WAN probe targets themselves are IP literals in the normal case, so they
-# generate no DNS at all -- but the Settings field accepts a domain, and that
-# name has to be resolved somewhere. Doing it via ping (as this used to) hands
-# the query to the system resolver, i.e. straight into the log we are trying
-# to stay out of. Runs only when the target list changes, not per tick.
+# The first address after "Name:"; nslookup prints its server's own address
+# before the answer.
+nslookup_addr() {
+	awk 'BEGIN { seen = 0 } /^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$1" 2>/dev/null
+}
+
+# Resolves a hostname probe target through the same bypass. Runs only when
+# the target list changes.
 lookup_host() {
 	_h=$1; _fam=$2; _tag=$3
 	_qt=A; [ "$_fam" = "6" ] && _qt=AAAA
-	# Per-caller scratch file: interface lookups run concurrently, one
-	# subshell each, and would otherwise all write the same path.
+	# Per-caller scratch file: interface jobs resolve concurrently.
 	_lf="$RINGDIR/.probe.${_tag:-cfg}.host"
 	_ip=""
 	if [ -n "$ASN_DNS" ]; then
 		for _srv in $ASN_DNS_LIST; do
 			run_capped "$PING_CAP" "$_lf" nslookup -type="$_qt" "$_h" "$_srv"
-			_ip=$(awk 'BEGIN { seen = 0 } /^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
+			_ip=$(nslookup_addr "$_lf")
 			[ -n "$_ip" ] && break
 		done
 	else
 		run_capped "$PING_CAP" "$_lf" nslookup -type="$_qt" "$_h"
-		_ip=$(awk 'BEGIN { seen = 0 } /^Name:/ { seen = 1 } seen && /^Address/ { print $NF; exit }' "$_lf" 2>/dev/null)
+		_ip=$(nslookup_addr "$_lf")
 	fi
-	# nslookup prints the server's own address before the answer section; a
-	# malformed reply must not become a probe target.
+	# A malformed reply must not become a probe target.
 	case "$_ip" in *[!0-9a-fA-F.:]*|'') _ip="" ;; esac
 	printf '%s' "$_ip"
 }
 
-# Globally routable IPv6? Excludes loopback, link-local (fe80::/10) and
-# unique-local (fc00::/7) -- none of which any registry can attribute.
+# Globally routable IPv6: not loopback, link-local (fe80::/10) or unique-local
+# (fc00::/7), none of which a registry can attribute.
 is_public_ip6() {
 	case "$1" in
 		''|::1|::) return 1 ;;
@@ -190,9 +162,8 @@ is_public_ip6() {
 	return 1
 }
 
-# Globally routable IPv4, as far as a string can tell: not RFC 1918, not
-# the shared CGNAT block (RFC 6598), loopback, link-local, the IETF and
-# benchmarking blocks, multicast or reserved space.
+# Globally routable IPv4, as far as a string can tell: not RFC 1918, CGNAT
+# (RFC 6598), loopback, link-local, IETF/benchmark, multicast or reserved.
 is_public_ip4() {
 	case "$1" in
 		''|*[!0-9.]*) return 1 ;;
@@ -204,9 +175,9 @@ is_public_ip4() {
 	return 0
 }
 
-# An interface's IPv4 next hop: netifd's default route for it (the PPPoE
-# peer, the DHCP router), else the kernel's default through its device --
-# mwan3 keeps one per routing table.
+# An interface's IPv4 next hop: netifd's default route for it (PPPoE peer,
+# DHCP router), else the kernel's default via its device (mwan3 keeps one per
+# table).
 iface_gateway4() {
 	_ig=""
 	read -r _ig <<EOF
@@ -220,9 +191,8 @@ $(ip -4 route show table all default dev "$2" 2>/dev/null)
 EOF
 }
 
-# Cymru's origin6 zone keys on the fully expanded, nibble-reversed address,
-# same shape as ip6.arpa. Handles the compressed "::" form, and avoids
-# strtonum() so it runs on busybox awk as well as gawk.
+# Fully expanded, nibble-reversed address (ip6.arpa style) for Cymru's
+# origin6 zone. Avoids strtonum() so busybox awk can run it.
 ip6_nibbles() {
 	printf '%s' "$1" | awk '
 		BEGIN { addr = ""; head = ""; tail = ""; full = ""; out = ""; n = 0; hc = 0; tc = 0 }
@@ -246,64 +216,19 @@ ip6_nibbles() {
 	}'
 }
 
-IFACE_LIST=""
-ACTIVE_IFACES=""
-TRACKED_IFACES=""
-LAST_DISCOVER=0
-
-mkdir -p "$RINGDIR"
-
-# Which WANs exist survives a cold start; how they have been performing does
-# not. Discovery can only find an interface that currently holds a default
-# route, so on a fresh /tmp a WAN that is down at that moment is invisible --
-# it never enters the tracked list and the card silently loses the one link
-# that actually needs looking at. That is a cold start on every reboot, and on
-# every package upgrade too, since postinst clears /tmp/hwdash*.
-#
-# So the membership list, and only the membership list, is kept out of tmpfs.
-# It is rewritten solely when the set of interfaces changes -- adding or
-# removing a WAN, which is a human editing the config -- never on a discovery
-# cycle and never on a tick, so the flash cost is nil in normal running. Every
-# seeded name is still put through the uci check in discover_ifaces below, so
-# an interface deleted while the router was off is dropped on the first pass
-# rather than resurrected.
-PERSIST_DIR=/etc/hwdash
-PERSIST_TRACKED="$PERSIST_DIR/tracked"
-
-# Optional second copy of the same durable state, on a directory the user
-# points at explicitly -- typically a mounted USB drive. /etc/hwdash above
-# is never optional and never goes away; this is purely additive, so a USB
-# drive that fails, fills up, or was never plugged in cannot make anything
-# worse than before the option existed.
-#
-# Set from Settings -> Persistent Storage Directory. rpcd relays it here the
-# same way it already relays the WAN probe targets (see the sourcing of
-# .wan_targets in the main loop below): rpcd owns UCI, this is a separate
-# long-running daemon that does not read UCI on every tick, so the value
-# crosses process boundaries through a small file this script sources.
-PERSISTDIR=""
+# The value ends up sourced by a root shell every tick, so it is reduced to
+# characters a mount path can use: nothing a sourced file could execute.
 load_persist_dir() {
 	_cfg_json=$(uci -q get hwdash.main.settings_json 2>/dev/null)
 	[ -z "$_cfg_json" ] && return
 	_pd=$(jsonfilter -s "$_cfg_json" -e '@.persistDir' 2>/dev/null)
-	# This value is sourced by a root shell on every tick once it is set
-	# (see the main loop), so it is reduced to the character set a real
-	# mount path can legally use before it goes anywhere near that --
-	# no quotes, no $, no backticks, nothing a sourced file could execute.
 	_pd=$(printf '%s' "$_pd" | tr -cd 'A-Za-z0-9/_.-')
 	case "$_pd" in /*) PERSISTDIR=$_pd ;; *) PERSISTDIR="" ;; esac
 }
-load_persist_dir
 
-# Is a real filesystem actually mounted at (or above) this path? A plain
-# directory that merely LOOKS like a USB mountpoint is the dangerous case:
-# right after the drive is unplugged, the original mountpoint is still there
-# as an ordinary empty directory on internal flash, and every write would
-# silently land back on it with no error at all -- quietly reintroducing the
-# exact flash-wear and power-loss risk this option exists to avoid. Checked
-# against /proc/mounts rather than trusted from the setting alone, and
-# re-checked on every use rather than cached, since a drive can be pulled at
-# any moment.
+# A real filesystem mounted at or above $1? An unplugged drive leaves its
+# mountpoint behind as a plain directory on flash that would silently take
+# the writes, so this is checked on every use, never cached.
 _persist_mount_ok() {
 	_pm_dir=$1
 	[ -d "$_pm_dir" ] || return 1
@@ -314,8 +239,7 @@ _persist_mount_ok() {
 		esac
 		case "$_pm_dir" in
 			"$_pm_mp"|"$_pm_mp"/*)
-				# Longest match wins: a path can sit under more than one
-				# listed mount (e.g. both / and /mnt/usb1).
+				# Longest match: a path can sit under both / and /mnt/usb1.
 				[ ${#_pm_mp} -gt ${#_pm_best} ] && _pm_best=$_pm_mp
 				;;
 		esac
@@ -323,19 +247,14 @@ _persist_mount_ok() {
 	[ -n "$_pm_best" ]
 }
 
-# Both copies of $RINGDIR/.tracked are rewritten from here, and nowhere
-# else: a full rediscovery and a confirmed-gone interface (see the "missing"
-# handling in process_down_iface below) both change membership and both call
-# this. cmp first, so a router whose WANs are stable writes nothing on
-# either copy for its whole uptime.
+# The only writer of both persisted .tracked copies. cmp first, so a stable
+# set of WANs never writes flash.
 mirror_tracked() {
 	if ! cmp -s "$RINGDIR/.tracked" "$PERSIST_TRACKED" 2>/dev/null; then
 		mkdir -p "$PERSIST_DIR" 2>/dev/null
 		cat "$RINGDIR/.tracked" > "$PERSIST_TRACKED" 2>/dev/null
-		# Flush it. The overlay buffers writes, so an unsynced update can be
-		# lost to an unclean shutdown -- and a power cut is exactly the
-		# reboot after which you most want to know which WANs failed to
-		# come back.
+		# The overlay buffers writes, and a power cut is exactly when this
+		# list matters.
 		sync 2>/dev/null
 	fi
 	if [ -n "$PERSISTDIR" ] && _persist_mount_ok "$PERSISTDIR"; then
@@ -346,26 +265,19 @@ mirror_tracked() {
 	fi
 }
 
-if [ ! -f "$RINGDIR/.tracked" ]; then
+# Discovery only finds a WAN that holds a route, so a fresh /tmp (every boot
+# and upgrade) is seeded with the persisted list to keep a dead WAN visible.
+seed_tracked() {
+	[ -f "$RINGDIR/.tracked" ] && return
 	if [ -f "$PERSIST_TRACKED" ]; then
 		cat "$PERSIST_TRACKED" > "$RINGDIR/.tracked" 2>/dev/null
 	elif [ -n "$PERSISTDIR" ] && [ -f "$PERSISTDIR/tracked" ] && _persist_mount_ok "$PERSISTDIR"; then
-		# Internal flash has nothing, but the external drive does -- a
-		# reflash or a fresh install onto the same USB history, which is
-		# exactly the case worth falling back for.
 		cat "$PERSISTDIR/tracked" > "$RINGDIR/.tracked" 2>/dev/null
 	fi
-fi
+}
 
-# Mirrors the 24-hour availability window (day-bucket files + summary) for
-# every tracked interface to the external persist_dir, so a real power
-# outage -- not just a graceful reboot -- does not silently reset every
-# WAN's uptime% back to 100% with no memory of what just happened. Nothing
-# equivalent exists for internal flash: the 24h window has only ever lived
-# in tmpfs, by design, because it changes constantly and $PERSIST_DIR is
-# reserved for state that changes rarely. persist_dir is the first place
-# this data can outlive a power loss at all, and only when the user has
-# opted in.
+# Mirrors the 24 h window to the external persist_dir so a power cut does not
+# reset every WAN's uptime. Never to /etc: this changes constantly.
 sync_wan_history() {
 	[ -n "$PERSISTDIR" ] || return
 	_persist_mount_ok "$PERSISTDIR" || return
@@ -380,13 +292,8 @@ sync_wan_history() {
 	done
 }
 
-# The read side of the same mirror, run once at startup only: seeds a fresh
-# tmpfs with whatever the external drive still has, so the very first
-# record_window_sample after a real power loss extends the old totals
-# instead of starting the 24h window over from empty files. Never overwrites
-# a bucket file that already exists -- that would mean this was a hotplug
-# restart or a hand-restart of the collector, not a reboot, and the tmpfs
-# copy is already the current one.
+# Startup only. A bucket that already exists means a collector restart, not a
+# reboot, so tmpfs is current and is never overwritten.
 seed_wan_history() {
 	[ -n "$PERSISTDIR" ] || return
 	_persist_mount_ok "$PERSISTDIR" || return
@@ -398,293 +305,10 @@ seed_wan_history() {
 		[ -f "$_dst" ] || cat "$_sf" > "$_dst" 2>/dev/null
 	done
 }
-seed_wan_history
-PERSIST_SYNC_INTERVAL=600
-LAST_PERSIST_SYNC=0
 
-discover_ifaces() {
-	_dump=$(ubus call network.interface dump 2>/dev/null)
-	# Bail BEFORE touching any state. Clearing first and then returning
-	# published an empty ACTIVE_IFACES while TRACKED_IFACES kept its contents,
-	# and the main loop reads exactly that pair as "every tracked WAN is now
-	# down": one transient ubus hiccup flipped every link to OFFLINE, reset its
-	# uptime streak, punched a gap in every sparkline, counted a failure
-	# against the 24h window and raised a WAN-down alert per interface.
-	#
-	# Keeping the previous view means probing carries on against the last
-	# known-good list until discovery next succeeds -- on the hotplug trigger,
-	# or at DISCOVER_INTERVAL, since the caller advances LAST_DISCOVER whether
-	# or not this returned early. Stale for a while beats wrong immediately.
-	[ -z "$_dump" ] && return
-	IFACE_LIST=""
-	_active=""
-	ACTIVE_IFACES=""
-
-	_rules4=""
-	_rules6=""
-	if [ -f "$WRAP" ]; then
-		_rules4=$(ip -f inet rule 2>/dev/null)
-		_rules6=$(ip -f inet6 rule 2>/dev/null)
-	fi
-	_names=$(printf '%s' "$_dump" | jsonfilter -e '@.interface[*].interface' 2>/dev/null)
-	_idx=0
-	# LAN is not a WAN on a router that has one, and saying otherwise is what
-	# the name filter here has always been for. But on an access point there is
-	# no WAN at all -- DHCP and the firewall are off, the uplink is simply the
-	# LAN bridge with a default route pointing at the real router -- and the
-	# same filter left the uptime card permanently empty on exactly the devices
-	# whose one uplink is the thing worth watching.
-	#
-	# So LAN is deferred rather than dropped: collected with everything else,
-	# then used only if nothing that is genuinely a WAN turned up. A router
-	# with any working WAN never reaches the promotion below, which is what
-	# keeps this from regressing into "LAN listed next to the real uplinks".
-	_lan_deferred=""
-	_lan_names=""
-	_lan_gws=""
-	for _ifn in $_names; do
-		_i=$_idx
-		_idx=$((_idx + 1))
-		case "$_ifn" in loopback) continue ;; esac
-		_is_lan=0
-		case "$_ifn" in lan|lan6) _is_lan=1 ;; esac
-
-		_up=""; _dev=""; _ip4=""; _ip6=""
-		eval "$(printf '%s' "$_dump" | jsonfilter \
-			-e "_up=@.interface[$_i].up" \
-			-e "_dev=@.interface[$_i].l3_device" \
-			-e "_ip4=@.interface[$_i][\"ipv4-address\"][0].address" 2>/dev/null)"
-		_ip6_all=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i][\"ipv6-address\"][*].address" 2>/dev/null)
-		for _a6 in $_ip6_all; do
-			if is_public_ip6 "$_a6"; then
-				_ip6="$_a6"
-				break
-			fi
-		done
-
-		[ "$_up" = "1" ] || [ "$_up" = "true" ] || continue
-		[ -z "$_dev" ] && continue
-
-		# Exact-match against each route's own target, not a substring test
-		# against target+mask mashed together. That earlier version broke on
-		# a 464xlat "wan" interface: its route table legitimately carries
-		# both a /128 IPv6 host route to the PLAT endpoint (target something
-		# like "2409:4091:6002:1801::" -- a real address that just happens
-		# to end in "::" as the normal zero-compression abbreviation, not a
-		# default route at all) AND the actual IPv4 default route
-		# ("0.0.0.0"/0) that makes it what it is. A *::* substring match
-		# fires on that host route and calls the whole interface family=6,
-		# handing it an IPv6 ping target it can never answer even though the
-		# interface exists specifically to carry IPv4. Checking each target
-		# for being exactly "::" or exactly "0.0.0.0" -- never a substring
-		# of a longer address -- is immune to this: only a genuine default
-		# route target ever equals one of those two literal strings.
-		_targets=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i].route[*].target" 2>/dev/null)
-		_family=""
-		while IFS= read -r _rttgt; do
-			case "$_rttgt" in
-				::) _family="6"; break ;;
-				0.0.0.0) _family="4"; break ;;
-			esac
-		done <<EOF
-$_targets
-EOF
-		if [ "$_is_lan" = "1" ] && [ -n "$_ip4" ]; then
-			_family="4"
-		fi
-		[ -z "$_family" ] && continue
-
-		_srcip=""
-		[ "$_family" = "4" ] && _srcip="$_ip4"
-		[ "$_family" = "6" ] && _srcip="$_ip6"
-
-		_mark=""
-		if [ -f "$WRAP" ]; then
-			_rules=""
-			[ "$_family" = "4" ] && _rules="$_rules4"
-			[ "$_family" = "6" ] && _rules="$_rules6"
-			_table=$(printf '%s\n' "$_rules" | sed -n "/iif $_dev /s/.*lookup //p" | head -1)
-			[ -n "$_table" ] && _mark=$(printf '%s\n' "$_rules" | sed -n "/fwmark .*lookup $_table$/s/.*fwmark \(0x[0-9a-fA-F]*\).*/\1/p" | head -1)
-		fi
-		[ -z "$_mark" ] && _mark="-"
-		# Probe targets are stable for as long as this entry is, so resolve
-		# them here (once per discovery) instead of per tick -- see
-		# get_target_for_iface.
-		_tgt=$(get_target_for_iface "$_ifn" "$_family" 0)
-		_btgt=$(get_target_for_iface "$_ifn" "$_family" 1)
-		# Gateway is only meaningful for a LAN entry that might get promoted
-		# to AP-mode uplink below -- a real WAN gets the "-" sentinel so the
-		# field count stays fixed and process_iface can tell the two apart
-		# without a second lookup.
-		_gw="-"
-		[ "$_is_lan" = "1" ] && _gw=$(discover_gateway "$_family")
-		# A blank _srcip (no address on this family yet -- exactly the
-		# 464xlat clat case: the interface has neither an ipv4-address nor
-		# an ipv6-address over ubus at all) can't survive as a middle field
-		# in a space-joined line: read's default whitespace splitting
-		# collapses consecutive spaces into one separator, so an empty
-		# field contributes zero tokens rather than an empty one, and every
-		# field after it silently shifts left by one. That is not a
-		# hypothetical -- it produced a real, live failure: a 464xlat WAN's
-		# _mark, _family, _tgt and _btgt each took on the next field's
-		# value, so `ping -"$_family"` ran as `ping -1.1.1.1`, an invalid
-		# flag that fails silently (stderr is discarded) with zero probe
-		# output, forever "down". The "-" placeholder already used for
-		# _mark/_gw exists for exactly this reason; _srcip just never had
-		# one before now.
-		_srcip=${_srcip:--}
-		if [ "$_is_lan" = "1" ]; then
-			# Held back until the whole dump has been walked -- see above.
-			_lan_deferred="$_lan_deferred$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
-"
-			_lan_names="$_lan_names $_ifn"
-			# Kept separately from _lan_deferred (2 fields, neither ever
-			# empty) so writing the .gw file below doesn't need to re-parse
-			# the 7-field line and risk the same shift the comment above
-			# warns about.
-			_lan_gws="$_lan_gws$_ifn $_gw
-"
-			continue
-		fi
-		IFACE_LIST="$IFACE_LIST$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
-"
-		_active="${_active}${_ifn}
-"
-		ACTIVE_IFACES="$ACTIVE_IFACES $_ifn"
-	done
-	# Access-point mode: not one interface other than LAN holds a default
-	# route, so LAN *is* the uplink and monitoring it is the whole point.
-	# Appended as a block rather than re-parsed line by line, so an entry
-	# whose source address is empty cannot have its fields shift.
-	AP_MODE=0
-	if [ -z "$ACTIVE_IFACES" ] && [ -n "$_lan_deferred" ]; then
-		AP_MODE=1
-		IFACE_LIST="$IFACE_LIST$_lan_deferred"
-		for _ap_ifn in $_lan_names; do
-			_active="${_active}${_ap_ifn}
-"
-			ACTIVE_IFACES="$ACTIVE_IFACES $_ap_ifn"
-		done
-		# Resolved gateway, one line per promoted interface, for the rpc to
-		# read back -- .gwstats has no spare field for the address itself.
-		printf '%s' "$_lan_gws" | while read -r _pg_ifn _pg_gw; do
-			[ -z "$_pg_ifn" ] && continue
-			printf '%s\n' "$_pg_gw" > "$RINGDIR/${_pg_ifn}.gw"
-		done
-	fi
-	# Read by the RPC so the card can title itself honestly: on an access
-	# point the row says LAN, and calling that a WAN would be a lie.
-	if [ "$AP_MODE" = "1" ]; then
-		printf '1\n' > "$RINGDIR/.apmode"
-	else
-		rm -f "$RINGDIR/.apmode" 2>/dev/null
-	fi
-	# Keep an atomic live-state snapshot for the collector's own transition
-	# handling; the RPC reader deliberately uses .tracked so an outage stays
-	# visible rather than vanishing from the dashboard.
-	ACTIVE_IFACES="${ACTIVE_IFACES# }"
-	printf '%s' "$_active" > "$RINGDIR/.active"
-
-	# Keep monitoring interfaces across ifdown. A quality card must show
-	# the outage and collect its downtime, not disappear merely because
-	# netifd temporarily withdrew the default route.
-	#
-	# But "brought down" and "deleted" are not the same thing. An interface
-	# removed from the configuration, or administratively disabled, is not
-	# having an outage -- keeping it here reported it as permanently down
-	# forever, kept it in the settings list, and (since the Alerts card
-	# landed) raised a standing "WAN down" alert for something that no
-	# longer exists. Drop those, and delete the ring state with them.
-	#
-	# One uci snapshot rather than a lookup per interface; this runs every
-	# DISCOVER_INTERVAL, not every tick, so it is a fork per five minutes.
-	_uci_net=$(uci -q show network 2>/dev/null)
-	_old_tracked=""
-	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
-	TRACKED_IFACES=""
-	for _ifn in $_old_tracked; do
-		_keep=1
-		# LAN is dropped from the tracked list for the same reason it is
-		# skipped above -- unless this is an access point, where it is the
-		# only uplink there is and dropping it would undo the promotion that
-		# just happened.
-		case "$_ifn" in
-			loopback) _keep=0 ;;
-			lan|lan6) [ "$AP_MODE" = "1" ] || _keep=0 ;;
-		esac
-		if [ -n "$_uci_net" ]; then
-			case "$_uci_net" in
-				*"network.$_ifn=interface"*) ;;
-				*) _keep=0 ;;
-			esac
-			case "$_uci_net" in
-				*"network.$_ifn.disabled='1'"*) _keep=0 ;;
-			esac
-		fi
-		if [ "$_keep" = "1" ]; then
-			TRACKED_IFACES="$TRACKED_IFACES $_ifn"
-		else
-			# Both namings: the ring/state files are "<iface>.*", but the
-			# per-interface scratch buffers are ".probe.<iface>.*" and would
-			# not be matched by the first glob.
-			rm -f "$RINGDIR/$_ifn".* "$RINGDIR/.probe.$_ifn".* 2>/dev/null
-		fi
-	done
-	# Actives are appended after the prune, so an interface that is up but
-	# has no uci section of its own (created by a protocol handler) is put
-	# straight back and never disappears from the card.
-	for _ifn in $ACTIVE_IFACES; do
-		_case=" $TRACKED_IFACES "
-		case "$_case" in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
-	done
-	# An alias of a tracked WAN is a WAN, whether or not it currently holds a
-	# route of its own.
-	#
-	# Everything above can only ever learn about an interface that is working
-	# at the time it looks, because a default route is what identifies a WAN.
-	# So a v6 sibling that has lost its default route is not merely marked
-	# down -- it is never seen at all, and on a cold start it does not come
-	# back until the ISP does. Found live: wan6 on a 13-WAN router, uci
-	# section present and enabled, holding a global address, no route, and
-	# absent from the dashboard entirely rather than reported as down.
-	#
-	# uci device='@wan' is an exact statement that this interface rides that
-	# interface's link, so it needs no guessing about what looks WAN-ish. One
-	# sed per discovery, i.e. per five minutes.
-	_alias_pairs=$(printf '%s\n' "$_uci_net" | \
-		sed -n "s/^network\.\([^.]*\)\.device='@\(.*\)'\$/\1 \2/p" 2>/dev/null)
-	while read -r _a_child _a_parent; do
-		[ -z "$_a_child" ] && continue
-		[ -z "$_a_parent" ] && continue
-		# Only inherit from a parent we already decided is a WAN.
-		case " $TRACKED_IFACES " in *" $_a_parent "*) ;; *) continue ;; esac
-		case " $TRACKED_IFACES " in *" $_a_child "*) continue ;; esac
-		case "$_uci_net" in *"network.$_a_child.disabled='1'"*) continue ;; esac
-		TRACKED_IFACES="$TRACKED_IFACES $_a_child"
-	done <<EOF
-$_alias_pairs
-EOF
-	printf '%s\n' "$_alias_pairs" > "$RINGDIR/.aliases"
-	# Sorted, so every reader presents the same interfaces in the same order.
-	# Unsorted this file is in first-discovery order, which is whatever netifd
-	# happened to bring up first on this boot -- the NAT Type card inherited it
-	# directly and put wanb above wan on a router where wanb won the race.
-	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' | sort > "$RINGDIR/.tracked"
-	mirror_tracked
-}
-
-# Run one command with a hard wall-clock cap of its own.
-#
-# There is no loop-level watchdog: every external command in the probe path
-# must bound itself. ping does (-w/-W), curl does (--max-time 5) and the ubus
-# client does (30s default). nslookup does not -- a DNS server that accepts
-# the query and never answers, which is exactly what a misrouted resolver
-# does, holds it open forever, and the main loop's `wait` would block behind
-# it. That is what this cap is for.
-# The watchdog traps TERM and takes its own sleep down with it. Killing the
-# subshell alone does NOT reach the sleep it forked: the sleep is reparented to
-# init and lives out its full delay. Measured on the target busybox, the plain
-# `( sleep N; kill ... ) &` form leaves one orphan per invocation.
+# Runs a command with a wall-clock cap. nslookup has no timeout of its own and
+# hangs forever on a resolver that never answers. The watchdog traps TERM to
+# kill its sleep, which would otherwise be orphaned for the full delay.
 run_capped() {
 	_cap=$1; _outf=$2; shift 2
 	"$@" > "$_outf" 2>/dev/null &
@@ -701,49 +325,17 @@ run_capped() {
 	wait "$_wd" 2>/dev/null
 }
 
-# Same idea for the per-tick probe, minus the watchdog subshell.
-#
-# run_capped costs two forks per call: the command, plus a shell that sleeps
-# and kills it. That is the right trade for nslookup, which can genuinely hang
-# forever against a resolver that accepts a query and never answers. It is the
-# wrong trade here: this runs once per WAN every INTERVAL seconds -- the single
-# largest source of background forks on an idle router -- and ping already
-# bounds itself with -W 1 (measured 2s against a blackholed target, vs 11s
-# without). Unlike a DNS query, it cannot hang indefinitely, so it needs no
-# cap of its own.
+# ping bounds itself with -w/-W, so the per-tick probe skips the watchdog fork.
 run_probe() {
 	_outf=$1; shift
 	"$@" > "$_outf" 2>/dev/null
 }
 
-# Which -I / --interface argument binds a probe to THIS interface?
-#
-# This is the no-fwmark path, used when mwan3 isn't installed at all or when
-# an interface has no policy-routing rule of its own. Getting it wrong is not
-# a cosmetic failure: a probe that leaves via the wrong WAN reports that WAN's
-# latency and resolves that WAN's ISP, under this interface's name. It is what
-# made an Airtel-upstream link confidently display as Jio.
-#
-# IPv4 binds to the DEVICE. A source-address-bound socket still routes by
-# destination, so on a policy-routed box it egresses via whatever the main
-# table's default route is. Measured on a 6-WAN router: the source-bound probe
-# for wand came back as 106.222.224.181, the device-bound one as
-# 106.222.224.169 -- the latter matching the fwmark-wrapped ground truth.
-#
-# IPv6 binds to the DEVICE as well. Binding to the /128 interface address
-# instead made some carriers (RailWire, BSNL) drop the echo requests outright,
-# so the device name is what both families use; the source address is only a
-# fallback for the case where no L3 device name is known.
-#
-# $1 = family (unused now that both families bind the same way, kept so the
-# call sites stay symmetrical), $2 = device, $3 = source address.
-BIND_IF=""
+# Probes bind to the device, falling back to the source address. A
+# source-bound socket still routes by the main table on a policy-routed box,
+# and some carriers drop v6 echoes sent from the /128.
 bind_arg() {
-	if [ -n "$2" ]; then
-		BIND_IF=$2
-	else
-		BIND_IF=$3
-	fi
+	BIND_IF=${1:-$2}
 }
 
 do_ping() {
@@ -755,218 +347,16 @@ do_ping() {
 			env FAMILY="$_famtag" DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
 			ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 	else
-		bind_arg "$_family" "$_dev" "$_srcip"
+		bind_arg "$_dev" "$_srcip"
 		if [ -n "$BIND_IF" ]; then
-			run_probe "$_pf" \
-				ping -"$_family" -I "$BIND_IF" -c 2 -A -w 2 -W 1 "$_anchor"
+			run_probe "$_pf" ping -"$_family" -I "$BIND_IF" -c 2 -A -w 2 -W 1 "$_anchor"
 		else
-			run_probe "$_pf" \
-				ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
+			run_probe "$_pf" ping -"$_family" -c 2 -A -w 2 -W 1 "$_anchor"
 		fi
 	fi
 	while IFS= read -r _line || [ -n "$_line" ]; do
 		printf '%s ' "$_line"
 	done < "$_pf" 2>/dev/null
-}
-
-DEFAULT_TARGETS4="1.1.1.1 8.8.8.8 9.9.9.9 1.0.0.1 8.8.4.4 149.112.112.112"
-DEFAULT_TARGETS6="2606:4700:4700::1111 2001:4860:4860::8888 2620:fe::fe 2606:4700:4700::1001 2001:4860:4860::8844 2620:fe::9"
-TARGETS4_LIST="$DEFAULT_TARGETS4"
-TARGETS6_LIST="$DEFAULT_TARGETS6"
-# Raw (unresolved) user targets currently reflected in the two lists above,
-# so a settings change can be detected without re-resolving every tick.
-RAW_TGT4=""
-RAW_TGT6=""
-# Uptime second at which an incomplete resolution should be retried, empty when
-# the lists above are fully resolved. procd starts this collector as soon as
-# the network is configured, which is long before it is usable -- measured on
-# one router, this daemon came up at T+21s and the box's only resolver at
-# T+159s -- so the very first resolution attempt failing is the normal case,
-# not an edge one, and without a retry it would be the only attempt for the
-# entire life of the daemon.
-TGT_RETRY_AT=""
-TGT_RETRY_INTERVAL=300
-
-# Turn a user-entered target into something ping can use every two seconds
-# without a DNS lookup each time. A hostname is resolved once here by reading
-# the IP back out of ping's own header line (it prints the resolved address
-# before the first probe, so this works even for a host that never replies).
-resolve_target() {
-	_val=$1; _fam=$2
-	_res=""
-	for _t in $_val; do
-		case "$_t" in
-			*[a-zA-Z]*)
-				_ip=$(lookup_host "$_t" "$_fam" cfg)
-				# A name that would not resolve is dropped, never passed
-				# through as-is. Handing the raw name to ping looks harmless
-				# -- ping resolves it, after all -- but ping re-resolves on
-				# every single probe, which is once every two seconds per
-				# interface, through the system resolver. That is precisely
-				# the resolver this package goes to some length to keep its
-				# own lookups away from, and a filtering one logs every
-				# query: observed on a live router as 245k lookups for one
-				# hostname in 18 hours, 62% of all DNS traffic on the box,
-				# from a single failed resolution at boot. The caller
-				# substitutes the built-in address list and retries later.
-				[ -n "$_ip" ] && _res="$_res $_ip"
-				;;
-			*) _res="$_res $_t" ;;
-		esac
-	done
-	printf '%s' "${_res# }"
-}
-
-# $1/$2 = raw wanTarget4 / wanTarget6 straight from settings. Empty means
-# "use the built-in spread". Returns 0 only when something actually changed,
-# so the caller knows whether the cached per-interface targets are stale.
-apply_targets() {
-	_at4=$1; _at6=$2
-	if [ "$_at4" = "$RAW_TGT4" ] && [ "$_at6" = "$RAW_TGT6" ]; then
-		# Same raw config as last time. Normally nothing to do -- but if that
-		# attempt could not resolve every name, retry once the interval has
-		# elapsed rather than living with the shortfall forever.
-		[ -z "$TGT_RETRY_AT" ] && return 1
-		read -r _at_now _ < /proc/uptime
-		[ "${_at_now%%.*}" -lt "$TGT_RETRY_AT" ] && return 1
-	fi
-	RAW_TGT4=$_at4; RAW_TGT6=$_at6
-	_at_old4=$TARGETS4_LIST; _at_old6=$TARGETS6_LIST
-	_at_short=0
-	if [ -n "$RAW_TGT4" ]; then
-		_r=$(resolve_target "$RAW_TGT4" 4)
-		TARGETS4_LIST=${_r:-$DEFAULT_TARGETS4}
-		set -- $RAW_TGT4; _at_want=$#
-		set -- $_r; [ $# -lt "$_at_want" ] && _at_short=1
-	else
-		TARGETS4_LIST="$DEFAULT_TARGETS4"
-	fi
-	if [ -n "$RAW_TGT6" ]; then
-		_r=$(resolve_target "$RAW_TGT6" 6)
-		TARGETS6_LIST=${_r:-$DEFAULT_TARGETS6}
-		set -- $RAW_TGT6; _at_want=$#
-		set -- $_r; [ $# -lt "$_at_want" ] && _at_short=1
-	else
-		TARGETS6_LIST="$DEFAULT_TARGETS6"
-	fi
-	# resolve_target runs in a command substitution, so it cannot hand back a
-	# failure flag through a variable -- the token count is the signal: fewer
-	# addresses out than names in means at least one did not resolve.
-	if [ "$_at_short" = "1" ]; then
-		read -r _at_now _ < /proc/uptime
-		TGT_RETRY_AT=$(( ${_at_now%%.*} + TGT_RETRY_INTERVAL ))
-	else
-		TGT_RETRY_AT=""
-	fi
-	# Only claim a change when the effective lists really moved, so a retry
-	# that resolves to the same thing does not force a pointless rediscovery.
-	[ "$TARGETS4_LIST" = "$_at_old4" ] && [ "$TARGETS6_LIST" = "$_at_old6" ] && return 1
-	return 0
-}
-
-load_targets() {
-	_cfg_json=$(uci -q get hwdash.main.settings_json 2>/dev/null)
-	[ -z "$_cfg_json" ] && return 1
-	_tgt4=$(jsonfilter -s "$_cfg_json" -e '@.wanTarget4' 2>/dev/null)
-	_tgt6=$(jsonfilter -s "$_cfg_json" -e '@.wanTarget6' 2>/dev/null)
-	apply_targets "$_tgt4" "$_tgt6"
-}
-load_targets
-
-# Spread interfaces across the target list so two WANs on the same router
-# don't hammer one anycast address, and so one target going dark can't take
-# every link's card down at once. The choice depends only on the interface
-# name and the list, both of which are fixed between discoveries -- so this
-# is resolved once per interface in discover_ifaces and cached in IFACE_LIST
-# rather than recomputed (two `od` pipelines deep) on every two-second tick.
-get_target_for_iface() {
-	_ifn=$1; _family=$2; _is_backup=$3
-	_targets="$TARGETS4_LIST"
-	[ "$_family" = "6" ] && _targets="$TARGETS6_LIST"
-	set -- $_targets
-	_num_targets=$#
-	if [ "$_num_targets" -le 1 ]; then
-		# A single custom target has no sibling to fail over to, and pinging
-		# the same address twice tells us nothing the first attempt didn't.
-		# Fall back to a built-in for the second probe.
-		if [ "$_family" = "6" ]; then _ta=$ANCHOR6; _tb=$BACKUP6
-		else _ta=$ANCHOR4; _tb=$BACKUP4; fi
-		[ "$_num_targets" -eq 1 ] && _ta=$1
-		if [ "$_is_backup" = "1" ]; then
-			# Covers the user picking one of the built-ins as their target.
-			if [ "$_ta" = "$_tb" ]; then
-				[ "$_family" = "6" ] && _tb=$ANCHOR6 || _tb=$ANCHOR4
-			fi
-			printf '%s' "$_tb"
-		else
-			printf '%s' "$_ta"
-		fi
-		return
-	fi
-
-	_hash=0
-	for _c in $(printf '%s' "$_ifn" | hexdump -v -e '1/1 "%u "' 2>/dev/null); do
-		_hash=$(( (_hash + _c) % _num_targets ))
-	done
-	[ "$_is_backup" = "1" ] && _hash=$(( (_hash + 1) % _num_targets ))
-	shift "$_hash"
-	printf '%s' "$1"
-}
-
-# The upstream router's address on an access point -- the actual thing an AP
-# uplink should be measured against, not a public anchor three hops beyond
-# it. Resolved once per discovery (like get_target_for_iface above), never
-# per tick: this is the system's own default route, which does not change
-# without a network event that already forces rediscovery on its own (see
-# the hotplug trigger). $1 = family. Prints the gateway, or "-" if none.
-#
-# Ported from the Ping Latency rpc handler's identical gateway lookup, minus
-# its 60s TTL cache -- that exists to bound cost for a human-triggered rpc
-# call; discovery's own ~300s cadence already amortizes this one.
-discover_gateway() {
-	_dgw_family=$1
-	if [ "$_dgw_family" = "6" ]; then
-		_dgw=""
-		if command -v ip >/dev/null; then
-			while read -r _dgw_d _dgw_via _dgw_g _dgw_dev _dgw_if _; do
-				[ "$_dgw_d" = "default" ] || continue
-				[ "$_dgw_via" = "via" ] || continue
-				_dgw=$_dgw_g
-				case "$_dgw_g" in
-					fe80:*) [ "$_dgw_dev" = "dev" ] && _dgw="$_dgw_g%$_dgw_if" ;;
-				esac
-				break
-			done <<EOF6
-$(ip -6 route show default 2>/dev/null)
-EOF6
-		fi
-		if [ -z "$_dgw" ] && command -v jsonfilter >/dev/null; then
-			for _dgw_w6 in wan6 wan_6 wan; do
-				_dgw_ifn6=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
-				_dgw_g=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
-				case "$_dgw_g" in
-					'') ;;
-					fe80:*) _dgw="$_dgw_g${_dgw_ifn6:+%$_dgw_ifn6}"; break ;;
-					*:*) _dgw=$_dgw_g; break ;;
-				esac
-			done
-		fi
-		printf '%s' "${_dgw:--}"
-		return
-	fi
-	_dgw=""
-	while read -r _dgw_rif _dgw_rdst _dgw_rgw _dgw_rflg _; do
-		[ "$_dgw_rdst" = "00000000" ] || continue
-		case "$_dgw_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
-		[ "$_dgw_rgw" = "00000000" ] && continue
-		_dgw_b1=${_dgw_rgw#??????}
-		_dgw_b2=${_dgw_rgw#????}; _dgw_b2=${_dgw_b2%??}
-		_dgw_b3=${_dgw_rgw#??}; _dgw_b3=${_dgw_b3%????}
-		_dgw_b4=${_dgw_rgw%??????}
-		_dgw="$((0x$_dgw_b1)).$((0x$_dgw_b2)).$((0x$_dgw_b3)).$((0x$_dgw_b4))"
-		break
-	done < /proc/net/route
-	printf '%s' "${_dgw:--}"
 }
 
 ping_with_backup() {
@@ -989,10 +379,9 @@ ping_with_backup() {
 	do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_fb" "$_ifn"
 }
 
-# Trailing arguments after $5 are passed through to curl (used to pin a
-# hostname with --resolve so curl never asks the local resolver). curl is a
-# hard package dependency, so the fetch fallbacks below are belt-and-braces
-# and deliberately do not take the extra arguments.
+# Extra arguments after $5 go to curl (--resolve pins a name so curl never
+# asks the local resolver). curl is a hard dependency; the fetch fallbacks do
+# not take them.
 do_curl() {
 	_dev=$1; _srcip=$2; _mark=$3; _url=$4; _ifn=$5
 	shift 5
@@ -1002,8 +391,7 @@ do_curl() {
 			_out=$(env FAMILY=ipv4 DEVICE="$_dev" SRCIP="$_srcip" FWMARK="$_mark" LD_PRELOAD="$WRAP" \
 				curl -s --max-time 5 "$@" "$_url" 2>/dev/null)
 		else
-			# IPv4 only (ipify), so bind to the device -- see bind_arg.
-			bind_arg 4 "$_dev" "$_srcip"
+			bind_arg "$_dev" "$_srcip"
 			_out=$(curl -s --interface "$BIND_IF" --max-time 5 "$@" "$_url" 2>/dev/null)
 		fi
 	elif command -v uclient-fetch >/dev/null 2>&1; then
@@ -1014,15 +402,9 @@ do_curl() {
 	printf '%s' "$_out" | tr '\n' ' '
 }
 
-# What is our public IPv4, for a WAN behind carrier NAT? Answering needs
-# api.ipify.org resolved, which would put a query in the local resolver's log
-# for every interface -- so resolve it through the same bypass and pin the
-# result for curl with --resolve. --resolve works on every curl build, unlike
-# --dns-servers which needs a c-ares one.
-#
-# Deliberately uncached: resolve_isp only calls this on a reconnect and no
-# more than once per ISP_RETRY_INTERVAL, so a shared cachefile bought
-# nothing and cost cross-subshell state to invalidate.
+# Public IPv4 behind carrier NAT. The lookup hosts are resolved through the
+# bypass and pinned with --resolve, which every curl build has (unlike
+# --dns-servers).
 get_public_ip4() {
 	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4
 	_pub=""
@@ -1047,78 +429,479 @@ get_public_ip4() {
 	printf '%s' "$_pub" | tr -d ' \r\n'
 }
 
-resolve_isp() {
-	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4; _family=$5
-	_isp_file="$RINGDIR/${_ifn}.isp"
-	if [ "$_family" = "6" ]; then
-		case "$_ifn" in
-			*6)
-				_base=${_ifn%6}
-				_sib_isp="$RINGDIR/${_base}.isp"
-				if [ -f "$_sib_isp" ]; then
-					cp "$_sib_isp" "$_isp_file" 2>/dev/null
-					return
-				fi
+# Turns user targets into addresses once, so ping never resolves per tick. A
+# name that will not resolve is dropped, not passed through: ping would
+# re-resolve it every probe via the very resolver being avoided.
+resolve_target() {
+	_val=$1; _fam=$2
+	_res=""
+	for _t in $_val; do
+		case "$_t" in
+			*[a-zA-Z]*)
+				_ip=$(lookup_host "$_t" "$_fam" cfg)
+				[ -n "$_ip" ] && _res="$_res $_ip"
 				;;
+			*) _res="$_res $_t" ;;
 		esac
-		[ -f "$_isp_file" ] && return
-		is_public_ip6 "$_srcip" || return
-		_try_file="$RINGDIR/${_ifn}.isp.try"
-		if [ -f "$_try_file" ]; then
-			read -r _try_time < "$_try_file" 2>/dev/null
-			if [ "$(( _now - ${_try_time:-0} ))" -lt "$ISP_RETRY_INTERVAL" ]; then
-				return
-			fi
-		fi
-		printf '%d\n' "$_now" > "$_try_file"
-		_rev6=$(ip6_nibbles "$_srcip")
-		[ -z "$_rev6" ] && return
-		_nsf="$RINGDIR/.probe.${_ifn}.ns"
-		asn_txt "${_rev6}.origin6.asn.cymru.com" "$_nsf"
-		_asn=$(asn_pick "$_nsf")
-		case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
-		asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-		_org=$(asn_org "$_nsf")
-		rm -f "$_nsf"
-		_org=${_org# }
-		[ -z "$_org" ] && return
-		printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
-		_base=${_ifn%6}
-		[ -n "$_base" ] && [ ! -f "$RINGDIR/${_base}.isp" ] && cp "$_isp_file" "$RINGDIR/${_base}.isp" 2>/dev/null
-		rm -f "$_try_file"
+	done
+	printf '%s' "${_res# }"
+}
+
+# Sets _rl to raw list $1 resolved for family $2, else default list $3.
+# resolve_target runs in a subshell and cannot flag a failure, so fewer
+# addresses out than names in sets _at_short.
+resolve_list() {
+	if [ -z "$1" ]; then
+		_rl=$3
 		return
 	fi
+	_r=$(resolve_target "$1" "$2")
+	_rl=${_r:-$3}
+	set -- $1; _at_want=$#
+	set -- $_r; [ $# -lt "$_at_want" ] && _at_short=1
+}
+
+# $1/$2 = raw wanTarget4/6 from settings, empty for the built-in spread.
+# Succeeds only when the effective lists changed, i.e. the per-interface
+# targets cached in IFACE_LIST are stale.
+apply_targets() {
+	_at4=$1; _at6=$2
+	if [ "$_at4" = "$RAW_TGT4" ] && [ "$_at6" = "$RAW_TGT6" ]; then
+		# Unchanged: redo it only when a retry of unresolved names is due.
+		[ -z "$TGT_RETRY_AT" ] && return 1
+		read -r _at_now _ < /proc/uptime
+		[ "${_at_now%%.*}" -lt "$TGT_RETRY_AT" ] && return 1
+	fi
+	RAW_TGT4=$_at4; RAW_TGT6=$_at6
+	_at_old4=$TARGETS4_LIST; _at_old6=$TARGETS6_LIST
+	_at_short=0
+	resolve_list "$RAW_TGT4" 4 "$DEFAULT_TARGETS4"; TARGETS4_LIST=$_rl
+	resolve_list "$RAW_TGT6" 6 "$DEFAULT_TARGETS6"; TARGETS6_LIST=$_rl
+	if [ "$_at_short" = "1" ]; then
+		read -r _at_now _ < /proc/uptime
+		TGT_RETRY_AT=$(( ${_at_now%%.*} + TGT_RETRY_INTERVAL ))
+	else
+		TGT_RETRY_AT=""
+	fi
+	[ "$TARGETS4_LIST" = "$_at_old4" ] && [ "$TARGETS6_LIST" = "$_at_old6" ] && return 1
+	return 0
+}
+
+load_targets() {
+	_cfg_json=$(uci -q get hwdash.main.settings_json 2>/dev/null)
+	[ -z "$_cfg_json" ] && return 1
+	_tgt4=$(jsonfilter -s "$_cfg_json" -e '@.wanTarget4' 2>/dev/null)
+	_tgt6=$(jsonfilter -s "$_cfg_json" -e '@.wanTarget6' 2>/dev/null)
+	apply_targets "$_tgt4" "$_tgt6"
+}
+
+# Spreads interfaces across the target list, so WANs do not all hit one
+# anycast address and one dark target cannot take every card down. Depends
+# only on the name and the list, so discovery caches it in IFACE_LIST.
+get_target_for_iface() {
+	_ifn=$1; _family=$2; _is_backup=$3
+	_targets="$TARGETS4_LIST"
+	[ "$_family" = "6" ] && _targets="$TARGETS6_LIST"
+	set -- $_targets
+	_num_targets=$#
+	if [ "$_num_targets" -le 1 ]; then
+		# One target has no sibling to fail over to; the second probe uses a
+		# built-in instead.
+		if [ "$_family" = "6" ]; then _ta=$ANCHOR6; _tb=$BACKUP6
+		else _ta=$ANCHOR4; _tb=$BACKUP4; fi
+		[ "$_num_targets" -eq 1 ] && _ta=$1
+		if [ "$_is_backup" = "1" ]; then
+			# The user's one target may be the built-in backup itself.
+			if [ "$_ta" = "$_tb" ]; then
+				[ "$_family" = "6" ] && _tb=$ANCHOR6 || _tb=$ANCHOR4
+			fi
+			printf '%s' "$_tb"
+		else
+			printf '%s' "$_ta"
+		fi
+		return
+	fi
+
+	_hash=0
+	for _c in $(printf '%s' "$_ifn" | hexdump -v -e '1/1 "%u "' 2>/dev/null); do
+		_hash=$(( (_hash + _c) % _num_targets ))
+	done
+	[ "$_is_backup" = "1" ] && _hash=$(( (_hash + 1) % _num_targets ))
+	shift "$_hash"
+	printf '%s' "$1"
+}
+
+# The upstream router an AP uplink should be measured against, not a public
+# anchor beyond it. Prints the gateway for family $1, or "-".
+discover_gateway() {
+	if [ "$1" = "6" ]; then
+		gateway6
+	else
+		gateway4
+	fi
+}
+
+gateway6() {
+	_dgw=""
+	if command -v ip >/dev/null; then
+		while read -r _dgw_d _dgw_via _dgw_g _dgw_dev _dgw_if _; do
+			[ "$_dgw_d" = "default" ] || continue
+			[ "$_dgw_via" = "via" ] || continue
+			_dgw=$_dgw_g
+			case "$_dgw_g" in
+				fe80:*) [ "$_dgw_dev" = "dev" ] && _dgw="$_dgw_g%$_dgw_if" ;;
+			esac
+			break
+		done <<EOF6
+$(ip -6 route show default 2>/dev/null)
+EOF6
+	fi
+	if [ -z "$_dgw" ] && command -v jsonfilter >/dev/null; then
+		for _dgw_w6 in wan6 wan_6 wan; do
+			_dgw_ifn6=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+			_dgw_g=$(ubus call network.interface."$_dgw_w6" status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+			case "$_dgw_g" in
+				'') ;;
+				fe80:*) _dgw="$_dgw_g${_dgw_ifn6:+%$_dgw_ifn6}"; break ;;
+				*:*) _dgw=$_dgw_g; break ;;
+			esac
+		done
+	fi
+	printf '%s' "${_dgw:--}"
+}
+
+# The default route's gateway, from /proc/net/route's little-endian hex.
+gateway4() {
+	_dgw=""
+	while read -r _dgw_rif _dgw_rdst _dgw_rgw _dgw_rflg _; do
+		[ "$_dgw_rdst" = "00000000" ] || continue
+		case "$_dgw_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
+		[ "$_dgw_rgw" = "00000000" ] && continue
+		_dgw_b1=${_dgw_rgw#??????}
+		_dgw_b2=${_dgw_rgw#????}; _dgw_b2=${_dgw_b2%??}
+		_dgw_b3=${_dgw_rgw#??}; _dgw_b3=${_dgw_b3%????}
+		_dgw_b4=${_dgw_rgw%??????}
+		_dgw="$((0x$_dgw_b1)).$((0x$_dgw_b2)).$((0x$_dgw_b3)).$((0x$_dgw_b4))"
+		break
+	done < /proc/net/route
+	printf '%s' "${_dgw:--}"
+}
+
+# Sets _family from dump entry $1's default route. Each target must equal
+# "::" or "0.0.0.0" exactly: a 464xlat /128 host route can end in "::".
+route_family() {
+	_family=""
+	_targets=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$1].route[*].target" 2>/dev/null)
+	while IFS= read -r _rttgt; do
+		case "$_rttgt" in
+			::) _family="6"; break ;;
+			0.0.0.0) _family="4"; break ;;
+		esac
+	done <<EOF
+$_targets
+EOF
+}
+
+# Sets _mark to mwan3's fwmark for device $1 and family $2, or "-".
+mwan3_mark() {
+	_mark=""
+	if [ -f "$WRAP" ]; then
+		_rules=""
+		[ "$2" = "4" ] && _rules="$_rules4"
+		[ "$2" = "6" ] && _rules="$_rules6"
+		_table=$(printf '%s\n' "$_rules" | sed -n "/iif $1 /s/.*lookup //p" | head -1)
+		[ -n "$_table" ] && _mark=$(printf '%s\n' "$_rules" | sed -n "/fwmark .*lookup $_table$/s/.*fwmark \(0x[0-9a-fA-F]*\).*/\1/p" | head -1)
+	fi
+	[ -z "$_mark" ] && _mark="-"
+}
+
+# Adds dump entry $1 (interface $2) when it holds a default route, as a line
+# of: iface device srcip mark family target backup_target gateway. LAN is
+# held back in _lan_deferred, since only an access point uses it.
+scan_iface() {
+	_i=$1; _ifn=$2
+	case "$_ifn" in loopback) return ;; esac
+	_is_lan=0
+	case "$_ifn" in lan|lan6) _is_lan=1 ;; esac
+
+	_up=""; _dev=""; _ip4=""; _ip6=""
+	eval "$(printf '%s' "$_dump" | jsonfilter \
+		-e "_up=@.interface[$_i].up" \
+		-e "_dev=@.interface[$_i].l3_device" \
+		-e "_ip4=@.interface[$_i][\"ipv4-address\"][0].address" 2>/dev/null)"
+	_ip6_all=$(printf '%s' "$_dump" | jsonfilter -e "@.interface[$_i][\"ipv6-address\"][*].address" 2>/dev/null)
+	for _a6 in $_ip6_all; do
+		if is_public_ip6 "$_a6"; then
+			_ip6="$_a6"
+			break
+		fi
+	done
+
+	[ "$_up" = "1" ] || [ "$_up" = "true" ] || return
+	[ -z "$_dev" ] && return
+	route_family "$_i"
+	if [ "$_is_lan" = "1" ] && [ -n "$_ip4" ]; then
+		_family="4"
+	fi
+	[ -z "$_family" ] && return
+
+	_srcip=""
+	[ "$_family" = "4" ] && _srcip="$_ip4"
+	[ "$_family" = "6" ] && _srcip="$_ip6"
+	mwan3_mark "$_dev" "$_family"
+	_tgt=$(get_target_for_iface "$_ifn" "$_family" 0)
+	_btgt=$(get_target_for_iface "$_ifn" "$_family" 1)
+	# Only a LAN entry, which may become an AP uplink, needs its gateway.
+	_gw="-"
+	[ "$_is_lan" = "1" ] && _gw=$(discover_gateway "$_family")
+	# The line is re-read with `read`, which collapses an empty field and
+	# shifts the rest (a 464xlat clat has no address), so "-" stands in.
+	_srcip=${_srcip:--}
+	_line="$_ifn $_dev $_srcip $_mark $_family $_tgt $_btgt $_gw
+"
+	if [ "$_is_lan" = "1" ]; then
+		_lan_deferred="$_lan_deferred$_line"
+		_lan_names="$_lan_names $_ifn"
+		_lan_gws="$_lan_gws$_ifn $_gw
+"
+		return
+	fi
+	IFACE_LIST="$IFACE_LIST$_line"
+	_active="${_active}${_ifn}
+"
+	ACTIVE_IFACES="$ACTIVE_IFACES $_ifn"
+}
+
+# Access point: nothing but LAN holds a default route, so LAN is the uplink.
+# .apmode lets the RPC title the card honestly; <iface>.gw hands it the
+# gateway, which .gwstats has no field for.
+promote_lan() {
+	AP_MODE=0
+	if [ -z "$ACTIVE_IFACES" ] && [ -n "$_lan_deferred" ]; then
+		AP_MODE=1
+		IFACE_LIST="$IFACE_LIST$_lan_deferred"
+		for _ap_ifn in $_lan_names; do
+			_active="${_active}${_ap_ifn}
+"
+			ACTIVE_IFACES="$ACTIVE_IFACES $_ap_ifn"
+		done
+		printf '%s' "$_lan_gws" | while read -r _pg_ifn _pg_gw; do
+			[ -z "$_pg_ifn" ] && continue
+			printf '%s\n' "$_pg_gw" > "$RINGDIR/${_pg_ifn}.gw"
+		done
+	fi
+	if [ "$AP_MODE" = "1" ]; then
+		printf '1\n' > "$RINGDIR/.apmode"
+	else
+		rm -f "$RINGDIR/.apmode" 2>/dev/null
+	fi
+}
+
+# LAN stays tracked only on an access point, where it is the uplink.
+keep_tracked() {
+	case "$1" in
+		loopback) return 1 ;;
+		lan|lan6) [ "$AP_MODE" = "1" ] || return 1 ;;
+	esac
+	[ -z "$_uci_net" ] && return 0
+	case "$_uci_net" in
+		*"network.$1=interface"*) ;;
+		*) return 1 ;;
+	esac
+	case "$_uci_net" in
+		*"network.$1.disabled='1'"*) return 1 ;;
+	esac
+	return 0
+}
+
+# Ring files are "<iface>.*"; scratch buffers are ".probe.<iface>.*".
+drop_iface_state() {
+	rm -f "$RINGDIR/$1".* "$RINGDIR/.probe.$1".* 2>/dev/null
+}
+
+# Tracked WANs stay listed across ifdown so the outage shows, but one deleted
+# or disabled in uci is dropped along with its ring state.
+prune_tracked() {
+	_old_tracked=""
+	[ -f "$RINGDIR/.tracked" ] && _old_tracked=$(tr '\n' ' ' < "$RINGDIR/.tracked" 2>/dev/null)
+	TRACKED_IFACES=""
+	for _ifn in $_old_tracked; do
+		if keep_tracked "$_ifn"; then
+			TRACKED_IFACES="$TRACKED_IFACES $_ifn"
+		else
+			drop_iface_state "$_ifn"
+		fi
+	done
+}
+
+# uci device='@wan' says an interface rides a tracked WAN's link, so it is
+# tracked too, even while it holds no default route of its own.
+add_alias_ifaces() {
+	_alias_pairs=$(printf '%s\n' "$_uci_net" | \
+		sed -n "s/^network\.\([^.]*\)\.device='@\(.*\)'\$/\1 \2/p" 2>/dev/null)
+	while read -r _a_child _a_parent; do
+		[ -z "$_a_child" ] && continue
+		[ -z "$_a_parent" ] && continue
+		case " $TRACKED_IFACES " in *" $_a_parent "*) ;; *) continue ;; esac
+		case " $TRACKED_IFACES " in *" $_a_child "*) continue ;; esac
+		case "$_uci_net" in *"network.$_a_child.disabled='1'"*) continue ;; esac
+		TRACKED_IFACES="$TRACKED_IFACES $_a_child"
+	done <<EOF
+$_alias_pairs
+EOF
+	printf '%s\n' "$_alias_pairs" > "$RINGDIR/.aliases"
+}
+
+# Sorted, so every reader lists the WANs in the same order whichever one
+# netifd brought up first.
+write_tracked() {
+	printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' | sort > "$RINGDIR/.tracked"
+	mirror_tracked
+}
+
+discover_ifaces() {
+	_dump=$(ubus call network.interface dump 2>/dev/null)
+	# Bail before touching any state: clearing first made one ubus hiccup read
+	# as every tracked WAN going down at once.
+	[ -z "$_dump" ] && return
+	IFACE_LIST=""
+	_active=""
+	ACTIVE_IFACES=""
+
+	_rules4=""
+	_rules6=""
+	if [ -f "$WRAP" ]; then
+		_rules4=$(ip -f inet rule 2>/dev/null)
+		_rules6=$(ip -f inet6 rule 2>/dev/null)
+	fi
+	_names=$(printf '%s' "$_dump" | jsonfilter -e '@.interface[*].interface' 2>/dev/null)
+	_lan_deferred=""
+	_lan_names=""
+	_lan_gws=""
+	_idx=0
+	for _ifn in $_names; do
+		scan_iface "$_idx" "$_ifn"
+		_idx=$((_idx + 1))
+	done
+	promote_lan
+	# The collector's own live view; the RPC reads .tracked so an outage stays
+	# on the card.
+	ACTIVE_IFACES="${ACTIVE_IFACES# }"
+	printf '%s' "$_active" > "$RINGDIR/.active"
+
+	# One uci snapshot per discovery, shared by the prune and the alias scan.
+	_uci_net=$(uci -q show network 2>/dev/null)
+	prune_tracked
+	# Actives go back in after the prune, so one with no uci section of its own
+	# (made by a protocol handler) never drops off the card.
+	for _ifn in $ACTIVE_IFACES; do
+		case " $TRACKED_IFACES " in *" $_ifn "*) ;; *) TRACKED_IFACES="$TRACKED_IFACES $_ifn" ;; esac
+	done
+	add_alias_ifaces
+	write_tracked
+}
+
+# Succeeds, stamping try file $1, once $2 seconds have passed since the last
+# attempt.
+isp_try_due() {
+	if [ -f "$1" ]; then
+		read -r _try_time < "$1" 2>/dev/null
+		[ "$(( _now - ${_try_time:-0} ))" -lt "$2" ] && return 1
+	fi
+	printf '%d\n' "$_now" > "$1"
+}
+
+# Sets _org to AS $1's operator name, using scratch file $2.
+lookup_org() {
+	asn_txt "AS$1.asn.cymru.com" "$2"
+	_org=$(asn_org "$2")
+	rm -f "$2"
+	_org=${_org# }
+}
+
+# Sets _asn from Cymru's origin zone for IPv4 address $1, using scratch file $2.
+origin_asn4() {
+	_o1=${1%%.*}; _r1=${1#*.}; _o2=${_r1%%.*}; _r2=${_r1#*.}; _o3=${_r2%%.*}; _o4=${_r2#*.}
+	asn_txt "${_o4}.${_o3}.${_o2}.${_o1}.origin.asn.cymru.com" "$2"
+	_asn=$(asn_pick "$2")
+}
+
+# With nothing routable to look up, or no answer, fall back on an interface
+# name that names a known operator.
+isp_from_name() {
+	_lower_ifn=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+	case "$_lower_ifn" in
+		*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
+		*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
+		*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
+		*bsnl*)            _syn="AS9829 | BSNL" ;;
+		*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
+		*hathway*)         _syn="AS17488 | Hathway Cable" ;;
+		*vodafone*|*idea*) _syn="AS55410 | Vodafone Idea" ;;
+		*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
+		*verizon*)         _syn="AS701 | Verizon" ;;
+		*att*)             _syn="AS7018 | AT&T" ;;
+		*)                 _syn="" ;;
+	esac
+	[ -n "$_syn" ] || return
+	printf '%s' "$_syn" > "$RINGDIR/$1.isp"
+	[ ! -f "$RINGDIR/${1}6.isp" ] && cp "$RINGDIR/$1.isp" "$RINGDIR/${1}6.isp" 2>/dev/null
+}
+
+# IPv6: the interface address is globally routed, so it is looked up directly,
+# unless a v4 sibling already has the answer.
+resolve_isp6() {
+	_ifn=$1; _srcip=$2
+	_isp_file="$RINGDIR/${_ifn}.isp"
+	case "$_ifn" in
+		*6)
+			_base=${_ifn%6}
+			if [ -f "$RINGDIR/${_base}.isp" ]; then
+				cp "$RINGDIR/${_base}.isp" "$_isp_file" 2>/dev/null
+				return
+			fi
+			;;
+	esac
+	[ -f "$_isp_file" ] && return
+	is_public_ip6 "$_srcip" || return
+	_try_file="$RINGDIR/${_ifn}.isp.try"
+	isp_try_due "$_try_file" "$ISP_RETRY_INTERVAL" || return
+	_rev6=$(ip6_nibbles "$_srcip")
+	[ -z "$_rev6" ] && return
+	_nsf="$RINGDIR/.probe.${_ifn}.ns"
+	asn_txt "${_rev6}.origin6.asn.cymru.com" "$_nsf"
+	_asn=$(asn_pick "$_nsf")
+	case "$_asn" in ''|*[!0-9]*) rm -f "$_nsf"; return ;; esac
+	lookup_org "$_asn" "$_nsf"
+	[ -z "$_org" ] && return
+	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
+	_base=${_ifn%6}
+	[ -n "$_base" ] && [ ! -f "$RINGDIR/${_base}.isp" ] && cp "$_isp_file" "$RINGDIR/${_base}.isp" 2>/dev/null
+	rm -f "$_try_file"
+}
+
+# IPv4: the public exit address is the ground truth. Failing that the gateway
+# stands in, never the interface address, since a CGNAT operator may number
+# its side from someone else's space. A stand-in writes no .pubip, so the exit
+# address keeps being retried.
+resolve_isp4() {
+	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4
+	_isp_file="$RINGDIR/${_ifn}.isp"
 	_ip_file="$RINGDIR/${_ifn}.ispip"
 	_last_ip=""
 	[ -f "$_ip_file" ] && read -r _last_ip < "$_ip_file" 2>/dev/null
-	_sib_v6="$RINGDIR/${_ifn}6.isp"
-	if [ ! -f "$_isp_file" ] && [ -f "$_sib_v6" ]; then
-		cp "$_sib_v6" "$_isp_file" 2>/dev/null
+	if [ ! -f "$_isp_file" ] && [ -f "$RINGDIR/${_ifn}6.isp" ]; then
+		cp "$RINGDIR/${_ifn}6.isp" "$_isp_file" 2>/dev/null
 	fi
 	if [ -f "$_isp_file" ] && [ "$_last_ip" = "$_srcip" ] && [ -f "$RINGDIR/${_ifn}.pubip" ]; then
 		return
 	fi
 	_try_file="$RINGDIR/${_ifn}.isp.try"
-	# A stand-in answer (see below) is re-checked less often than a failed
-	# first attempt: there is already something sensible on screen.
+	# A stand-in answer is already on screen, so it is re-checked less often.
 	_iv=$ISP_RETRY_INTERVAL
 	[ -f "$_isp_file" ] && _iv=300
-	if [ -f "$_try_file" ]; then
-		read -r _try_time < "$_try_file" 2>/dev/null
-		if [ "$(( _now - ${_try_time:-0} ))" -lt "$_iv" ]; then
-			return
-		fi
-	fi
-	printf '%d\n' "$_now" > "$_try_file"
+	isp_try_due "$_try_file" "$_iv" || return
 	_nsf="$RINGDIR/.probe.${_ifn}.ns"
-	# The public exit address is the ground truth: it is what the rest of
-	# the internet sees, so it is always really routed. When it can't be
-	# fetched, the interface's gateway stands in -- never the interface's
-	# own address, because a CGNAT operator is free to number its side with
-	# someone else's space. Airtel hands out 100.230.x.x, which is T-Mobile
-	# USA's 100.128.0.0/9, and the lookup said exactly that. A stand-in
-	# answer writes no .pubip, so the exit address keeps being retried
-	# until it replaces it.
 	_pub=$(get_public_ip4 "$_dev" "$_srcip" "$_mark" "$_ifn")
 	is_public_ip4 "$_pub" || _pub=""
 	_lookup=$_pub
@@ -1127,39 +910,13 @@ resolve_isp() {
 		is_public_ip4 "$_gw" && _lookup=$_gw
 	fi
 	_asn=""
-	if [ -n "$_lookup" ]; then
-		_o1=${_lookup%%.*}; _r1=${_lookup#*.}; _o2=${_r1%%.*}; _r2=${_r1#*.}; _o3=${_r2%%.*}; _o4=${_r2#*.}
-		asn_txt "${_o4}.${_o3}.${_o2}.${_o1}.origin.asn.cymru.com" "$_nsf"
-		_asn=$(asn_pick "$_nsf")
-	fi
+	[ -n "$_lookup" ] && origin_asn4 "$_lookup" "$_nsf"
 	if [ -z "$_asn" ]; then
-		# Nothing routable to look up, or no answer: fall back on the
-		# interface name when it names a known operator.
-		_lower_ifn=$(printf '%s' "$_ifn" | tr 'A-Z' 'a-z')
-		case "$_lower_ifn" in
-			*airtel*|*bharti*) _syn="AS24560 | Bharti Airtel Ltd." ;;
-			*jio*|*reliance*)  _syn="AS55836 | Reliance Jio Infocomm" ;;
-			*netplus*)         _syn="AS133661 | Netplus Broadband" ;;
-			*bsnl*)            _syn="AS9829 | BSNL" ;;
-			*railwire*|*railtel*) _syn="AS24186 | RailWire" ;;
-			*hathway*)         _syn="AS17488 | Hathway Cable" ;;
-			*vodafone*|*idea*) _syn="AS55410 | Vodafone Idea" ;;
-			*comcast*|*xfinity*) _syn="AS7922 | Comcast" ;;
-			*verizon*)         _syn="AS701 | Verizon" ;;
-			*att*)             _syn="AS7018 | AT&T" ;;
-			*)                 _syn="" ;;
-		esac
-		if [ -n "$_syn" ]; then
-			printf '%s' "$_syn" > "$_isp_file"
-			[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
-		fi
+		isp_from_name "$_ifn"
 		rm -f "$_nsf"
 		return
 	fi
-	asn_txt "AS${_asn}.asn.cymru.com" "$_nsf"
-	_org=$(asn_org "$_nsf")
-	rm -f "$_nsf"
-	_org=${_org# }
+	lookup_org "$_asn" "$_nsf"
 	[ -z "$_org" ] && return
 	printf 'AS%s | %s' "$_asn" "$_org" > "$_isp_file"
 	[ ! -f "$RINGDIR/${_ifn}6.isp" ] && cp "$_isp_file" "$RINGDIR/${_ifn}6.isp" 2>/dev/null
@@ -1172,9 +929,17 @@ resolve_isp() {
 	fi
 }
 
-# Add one observation to a rolling 24-hour counter. Reusing a bucket slot
-# removes its expired contribution first, so rpcd can read one tiny summary
-# file instead of aggregating a full day's worth of two-second samples.
+resolve_isp() {
+	_dev=$1; _srcip=$2; _mark=$3; _ifn=$4; _family=$5
+	if [ "$_family" = "6" ]; then
+		resolve_isp6 "$_ifn" "$_srcip"
+	else
+		resolve_isp4 "$_dev" "$_srcip" "$_mark" "$_ifn"
+	fi
+}
+
+# Adds one sample to the rolling 24 h window. Reusing a bucket slot first
+# subtracts its expired counts, so rpcd reads one small summary file.
 record_window_sample() {
 	_ifn=$1; _ok=$2; _pfx=${3:-}
 	_bucket=$((_now / WINDOW_BUCKET_SECS))
@@ -1200,14 +965,8 @@ record_window_sample() {
 	printf '%d %d\n' "$_total" "$_success" > "$_summary_file"
 }
 
-# Announce a WAN going down or coming back, once per transition.
-#
-# The Alerts card only exists while a browser has the page open, so a link
-# that dies at 3am was diagnosed and then thrown away. syslog is where the
-# router already records things worth knowing, and it is what any existing
-# tooling -- logread, a log server, a notification script -- is already
-# watching. One fork per transition, not per tick: a link that stays down for
-# a day logs twice, when it leaves and when it returns.
+# Records each up/down transition in syslog, so it is kept even with no
+# dashboard open.
 log_transition() {
 	_lt_ifn=$1; _lt_new=$2; _lt_reason=$3
 	command -v logger >/dev/null 2>&1 || return
@@ -1219,17 +978,9 @@ log_transition() {
 	fi
 }
 
-# Throughput for one WAN, from the kernel's own byte counters.
-#
-# Costs two builtin reads and no fork, which is why it lives here rather than
-# in the RPC: wan_quality is polled every two seconds by every open dashboard, and
-# this way it stays a pure reader of what the collector already worked out.
-#
-# The counter is 64-bit on any kernel this runs on, but it still resets to
-# zero whenever the device is recreated -- which for pppoe-wan is every
-# reconnect, i.e. exactly when a link is interesting. A negative delta is
-# therefore normal, not corruption, and is treated as "start again from here"
-# rather than being clamped to a spike of several gigabits.
+# Throughput from the kernel byte counters, with builtin reads only. The
+# counters reset whenever the device is recreated (every PPPoE reconnect), so
+# a negative delta restarts the measurement rather than reading as a spike.
 sample_rate() {
 	_rt_ifn=$1; _rt_dev=$2
 	_rt_file="$RINGDIR/${_rt_ifn}.rate"
@@ -1250,211 +1001,199 @@ sample_rate() {
 		_rt_rbps=$(( (_rt_rx - _pr) / _rt_dt ))
 		_rt_tbps=$(( (_rt_tx - _pt) / _rt_dt ))
 	fi
-	# Device name last: two interfaces can share one device (a v4/v6 pair, an
-	# alias), and then this rate is the same wire counted twice. The reader
-	# needs to know that to avoid presenting it as two independent flows.
+	# Device name last: interfaces sharing a device (a v4/v6 pair, an alias)
+	# must not be read as two independent flows.
 	printf '%s %s %s %s %s %s\n' "$_rt_rx" "$_rt_tx" "$_now" "$_rt_rbps" "$_rt_tbps" "$_rt_dev" > "$_rt_file"
 }
 
-# The AP-mode counterpart to the bookkeeping in process_iface below, run
-# against the actual upstream router instead of a public anchor -- this is
-# what drives the AP card's primary status/uptime, kept in its own .gwstats
-# ring entirely separate from .stats so the interface's ordinary
-# internet-ping history (still collected right after this returns) is
-# untouched and still means exactly what it always meant.
-#
-# Deliberately duplicates process_iface's miss-threshold/status-flip logic
-# rather than sharing it: that function is already tuned and shipped for
-# every real WAN, and a small duplication here is a smaller regression risk
-# than making it depend on a new shared code path.
-#
-# Uses do_ping directly, never ping_with_backup: a single upstream hop either
-# answers or is genuinely unreachable, and there is no meaningful "backup
-# gateway" to fail over to the way a public anchor legitimately has one.
-process_ap_gateway() {
-	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _gw=$6
-	_gwp_stats_file="$RINGDIR/${_ifn}.gwstats"
-	_gwp_ms=""
-	if [ -n "$_srcip" ]; then
-		_gwp_out=$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_gw" "$_ifn")
-		case "$_gwp_out" in
-			*time=*)
-				_gwp_ms=${_gwp_out#*time=}
-				_gwp_ms=${_gwp_ms%% *}
-				_gwp_ms=${_gwp_ms%%.*}
-				case "$_gwp_ms" in ''|*[!0-9]*) _gwp_ms="" ;; esac
-				;;
-		esac
-	fi
-	_gwp_total=0; _gwp_success=0; _gwp_status="unknown"; _gwp_streak_start=$_now
-	_gwp_lastgood_ms="x"; _gwp_consec_miss=0
-	[ -f "$_gwp_stats_file" ] && read -r _gwp_total _gwp_success _gwp_status _gwp_streak_start _gwp_lastgood_ms _gwp_consec_miss < "$_gwp_stats_file" 2>/dev/null
-	case "$_gwp_lastgood_ms" in ''|*[!0-9]*) _gwp_lastgood_ms="x" ;; esac
-	case "$_gwp_consec_miss" in ''|*[!0-9]*) _gwp_consec_miss=0 ;; esac
-	_gwp_total=$((_gwp_total + 1))
-	if [ -n "$_gwp_ms" ]; then
-		_gwp_success=$((_gwp_success + 1))
-		_gwp_new_status="up"
-		_gwp_lastgood_ms="$_gwp_ms"
-		_gwp_consec_miss=0
-		_gwp_sample_up=1
-	else
-		_gwp_consec_miss=$((_gwp_consec_miss + 1))
-		if [ "$_gwp_consec_miss" -lt "$MISS_THRESHOLD" ] && [ "$_gwp_status" = "up" ]; then
-			_gwp_success=$((_gwp_success + 1))
-			_gwp_new_status="up"
-			_gwp_sample_up=1
-		else
-			_gwp_new_status="down"
-			_gwp_sample_up=0
-		fi
-	fi
-	if [ "$_gwp_new_status" != "$_gwp_status" ]; then
-		case "$_gwp_status" in
-			up|down) log_transition "$_ifn" "$_gwp_new_status" \
-				"Gateway ${_gw:-router} is not responding to ping from interface $_dev." ;;
-		esac
-		_gwp_status="$_gwp_new_status"
-		_gwp_streak_start=$_now
-	fi
-	printf '%d %d %s %d %s %d\n' \
-		"$_gwp_total" "$_gwp_success" "$_gwp_status" "$_gwp_streak_start" \
-		"$_gwp_lastgood_ms" "$_gwp_consec_miss" > "$_gwp_stats_file"
-	record_window_sample "$_ifn" "$_gwp_sample_up" "gw"
-	if [ "$_gwp_status" = "down" ]; then
-		printf '%d unreachable Gateway %s is not responding to ping from interface %s.\n' \
-			"$_now" "$_gw" "$_dev" > "$RINGDIR/${_ifn}.gwreason"
-	elif [ -f "$RINGDIR/${_ifn}.gwreason" ]; then
-		rm -f "$RINGDIR/${_ifn}.gwreason" 2>/dev/null
-	fi
+# Stats file: total success status streak_start lastgood_ms consecutive_misses.
+# lastgood_ms stays "x" until the link has answered once, so the card never
+# shows a made-up latency.
+load_stats() {
+	_total=0; _success=0; _status="unknown"; _streak_start=$_now
+	_lastgood_ms="x"; _consec_miss=0
+	[ -f "$1" ] && read -r _total _success _status _streak_start _lastgood_ms _consec_miss < "$1" 2>/dev/null
+	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
+	case "$_consec_miss" in ''|*[!0-9]*) _consec_miss=0 ;; esac
 }
 
-# One interface's full per-tick update: ping, roll the availability stats,
-# resolve ISP. Run backgrounded (one subshell per interface, see
-# the main loop below) so a single slow or timed-out link can't stall
-# every other interface's update that tick -- the same reason the
-# Ping Latency rpc call backgrounds each of its own targets instead of
-# pinging them one after another.
-#
-# Stats file format (6 fields):
-#   total success status streak_start lastgood_ms consecutive_misses
-#
-# lastgood_ms: last ms from a successful probe. Persists across failed
-#   ticks so the frontend keeps a real latency value while the link is up.
-#   Empty ("x") until this interface has actually answered once -- never
-#   seeded with a plausible-looking number, because a fabricated latency is
-#   indistinguishable on the card from a measured one.
-# consecutive_misses: resets to 0 on any success; only once it reaches
-#   MISS_THRESHOLD do we declare a real outage, count the tick as a failure
-#   for the availability window, and flip status to "down".
-process_iface() {
-	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7; _gw=$8
-	[ -n "$_gw" ] && [ "$_gw" != "-" ] && process_ap_gateway "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_gw"
-	_stats_file="$RINGDIR/${_ifn}.stats"
-	# Gated on the device, not the source address. A 464xlat clat device
-	# (l3_device like "464-wan") reports neither an ipv4-address nor an
-	# ipv6-address over ubus at all -- its whole job is kernel-level NAT46
-	# translation, not holding a routable address of its own -- yet it is
-	# fully pingable via device binding (confirmed live: `ping -I 464-wan`
-	# works). do_ping/bind_arg already prefer binding by device over source
-	# address whenever a device is known, so gating on srcip here was
-	# refusing to even try on exactly the interfaces where device-binding is
-	# not just available but the *only* way in. _dev is unconditionally
-	# non-empty for anything that reached this point -- discover_ifaces
-	# already skips any interface without one.
-	if [ -z "$_dev" ]; then
-		_out=""
-	else
-		_out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn" "$_tgt" "$_btgt")
-	fi
+save_stats() {
+	printf '%d %d %s %d %s %d\n' \
+		"$_total" "$_success" "$_status" "$_streak_start" \
+		"$_lastgood_ms" "$_consec_miss" > "$1"
+}
+
+# Sets _ms to the whole-millisecond RTT in ping output $1, or empty.
+parse_ms() {
 	_ms=""
-	case "$_out" in
+	case "$1" in
 		*time=*)
-			_ms=${_out#*time=}
+			_ms=${1#*time=}
 			_ms=${_ms%% *}
 			_ms=${_ms%%.*}
 			case "$_ms" in ''|*[!0-9]*) _ms="" ;; esac
 			;;
 	esac
-	_total=0; _success=0; _status="unknown"; _streak_start=$_now
-	_lastgood_ms="x"; _consec_miss=0
-	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _lastgood_ms _consec_miss < "$_stats_file" 2>/dev/null
-	# Sanitise: lastgood_ms is either a number or the "never measured" marker.
-	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
-	case "$_consec_miss" in ''|*[!0-9]*) _consec_miss=0 ;; esac
+}
+
+# Folds one probe result ($3 = ms, empty on a miss) into interface $1's
+# "${2}stats" file and 24 h window. A miss on an up link still counts as up
+# until MISS_THRESHOLD in a row; one still "unknown" has nothing to carry
+# forward. $4 explains a down transition in the log. Sets _status.
+record_probe() {
+	_rec_ifn=$1; _rec_pfx=$2; _rec_ms=$3; _rec_why=$4
+	_rec_file="$RINGDIR/${_rec_ifn}.${_rec_pfx}stats"
+	load_stats "$_rec_file"
 	_total=$((_total + 1))
-	if [ -n "$_ms" ]; then
-		# Probe succeeded -- clear miss counter, use real latency.
+	if [ -n "$_rec_ms" ]; then
 		_success=$((_success + 1))
 		_new_status="up"
-		_lastgood_ms="$_ms"
+		_lastgood_ms="$_rec_ms"
 		_consec_miss=0
 		_sample_up=1
 	else
 		_consec_miss=$((_consec_miss + 1))
 		if [ "$_consec_miss" -lt "$MISS_THRESHOLD" ] && [ "$_status" = "up" ]; then
-			# Transient miss on an otherwise-up link: keep it green.
-			# Reuse lastgood_ms so the frontend never shows "—" or a
-			# red sparkline gap for a brief ICMP6 drop. Requires status
-			# "up" specifically, not merely "not down" -- a link still in
-			# "unknown" has never answered, so there is no measured value
-			# to carry forward and nothing yet to call healthy.
 			_success=$((_success + 1))
 			_new_status="up"
 			_sample_up=1
 		else
-			# Confirmed outage (MISS_THRESHOLD consecutive misses, or
-			# the link was already down).
 			_new_status="down"
 			_sample_up=0
 		fi
 	fi
 	if [ "$_new_status" != "$_status" ]; then
-		# Only a real flip is worth a log line. The first probe after a
-		# collector restart moves every link from "unknown" to "up", which is
-		# not something that happened to the network -- it logged a full set of
-		# spurious UP lines on every package upgrade and every reboot, and
-		# netifd already records genuine interface events itself.
+		# Leaving "unknown" after a restart is not a network event.
 		case "$_status" in
-			up|down) log_transition "$_ifn" "$_new_status" \
-				"The interface $_dev reports a carrier, but the probe target ${_tgt:-the ICMP host} did not respond." ;;
+			up|down) log_transition "$_rec_ifn" "$_new_status" "$_rec_why" ;;
 		esac
 		_status="$_new_status"
 		_streak_start=$_now
 	fi
-	printf '%d %d %s %d %s %d\n' \
-		"$_total" "$_success" "$_status" "$_streak_start" \
-		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
-	record_window_sample "$_ifn" "$_sample_up"
-	sample_rate "$_ifn" "$_dev"
-	# Down here means something different than in process_down_iface: netifd
-	# still has the interface up with a route, the probes are simply not
-	# coming back. No ubus call can add to that, and no rate limit is needed
-	# because the answer is already in hand.
+	save_stats "$_rec_file"
+	record_window_sample "$_rec_ifn" "$_sample_up" "$_rec_pfx"
+}
+
+# netifd still has the link up with a route; the probes are just not coming
+# back, so the reason is already known and needs no ubus call.
+set_unreachable_reason() {
 	if [ "$_status" = "down" ]; then
-		printf '%d unreachable %s\n' "$_now" \
-			"The interface $_dev reports a carrier, but the probe target ${_tgt:-the ICMP host} did not respond." \
-			> "$RINGDIR/${_ifn}.reason"
-	elif [ -f "$RINGDIR/${_ifn}.reason" ]; then
-		rm -f "$RINGDIR/${_ifn}.reason" 2>/dev/null
+		printf '%d unreachable %s\n' "$_now" "$2" > "$1"
+	elif [ -f "$1" ]; then
+		rm -f "$1" 2>/dev/null
 	fi
+}
+
+# An AP uplink measured against the upstream router, in its own .gwstats so
+# the interface's internet-ping history keeps its meaning. No backup target:
+# a single upstream hop either answers or is unreachable.
+process_ap_gateway() {
+	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _gw=$6
+	_ms=""
+	[ -n "$_srcip" ] && parse_ms "$(do_ping "$_dev" "$_srcip" "$_mark" "$_family" "$_gw" "$_ifn")"
+	_why="Gateway $_gw is not responding to ping from interface $_dev."
+	record_probe "$_ifn" gw "$_ms" "$_why"
+	set_unreachable_reason "$RINGDIR/${_ifn}.gwreason" "$_why"
+}
+
+# One interface's tick: probe, update stats and the 24 h window, sample the
+# rate, resolve the ISP. Each runs in the background so one slow link cannot
+# stall the rest.
+process_iface() {
+	_ifn=$1; _dev=$2; _srcip=$3; _mark=$4; _family=$5; _tgt=$6; _btgt=$7; _gw=$8
+	[ -n "$_gw" ] && [ "$_gw" != "-" ] && process_ap_gateway "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_gw"
+	# Gated on the device, not the address: a 464xlat clat device has no
+	# address over ubus, yet answers when bound by device.
+	_out=""
+	[ -n "$_dev" ] && _out=$(ping_with_backup "$_dev" "$_srcip" "$_mark" "$_family" "$_ifn" "$_tgt" "$_btgt")
+	parse_ms "$_out"
+	_why="The interface $_dev reports a carrier, but the probe target ${_tgt:-the ICMP host} did not respond."
+	record_probe "$_ifn" "" "$_ms" "$_why"
+	sample_rate "$_ifn" "$_dev"
+	set_unreachable_reason "$RINGDIR/${_ifn}.reason" "$_why"
 	resolve_isp "$_dev" "$_srcip" "$_mark" "$_ifn" "$_family"
 }
 
-# Explain WHY netifd has an interface down, in the words someone would use
-# to go and fix it. "WAN has been down for 4 minutes" tells you nothing you
-# could act on; "no link on eth1 -- cable unplugged or the peer is off" sends
-# you to the right end of the cable.
-#
-# Ordered physical-cause-first, because that is the order in which one cause
-# masks the next: with no carrier there is nothing to run DHCP over, so
-# reporting the missing lease would name a symptom and hide the cause.
-#
-# Emits "<code> <human text>" on stdout. One ubus fork per call, rate-limited
-# by REASON_INTERVAL at the only call site.
+# Kernel carrier on either netifd name, since either may not be a real netdev
+# (a uci bridge name; a ppp device that is gone while down). An admin-down
+# device returns EINVAL here, so only an explicit 0 counts as unplugged.
+no_carrier_reason() {
+	for _r_nd in "$_r_dev" "$_r_l3"; do
+		[ -n "$_r_nd" ] || continue
+		[ -f "/sys/class/net/$_r_nd/carrier" ] || continue
+		_r_car=""
+		read -r _r_car < "/sys/class/net/$_r_nd/carrier" 2>/dev/null
+		if [ "$_r_car" = "0" ]; then
+			echo "nocarrier The physical link on interface $_r_nd is down. The cable is disconnected, or the upstream device is powered off."
+			return 0
+		fi
+		break
+	done
+	return 1
+}
+
+# The codes netifd core and the stock protocol handlers emit (ubus.c, ppp.sh's
+# exit codes, dhcp and modem handlers); anything else is reported verbatim.
+netifd_error_reason() {
+	case "$1" in
+		NO_DEVICE|NO_IFACE|NO_IFNAME|BAD_DEVICE)
+		                  echo "netifd The configured physical or logical device is missing." ;;
+		DEVICE_CLAIM_FAILED)
+		                  echo "netifd The device could not be claimed. Another interface is currently using it." ;;
+		NO_ADDRESS|ADDRESS_MISSING|NO_IPADDRESS)
+		                  echo "netifd No IP address was received from the upstream gateway or server." ;;
+		PREFIX_MISSING)   echo "netifd The service provider did not delegate an IPv6 prefix." ;;
+		PEER_AUTH_FAILED|CNID_AUTH_FAILED|AUTH_FAILED)
+		                  echo "netifd PPP authentication failed. The service provider rejected the credentials." ;;
+		AUTH_TOPEER_FAILED)
+		                  echo "netifd Upstream service provider authentication failed." ;;
+		CONNECT_FAILED|CALL_FAILED)
+		                  echo "netifd The attempt to establish a connection to the service provider failed." ;;
+		NEGOTIATION_FAILED)
+		                  echo "netifd PPP session negotiation with the service provider failed." ;;
+		PEER_DEAD|HANGUP) echo "netifd The service provider terminated the active PPP session." ;;
+		IDLE_TIMEOUT)     echo "netifd The PPP session was closed after an inactivity timeout." ;;
+		TRAFFIC_LIMIT)    echo "netifd The PPP session reached its configured data traffic limit." ;;
+		INVALID_ADDRESS|INVALID_GATEWAY|INVALID_NETMASK|INVALID_BROADCAST|INVALID_PTPADDR)
+		                  echo "netifd Invalid addressing information was received from the upstream service provider." ;;
+		OPTION_ERROR|INVALID_PROTO|INVALID_OPTIONS)
+		                  echo "netifd Interface configuration parameters were rejected." ;;
+		SETUP_FAILED|CONFIGURE_FAILED|INITIALIZE_FAILED)
+		                  echo "netifd Interface initialisation failed." ;;
+		NO_APN|NO_REGISTRATION|NETWORK_REGISTRATION_FAILED)
+		                  echo "netifd Cellular network registration failed." ;;
+		PIN_FAILED|PIN_NOT_SPECIFIED|MM_PINCODE_REQUIRED|MM_PINCODE_WRONG|PUK_NEEDED)
+		                  echo "netifd The SIM card is locked. A valid PIN or PUK code is required." ;;
+		*)                echo "netifd netifd reported the error code $1." ;;
+	esac
+}
+
+# Up but unaddressed, explained by protocol $1.
+no_address_reason() {
+	case "$1" in
+		dhcp|dhcpv6)
+			echo "nolease No DHCP lease was acquired. The upstream server did not respond, or the lease has expired." ;;
+		pppoe|pppoa|ppp|l2tp|pptp)
+			case "$1" in
+				pppoe) _r_pname="PPPoE" ;;
+				pppoa) _r_pname="PPPoA" ;;
+				ppp)   _r_pname="PPP" ;;
+				l2tp)  _r_pname="L2TP" ;;
+				pptp)  _r_pname="PPTP" ;;
+			esac
+			echo "nosession The $_r_pname session is not established." ;;
+		static)
+			echo "noaddress The configured static IP address is not assigned to the interface." ;;
+		*)
+			echo "noaddress The link is up, but no IP address was assigned." ;;
+	esac
+}
+
+# Why netifd has interface $1 down, as "<code> <text>". Physical causes come
+# first: with no carrier there is nothing to run DHCP over, so a missing
+# lease would name the symptom and hide the cause.
 wan_down_reason() {
-	_r_ifn=$1
-	_r_st=$(ubus call "network.interface.$_r_ifn" status 2>/dev/null)
+	_r_st=$(ubus call "network.interface.$1" status 2>/dev/null)
 	if [ -z "$_r_st" ]; then
 		echo "missing The interface is no longer managed by netifd. It may have been deleted or renamed."
 		return
@@ -1468,124 +1207,38 @@ wan_down_reason() {
 		-e '_r_v4=@["ipv4-address"][0].address' \
 		-e '_r_v6=@["ipv6-address"][0].address' 2>/dev/null)" 2>/dev/null
 
-	# Carrier is the one fact the kernel knows for certain, and reading it is
-	# a file read rather than another fork. Both names are tried because
-	# neither is always a kernel netdev: netifd's "device" is a uci device
-	# name, which for a bridge is br-something the kernel never sees under
-	# that spelling, and l3_device is the ppp/tunnel device that does not
-	# exist at all while the session is down.
-	#
-	# A device that is administratively down returns EINVAL on this file
-	# rather than 0, so only an explicit "0" counts as unplugged -- an
-	# unreadable carrier is not evidence of anything.
-	for _r_nd in "$_r_dev" "$_r_l3"; do
-		[ -n "$_r_nd" ] || continue
-		[ -f "/sys/class/net/$_r_nd/carrier" ] || continue
-		_r_car=""
-		read -r _r_car < "/sys/class/net/$_r_nd/carrier" 2>/dev/null
-		if [ "$_r_car" = "0" ]; then
-			echo "nocarrier The physical link on interface $_r_nd is down. The cable is disconnected, or the upstream device is powered off."
-			return
-		fi
-		break
-	done
-
+	no_carrier_reason && return
 	case "$_r_auto" in
 		0|false) echo "admin The interface is administratively disabled and configured not to start automatically."; return ;;
 	esac
 	case "$_r_avail" in
 		0|false) echo "nodevice The physical device${_r_dev:+ ($_r_dev)} is not present. The port or hardware module is missing."; return ;;
 	esac
-
-	# netifd's own error stack, when it has one, beats anything inferred.
-	# The codes below are the ones netifd core and the stock protocol handlers
-	# actually emit (netifd ubus.c, ppp.sh's exit-code table, the dhcp/modem
-	# handlers) -- not a guess at what they might be called. Anything outside
-	# the list still gets reported verbatim rather than swallowed.
 	_r_err=$(printf '%s' "$_r_st" | jsonfilter -e '@.errors[0].code' 2>/dev/null)
 	if [ -n "$_r_err" ]; then
-		case "$_r_err" in
-			NO_DEVICE|NO_IFACE|NO_IFNAME|BAD_DEVICE)
-			                  echo "netifd The configured physical or logical device is missing." ;;
-			DEVICE_CLAIM_FAILED)
-			                  echo "netifd The device could not be claimed. Another interface is currently using it." ;;
-			NO_ADDRESS|ADDRESS_MISSING|NO_IPADDRESS)
-			                  echo "netifd No IP address was received from the upstream gateway or server." ;;
-			PREFIX_MISSING)   echo "netifd The service provider did not delegate an IPv6 prefix." ;;
-			PEER_AUTH_FAILED|CNID_AUTH_FAILED|AUTH_FAILED)
-			                  echo "netifd PPP authentication failed. The service provider rejected the credentials." ;;
-			AUTH_TOPEER_FAILED)
-			                  echo "netifd Upstream service provider authentication failed." ;;
-			CONNECT_FAILED|CALL_FAILED)
-			                  echo "netifd The attempt to establish a connection to the service provider failed." ;;
-			NEGOTIATION_FAILED)
-			                  echo "netifd PPP session negotiation with the service provider failed." ;;
-			PEER_DEAD|HANGUP) echo "netifd The service provider terminated the active PPP session." ;;
-			IDLE_TIMEOUT)     echo "netifd The PPP session was closed after an inactivity timeout." ;;
-			TRAFFIC_LIMIT)    echo "netifd The PPP session reached its configured data traffic limit." ;;
-			INVALID_ADDRESS|INVALID_GATEWAY|INVALID_NETMASK|INVALID_BROADCAST|INVALID_PTPADDR)
-			                  echo "netifd Invalid addressing information was received from the upstream service provider." ;;
-			OPTION_ERROR|INVALID_PROTO|INVALID_OPTIONS)
-			                  echo "netifd Interface configuration parameters were rejected." ;;
-			SETUP_FAILED|CONFIGURE_FAILED|INITIALIZE_FAILED)
-			                  echo "netifd Interface initialisation failed." ;;
-			NO_APN|NO_REGISTRATION|NETWORK_REGISTRATION_FAILED)
-			                  echo "netifd Cellular network registration failed." ;;
-			PIN_FAILED|PIN_NOT_SPECIFIED|MM_PINCODE_REQUIRED|MM_PINCODE_WRONG|PUK_NEEDED)
-			                  echo "netifd The SIM card is locked. A valid PIN or PUK code is required." ;;
-			*)                echo "netifd netifd reported the error code $_r_err." ;;
-		esac
+		netifd_error_reason "$_r_err"
 		return
 	fi
-
 	case "$_r_pending" in
 		1|true) echo "pending The connection is currently being negotiated." ; return ;;
 	esac
-
 	if [ "$_r_up" = "1" ] || [ "$_r_up" = "true" ]; then
 		if [ -z "$_r_v4" ] && [ -z "$_r_v6" ]; then
-			case "$_r_proto" in
-				dhcp|dhcpv6)
-					echo "nolease No DHCP lease was acquired. The upstream server did not respond, or the lease has expired." ;;
-				pppoe|pppoa|ppp|l2tp|pptp)
-					# netifd reports the protocol lowercase ("pppoe"), which read
-					# as a typo in a sentence shown to a person. Name each one the
-					# way its own standard does.
-					case "$_r_proto" in
-						pppoe) _r_pname="PPPoE" ;;
-						pppoa) _r_pname="PPPoA" ;;
-						ppp)   _r_pname="PPP" ;;
-						l2tp)  _r_pname="L2TP" ;;
-						pptp)  _r_pname="PPTP" ;;
-						*)     _r_pname="$_r_proto" ;;
-					esac
-					echo "nosession The $_r_pname session is not established." ;;
-				static)
-					echo "noaddress The configured static IP address is not assigned to the interface." ;;
-				*)
-					echo "noaddress The link is up, but no IP address was assigned." ;;
-			esac
-			return
+			no_address_reason "$_r_proto"
+		else
+			# Up and addressed, but discovery skipped it: no default route.
+			echo "noroute The interface is up with an assigned IP address, but no default route is provided by the upstream gateway."
 		fi
-		# Up, addressed, but discovery still skipped it -- the one remaining
-		# requirement is a default route, which is the upstream's to hand out.
-		echo "noroute The interface is up with an assigned IP address, but no default route is provided by the upstream gateway."
 		return
 	fi
 	echo "stopped The interface has been stopped by the network configuration daemon."
 }
 
-# Record an actual outage sample for an interface netifd has taken down.
-# No probe is attempted because its route/device is no longer valid; the
-# next ifup discovery will move it back to process_iface automatically.
-process_down_iface() {
-	_ifn=$1
-	_stats_file="$RINGDIR/${_ifn}.stats"
-	_total=0; _success=0; _status="unknown"; _streak_start=$_now
-	_lastgood_ms="x"; _consec_miss=0
-	[ -f "$_stats_file" ] && read -r _total _success _status _streak_start _lastgood_ms _consec_miss < "$_stats_file" 2>/dev/null
-	case "$_lastgood_ms" in ''|*[!0-9]*) _lastgood_ms="x" ;; esac
-	case "$_consec_miss" in ''|*[!0-9]*) _consec_miss=0 ;; esac
+# One forced outage sample in $1's .stats. Sets _went_down when this sample
+# takes the link from up to down.
+mark_iface_down() {
+	_sf="$RINGDIR/$1.stats"
+	load_stats "$_sf"
 	_total=$((_total + 1))
 	_was_status=$_status
 	_consec_miss=$((_consec_miss + 1))
@@ -1598,111 +1251,139 @@ process_down_iface() {
 		fi
 	fi
 	_status="$_new_status"
-	printf '%d %d %s %d %s %d\n' \
-		"$_total" "$_success" "$_status" "$_streak_start" \
-		"$_lastgood_ms" "$_consec_miss" > "$_stats_file"
-	record_window_sample "$_ifn" 0
-	# Mirror the same forced-down accounting into .gwstats, but only for an
-	# interface that actually has one -- its presence is what tells us this
-	# is an AP-mode uplink under gateway tracking, no separate flag needed.
-	# No .gwreason write: when netifd itself withdrew the route, .reason
-	# above already carries the real diagnosis for both streams.
-	_gwd_stats_file="$RINGDIR/${_ifn}.gwstats"
-	if [ -f "$_gwd_stats_file" ]; then
-		_gwd_total=0; _gwd_success=0; _gwd_status="unknown"; _gwd_streak_start=$_now
-		_gwd_lastgood_ms="x"; _gwd_consec_miss=0
-		read -r _gwd_total _gwd_success _gwd_status _gwd_streak_start _gwd_lastgood_ms _gwd_consec_miss < "$_gwd_stats_file" 2>/dev/null
-		case "$_gwd_lastgood_ms" in ''|*[!0-9]*) _gwd_lastgood_ms="x" ;; esac
-		_gwd_total=$((_gwd_total + 1))
-		if [ "$_gwd_status" != "down" ]; then
-			_gwd_status="down"
-			_gwd_streak_start=$_now
-		fi
-		printf '%d %d %s %d %s %d\n' \
-			"$_gwd_total" "$_gwd_success" "$_gwd_status" "$_gwd_streak_start" \
-			"$_gwd_lastgood_ms" "$MISS_THRESHOLD" > "$_gwd_stats_file"
-		record_window_sample "$_ifn" 0 "gw"
+	save_stats "$_sf"
+	record_window_sample "$1" 0
+	_went_down=0
+	[ "$_was_status" = "up" ] && [ "$_status" = "down" ] && _went_down=1
+}
+
+# An AP uplink's gateway stream goes down with it. No .gwreason: .reason
+# already carries netifd's diagnosis for both streams.
+mark_gateway_down() {
+	_sf="$RINGDIR/$1.gwstats"
+	load_stats "$_sf"
+	_total=$((_total + 1))
+	if [ "$_status" != "down" ]; then
+		_status="down"
+		_streak_start=$_now
 	fi
-	# Zero it explicitly: leaving the last rate in place showed traffic still
-	# flowing over a link that is down.
-	#
-	# The TIMESTAMP is zeroed too, not stamped with $_now. Zeroing the byte
-	# counters while leaving a live timestamp told sample_rate that this device
-	# had transferred zero bytes as of a moment ago -- so the first successful
-	# tick after the link returned computed (lifetime_bytes - 0) / 2s and
-	# published the entire history of the interface as two seconds' traffic.
-	# Measured against a real counter set: 3970.7 MB/s down, 2184.0 MB/s up on
-	# an ordinary broadband link. A zero timestamp fails sample_rate's
-	# [ "$_pw" -gt 0 ] guard instead, which is exactly the "start measuring
-	# again from here" path already used for a recreated device.
-	printf '0 0 0 0 0 -\n' > "$RINGDIR/${_ifn}.rate"
-	# Refresh the explanation on the transition and then only every
-	# REASON_INTERVAL, so a long outage does not cost a ubus fork per tick.
-	_reason_file="$RINGDIR/${_ifn}.reason"
+	_consec_miss=$MISS_THRESHOLD
+	save_stats "$_sf"
+	record_window_sample "$1" 0 "gw"
+}
+
+# Re-reads netifd's view on the transition, then every REASON_INTERVAL. Two
+# "missing" answers in a row mean the interface was deleted (one alone is
+# just a netifd restart); a .gone marker is left for the main loop, the only
+# writer of .tracked.
+refresh_down_reason() {
+	_reason_file="$RINGDIR/$1.reason"
 	_r_at=0; _r_rest=""
 	[ -f "$_reason_file" ] && read -r _r_at _r_rest < "$_reason_file" 2>/dev/null
 	case "$_r_at" in ''|*[!0-9]*) _r_at=0 ;; esac
 	_r_old_code=${_r_rest%% *}
 	if [ -z "$_r_rest" ] || [ $((_now - _r_at)) -ge "$REASON_INTERVAL" ]; then
-		_r_new=$(wan_down_reason "$_ifn")
+		_r_new=$(wan_down_reason "$1")
 		printf '%d %s\n' "$_now" "$_r_new" > "$_reason_file"
-		# "missing" means ubus has nothing at all for this interface --
-		# netifd does not know it, which is what happens once it is deleted
-		# or renamed in the config, not an ordinary outage. Reporting that
-		# forever as a WAN-down alert is what prompted this: a router still
-		# showed WAND/WAND6 as down after both interfaces had been removed,
-		# surviving a hard refresh and a re-login because the frontend was
-		# only ever reflecting what the RPC still had tracked.
-		#
-		# Requires two consecutive "missing" reads, one REASON_INTERVAL
-		# apart, before acting on it -- a single empty ubus reply during a
-		# netifd restart looks identical to a genuinely deleted interface,
-		# and that debounce is what stops an ordinary config reload from
-		# wiping a real WAN's whole 24h history. Actually dropping the
-		# interface happens in the main loop, never here: this runs as a
-		# background subshell, one per interface, and two going missing on
-		# the same tick would otherwise race to rewrite the same .tracked
-		# file. This only leaves a marker for the main loop to collect.
 		case "${_r_new%% *}:$_r_old_code" in
-			missing:missing) : > "$RINGDIR/.gone.${_ifn}" ;;
+			missing:missing) : > "$RINGDIR/.gone.$1" ;;
 		esac
 	fi
-	# Logged after the reason is known, so the one line in syslog carries the
-	# cause rather than just the fact.
-	if [ "$_was_status" = "up" ] && [ "$_status" = "down" ]; then
-		_lg_code=""; _lg_text=""
-		read -r _ _lg_code _lg_text < "$_reason_file" 2>/dev/null
+}
+
+# netifd has taken the interface down, so there is no route to probe over:
+# record an outage sample. The next ifup discovery resumes probing.
+process_down_iface() {
+	_ifn=$1
+	mark_iface_down "$_ifn"
+	[ -f "$RINGDIR/${_ifn}.gwstats" ] && mark_gateway_down "$_ifn"
+	# Zero the timestamp too: sample_rate then restarts from the next tick
+	# instead of reading lifetime bytes as one interval's traffic.
+	printf '0 0 0 0 0 -\n' > "$RINGDIR/${_ifn}.rate"
+	refresh_down_reason "$_ifn"
+	# Logged after the reason is known, so the syslog line carries the cause.
+	if [ "$_went_down" = "1" ]; then
+		_lg_text=""
+		read -r _ _ _lg_text < "$RINGDIR/${_ifn}.reason" 2>/dev/null
 		log_transition "$_ifn" down "$_lg_text"
 	fi
 }
 
+# rpcd relays the raw probe targets here whenever Settings is read or saved.
+# Version-gated so a file from an older rpcd is not read as "targets cleared".
+# Succeeds when the targets changed.
+poll_wan_targets() {
+	[ -f "$RINGDIR/.wan_targets" ] || return 1
+	WANTGT_V=""; WANTGT4=""; WANTGT6=""
+	. "$RINGDIR/.wan_targets" 2>/dev/null
+	[ "$WANTGT_V" = "2" ] && apply_targets "$WANTGT4" "$WANTGT6"
+}
+
+poll_persist_dir() {
+	[ -f "$RINGDIR/.persist_dir" ] || return
+	PERSISTDIR_V=""; PERSISTDIR=""
+	. "$RINGDIR/.persist_dir" 2>/dev/null
+	[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
+}
+
+probe_active_ifaces() {
+	[ -n "$IFACE_LIST" ] || return
+	while read -r _ifn _dev _srcip _mark _family _tgt _btgt _gw; do
+		[ -z "$_ifn" ] && continue
+		[ "$_srcip" = "-" ] && _srcip=""
+		process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_tgt" "$_btgt" "$_gw" &
+		_pids="$_pids $!"
+	done <<EOF
+$IFACE_LIST
+EOF
+}
+
+# Drops interfaces process_down_iface found deleted, without waiting for the
+# next rediscovery. Only the main loop rewrites .tracked, so the parallel
+# per-interface jobs never race on it.
+drop_gone_ifaces() {
+	_gone=""
+	for _gf in "$RINGDIR"/.gone.*; do
+		[ -e "$_gf" ] || continue
+		_gone="$_gone ${_gf##*/.gone.}"
+		rm -f "$_gf"
+	done
+	[ -n "$_gone" ] || return
+	_new_tracked=""
+	for _ifn in $TRACKED_IFACES; do
+		case " $_gone " in
+			*" $_ifn "*) drop_iface_state "$_ifn" ;;
+			*) _new_tracked="$_new_tracked $_ifn" ;;
+		esac
+	done
+	TRACKED_IFACES=$_new_tracked
+	write_tracked
+}
+
+# Tracked but without a default route: kept on the card as Offline, with one
+# outage sample per tick.
+probe_down_ifaces() {
+	for _ifn in $TRACKED_IFACES; do
+		case " $ACTIVE_IFACES " in *" $_ifn "*) continue ;; esac
+		process_down_iface "$_ifn" &
+		_pids="$_pids $!"
+	done
+}
+
+detect_asn_dns
+mkdir -p "$RINGDIR"
+load_persist_dir
+seed_tracked
+seed_wan_history
+load_targets
+
 while :; do
-	# Monotonic uptime, not wall-clock epoch -- a router with no
-	# battery-backed RTC boots with a wrong clock until NTP corrects it a
-	# few seconds/minutes in, and that correction can jump the wall clock
-	# by hours. _now feeds _streak_start (how long a link has been up/down)
-	# and the day-bucket index below; either stamped with a pre-NTP epoch
-	# would freeze at the wrong value once the clock jumps, since it's
-	# only re-stamped on an actual status change, not every tick.
+	# Monotonic uptime, not epoch: a router without an RTC jumps its clock at
+	# NTP sync, which would corrupt streak starts and bucket indexes.
 	read -r _now _ < /proc/uptime
 	_now=${_now%%.*}
 	_force_discover=0
-	# rpcd drops the user's raw WAN probe targets here whenever the dashboard
-	# settings are read or written, so a target change in the UI takes effect
-	# on the next tick instead of waiting for a collector restart. Sourcing is
-	# a builtin (no fork per tick); apply_targets re-resolves and returns true
-	# only when the value actually changed, which also invalidates the
-	# per-interface target cache held in IFACE_LIST.
-	if [ -f "$RINGDIR/.wan_targets" ]; then
-		WANTGT_V=""; WANTGT4=""; WANTGT6=""
-		. "$RINGDIR/.wan_targets" 2>/dev/null
-		# Version-gated: an older rpcd wrote a different set of names here,
-		# and treating that file as "user cleared both targets" would silently
-		# reset a configured target during a partial upgrade.
-		if [ "$WANTGT_V" = "2" ] && apply_targets "$WANTGT4" "$WANTGT6"; then
-			_force_discover=1
-		fi
-	fi
+	poll_wan_targets && _force_discover=1
 	if [ -f "$RINGDIR/.rediscover" ]; then
 		rm -f "$RINGDIR/.rediscover"
 		_force_discover=1
@@ -1711,73 +1392,15 @@ while :; do
 		discover_ifaces
 		LAST_DISCOVER=$_now
 	fi
-	# Same relay mechanism as .wan_targets above: rpcd writes this whenever
-	# Settings is read or saved, so a persist_dir change (or clearing it)
-	# takes effect on the next tick without a collector restart.
-	if [ -f "$RINGDIR/.persist_dir" ]; then
-		PERSISTDIR_V=""; PERSISTDIR=""
-		. "$RINGDIR/.persist_dir" 2>/dev/null
-		[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
-	fi
+	poll_persist_dir
 	if [ -n "$PERSISTDIR" ] && [ $((_now - LAST_PERSIST_SYNC)) -ge "$PERSIST_SYNC_INTERVAL" ]; then
 		sync_wan_history
 		LAST_PERSIST_SYNC=$_now
 	fi
 	_pids=""
-	if [ -n "$IFACE_LIST" ]; then
-		while read -r _ifn _dev _srcip _mark _family _tgt _btgt _gw; do
-			[ -z "$_ifn" ] && continue
-			# Undo the "-" placeholder discover_ifaces substitutes so this
-			# line can be space-joined without an empty field shifting
-			# every field after it -- see the comment there.
-			[ "$_srcip" = "-" ] && _srcip=""
-			process_iface "$_ifn" "$_dev" "$_srcip" "$_mark" "$_family" "$_tgt" "$_btgt" "$_gw" &
-			_pids="$_pids $!"
-		done <<EOF
-$IFACE_LIST
-EOF
-	fi
-
-	# Drop any interface process_down_iface confirmed is genuinely gone
-	# (see the "missing" handling there), rather than waiting up to
-	# DISCOVER_INTERVAL for the next full rediscovery to notice it left
-	# uci. Done here, in the single-threaded main loop, and nowhere else --
-	# process_down_iface runs one interface per background subshell, and
-	# two going missing on the same tick would otherwise race to rewrite
-	# the same .tracked file. The glob itself costs nothing (a builtin,
-	# not a fork) when there is nothing to collect, which is every tick on
-	# a router with no interface removed.
-	_gone=""
-	for _gf in "$RINGDIR"/.gone.*; do
-		[ -e "$_gf" ] || continue
-		_gone="$_gone ${_gf##*/.gone.}"
-		rm -f "$_gf"
-	done
-	if [ -n "$_gone" ]; then
-		_new_tracked=""
-		for _ifn in $TRACKED_IFACES; do
-			case " $_gone " in
-				*" $_ifn "*)
-					rm -f "$RINGDIR/$_ifn".* "$RINGDIR/.probe.$_ifn".* 2>/dev/null
-					;;
-				*) _new_tracked="$_new_tracked $_ifn" ;;
-			esac
-		done
-		TRACKED_IFACES=$_new_tracked
-		printf '%s\n' "$TRACKED_IFACES" | tr ' ' '\n' | sed '/^$/d' | sort > "$RINGDIR/.tracked"
-		mirror_tracked
-	fi
-
-	# Interfaces previously seen by the monitor but absent from the live
-	# default-route list are deliberately kept in the card as Offline and
-	# receive one timeout sample per tick. This covers both an ifdown test
-	# and a real link loss, including IPv4/IPv6 sibling interfaces.
-	for _ifn in $TRACKED_IFACES; do
-		case " $ACTIVE_IFACES " in *" $_ifn "*) continue ;; esac
-		process_down_iface "$_ifn" &
-		_pids="$_pids $!"
-	done
-
+	probe_active_ifaces
+	drop_gone_ifaces
+	probe_down_ifaces
 	if [ -n "$_pids" ]; then
 		wait $_pids 2>/dev/null
 	fi

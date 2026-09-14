@@ -2,17 +2,9 @@
 
 . /usr/share/hwdash/rpcd-common.sh
 
-
-# Which resolver should this package's own lookups use?
-#
-# Same rule as the collector: anything other than dnsmasq on :53 (AdGuard
-# Home, Pi-hole, Unbound) logs and charts every query it sees, and the Ping
-# Latency card is the heaviest DNS user in the package -- measured on one
-# router, 1,426 of the 1,487 logged queries for its default targets came from
-# the router itself. dnsmasq is left alone since it does not log per-query.
-#
-# Detected from the listener on :53 and cached for an hour: this method runs
-# about once a second, so it must never cost a netstat per call.
+# Anything but dnsmasq on :53 (AdGuard Home, Pi-hole, Unbound) logs every query,
+# and this card is the package's heaviest DNS user, so its lookups bypass it.
+# Cached for an hour: this method runs about once a second.
 HWDASH_DNS=""
 _dns_bypass() {
 	if _cache_read /tmp/hwdash_dnssrv.cache; then
@@ -32,10 +24,8 @@ _dns_bypass() {
 	_cache_write /tmp/hwdash_dnssrv.cache 3600 "${HWDASH_DNS:--}"
 }
 
-# Resolve a hostname off the local resolver. Empty result means "could not",
-# and the caller keeps the name -- for the ping card a one-off fallback is
-# better than losing the probe entirely, and it cannot recur often because the
-# answer is cached for 30 minutes either way.
+# Prints the address of $1 (family $2) from the bypass resolver, or nothing if
+# it cannot; the caller then pings the name rather than lose the probe.
 _resolve_off_resolver() {
 	[ -z "$HWDASH_DNS" ] && return
 	_rqt=A; [ "$2" = "6" ] && _rqt=AAAA
@@ -45,48 +35,45 @@ _resolve_off_resolver() {
 	printf '%s' "$_rres"
 }
 
-case "$1" in
-	list)
-		echo '{ "ping": { } }'
-		;;
-	call)
-		case "$2" in
-			ping)
-				HWDASH_NOW=$(date +%s 2>/dev/null)
-				_dns_bypass
-				# Router-side latency probes. Target list priority:
-				#   1. "targets" array in the RPC args (set from the dashboard
-				#      settings panel, stored per-browser) — "<host> <4|6>"
-				#   2. /etc/hwdash-ping.targets, one "<host> <4|6>" per line
-				#   3. built-in defaults
-				# All pings run in parallel with a 1s timeout, so the call
-				# returns in ~RTT of the slowest target, never serially.
-				_PT_LIST=""
-				_IN=""
-				IFS= read -r _IN 2>/dev/null
-				if [ -n "$_IN" ] && command -v jsonfilter >/dev/null; then
-					while read -r _pt_h _pt_f _; do
-						[ -z "$_pt_h" ] && continue
-						# hosts feed a command line — allow hostname/IP chars only
-						case "$_pt_h" in *[!A-Za-z0-9.:-]*) continue ;; esac
-						case "$_pt_f" in 4|6) ;; *) _pt_f=4 ;; esac
-						_PT_LIST="$_PT_LIST$_pt_h $_pt_f
+_is_name() {
+	case "$1" in *:*) return 1 ;; *[!0-9.]*) return 0 ;; esac
+	return 1
+}
+
+# _map_get MAP KEY sets _MV to KEY's value in a "k=v;k=v" map, or empty.
+_map_get() {
+	_MV=""
+	case ";$1;" in
+		*";$2="*)
+			_MV=";$1;"
+			_MV=${_MV#*";$2="}
+			_MV=${_MV%%;*}
+			;;
+	esac
+}
+
+# Appends "<host> <4|6>" lines from stdin to _PT_LIST. Hosts end up on a ping
+# command line, so only hostname and address characters are accepted.
+_pt_parse() {
+	while read -r _pt_h _pt_f _; do
+		case "$_pt_h" in ''|*[!A-Za-z0-9.:-]*) continue ;; esac
+		case "$_pt_f" in 4|6) ;; *) _pt_f=4 ;; esac
+		_PT_LIST="$_PT_LIST$_pt_h $_pt_f
 "
-					done <<EOF
-$(printf '%s' "$_IN" | jsonfilter -e '@.targets[*]' 2>/dev/null)
+	done
+}
+
+# Targets from the first source that has any: the RPC's "targets" array (set in
+# the settings panel), /etc/hwdash-ping.targets, then the built-in list.
+_ping_targets() {
+	_PT_LIST=""
+	if [ -n "$1" ] && command -v jsonfilter >/dev/null; then
+		_pt_parse <<EOF
+$(printf '%s' "$1" | jsonfilter -e '@.targets[*]' 2>/dev/null)
 EOF
-				fi
-				_PT_FILE=/etc/hwdash-ping.targets
-				if [ -z "$_PT_LIST" ] && [ -f "$_PT_FILE" ]; then
-					while read -r _pt_h _pt_f _; do
-						case "$_pt_h" in ''|'#'*) continue ;; esac
-						case "$_pt_h" in *[!A-Za-z0-9.:-]*) continue ;; esac
-						case "$_pt_f" in 4|6) ;; *) _pt_f=4 ;; esac
-						_PT_LIST="$_PT_LIST$_pt_h $_pt_f
-"
-					done < "$_PT_FILE"
-				fi
-				[ -z "$_PT_LIST" ] && _PT_LIST="dns.google 4
+	fi
+	[ -z "$_PT_LIST" ] && [ -f /etc/hwdash-ping.targets ] && _pt_parse < /etc/hwdash-ping.targets
+	[ -z "$_PT_LIST" ] && _PT_LIST="dns.google 4
 dns.google 6
 google.com 4
 google.com 6
@@ -95,338 +82,293 @@ one.one.one.one 6
 youtube.com 4
 youtube.com 6
 "
-				# Auto-prepend the default IPv4 gateway (first hop) — the most
-				# diagnostic target there is: spikes here mean the local link,
-				# flat here + spiking internet targets means the ISP/beyond.
-				# /proc/net/route: dst 00000000 row, gateway hex little-endian.
-				_GW=""
-				while read -r _rif _rdst _rgw _rflg _; do
-					[ "$_rdst" = "00000000" ] || continue
-					case "$_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
-					[ "$_rgw" = "00000000" ] && continue
-					_b1=${_rgw#??????}
-					_b2=${_rgw#????}; _b2=${_b2%??}
-					_b3=${_rgw#??}; _b3=${_b3%????}
-					_b4=${_rgw%??????}
-					_GW="$((0x$_b1)).$((0x$_b2)).$((0x$_b3)).$((0x$_b4))"
-					break
-				done < /proc/net/route
-				if [ -n "$_GW" ]; then
-					case "$_PT_LIST" in
-						"$_GW 4"*) ;;
-						*"
-$_GW 4"*) ;;
-						*) _PT_LIST="$_GW 4
-$_PT_LIST" ;;
-					esac
-				fi
-				# IPv6 default gateway (cached 60s): the FIRST default route
-				# (ip orders by metric, so lowest-metric wins) — on real ISPs
-				# this is the BNG/BRAS link-local. The %zone is kept internally
-				# so the probe works, but stripped from everything shown.
-				# netifd v6 wan interfaces are the fallback source.
-				_GW6=""
-				if _cache_read /tmp/hwdash_gw6.cache; then
-					[ "$C_VAL" != "-" ] && _GW6=$C_VAL
-				else
-					if command -v ip >/dev/null; then
-						while read -r _d6 _via6 _g6 _dev6 _if6 _; do
-							[ "$_d6" = "default" ] || continue
-							[ "$_via6" = "via" ] || continue
-							_GW6=$_g6
-							case "$_g6" in
-								fe80:*) [ "$_dev6" = "dev" ] && _GW6="$_g6%$_if6" ;;
-							esac
-							break
-						done <<EOF6
+}
+
+# Default IPv4 gateway into _GW. /proc/net/route holds it as little-endian hex.
+_gateway4() {
+	_GW=""
+	while read -r _rif _rdst _rgw _rflg _; do
+		[ "$_rdst" = "00000000" ] || continue
+		case "$_rgw" in *[!0-9A-Fa-f]*|"") continue ;; esac
+		[ "$_rgw" = "00000000" ] && continue
+		_b1=${_rgw#??????}
+		_b2=${_rgw#????}; _b2=${_b2%??}
+		_b3=${_rgw#??}; _b3=${_b3%????}
+		_b4=${_rgw%??????}
+		_GW="$((0x$_b1)).$((0x$_b2)).$((0x$_b3)).$((0x$_b4))"
+		break
+	done < /proc/net/route
+}
+
+# Default IPv6 gateway into _GW6, cached 60 s: the first default route (ip lists
+# the lowest metric first), else netifd's WAN route. A link-local keeps its
+# %zone so the probe works; it is stripped from everything shown.
+_gateway6() {
+	_GW6=""
+	if _cache_read /tmp/hwdash_gw6.cache; then
+		[ "$C_VAL" != "-" ] && _GW6=$C_VAL
+		return
+	fi
+	if command -v ip >/dev/null; then
+		while read -r _d6 _via6 _g6 _dev6 _if6 _; do
+			[ "$_d6" = "default" ] || continue
+			[ "$_via6" = "via" ] || continue
+			_GW6=$_g6
+			case "$_g6" in
+				fe80:*) [ "$_dev6" = "dev" ] && _GW6="$_g6%$_if6" ;;
+			esac
+			break
+		done <<EOF
 $(ip -6 route show default 2>/dev/null)
-EOF6
-					fi
-					if [ -z "$_GW6" ] && command -v jsonfilter >/dev/null; then
-						for _w6 in wan6 wan_6 wan; do
-							_ifn6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
-							_g6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
-							case "$_g6" in
-								'') ;;
-								fe80:*) _GW6="$_g6${_ifn6:+%$_ifn6}"; break ;;
-								*:*) _GW6=$_g6; break ;;
-							esac
-						done
-					fi
-					_cache_write /tmp/hwdash_gw6.cache 60 "${_GW6:--}"
-				fi
-				if [ -n "$_GW6" ]; then
-					case "$_PT_LIST" in
-						"$_GW6 6"*) ;;
-						*"
-$_GW6 6"*) ;;
-						*) _PT_LIST="$_GW 4
-$_GW6 6
-${_PT_LIST#$_GW 4
-}" ;;
-					esac
-				fi
-				# Reverse DNS for IP-literal targets (gateways, user-added IPs).
-				# Resolved by a detached child into a 30-min cache — never on
-				# the request path. Failures cache as "-" so they don't retry
-				# every second.
-				RDNS_MAP=""
-				_cache_read /tmp/hwdash_rdns.cache && RDNS_MAP=$C_VAL
-				_RDNS_MISS=""
-				while read -r _pt_h _pt_f; do
-					[ -z "$_pt_h" ] && continue
-					case "$_pt_h" in
-						*[!0-9.]*) case "$_pt_h" in *:*) ;; *) continue ;; esac ;;
-					esac
-					case ";$RDNS_MAP" in *";$_pt_h="*) continue ;; esac
-					_RDNS_MISS="$_RDNS_MISS $_pt_h"
-				done <<EOFR
+EOF
+	fi
+	if [ -z "$_GW6" ] && command -v jsonfilter >/dev/null; then
+		for _w6 in wan6 wan_6 wan; do
+			_ifn6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+			_g6=$(ubus call network.interface.$_w6 status 2>/dev/null | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+			case "$_g6" in
+				'') ;;
+				fe80:*) _GW6="$_g6${_ifn6:+%$_ifn6}"; break ;;
+				*:*) _GW6=$_g6; break ;;
+			esac
+		done
+	fi
+	_cache_write /tmp/hwdash_gw6.cache 60 "${_GW6:--}"
+}
+
+# The first hop leads the list: spikes there mean the local link, while a flat
+# first hop under spiking internet targets points at the ISP or beyond.
+_prepend_gateways() {
+	_head=""
+	[ -n "$_GW" ] && ! _listed "$_GW 4" && _head="$_GW 4
+"
+	[ -n "$_GW6" ] && ! _listed "$_GW6 6" && _head="$_head$_GW6 6
+"
+	_PT_LIST="$_head$_PT_LIST"
+}
+
+# 0 when the "<host> <family>" line $1 is already in _PT_LIST.
+_listed() {
+	case "
+$_PT_LIST" in *"
+$1
+"*) return 0 ;; esac
+	return 1
+}
+
+# Reverse DNS for IP-literal targets comes from a detached job into a 30-minute
+# cache, never the request path. Failures cache as "-" so they are not retried
+# every second.
+_rdns_refresh() {
+	RDNS_MAP=""
+	_cache_read /tmp/hwdash_rdns.cache && RDNS_MAP=$C_VAL
+	_rdns_miss=""
+	while read -r _pt_h _pt_f; do
+		[ -z "$_pt_h" ] && continue
+		_is_name "$_pt_h" && continue
+		case ";$RDNS_MAP" in *";$_pt_h="*) continue ;; esac
+		_rdns_miss="$_rdns_miss $_pt_h"
+	done <<EOF
 $_PT_LIST
-EOFR
-				if [ -n "$_RDNS_MISS" ] && ! _cache_read /tmp/hwdash_rdns.lock; then
-					_cache_write /tmp/hwdash_rdns.lock 60 resolving
-					(
-						_map=$RDNS_MAP
-						for _rip in $_RDNS_MISS; do
-							_bare=${_rip%%%*}
-							_nm="-"
-							while read -r _rl; do
-								case "$_rl" in
-									*" name = "*)
-										_nm=${_rl##* name = }
-										_nm=${_nm%.}
-										break
-										;;
-								esac
-							done <<EOFN
+EOF
+	[ -n "$_rdns_miss" ] || return
+	_cache_read /tmp/hwdash_rdns.lock && return
+	_cache_write /tmp/hwdash_rdns.lock 60 resolving
+	_rdns_resolve $_rdns_miss >/dev/null 2>&1 &
+}
+
+_rdns_resolve() {
+	_map=$RDNS_MAP
+	for _rip; do
+		_bare=${_rip%%%*}
+		_nm="-"
+		while read -r _rl; do
+			case "$_rl" in
+				*" name = "*)
+					_nm=${_rl##* name = }
+					_nm=${_nm%.}
+					break
+					;;
+			esac
+		done <<EOF
 $(nslookup "$_bare" $HWDASH_DNS 2>/dev/null)
-EOFN
-							case "$_nm" in *[!A-Za-z0-9.-]*) _nm="-" ;; esac
-							_map="${_map:+$_map;}$_rip=$_nm"
-						done
-						_cache_write /tmp/hwdash_rdns.cache 1800 "$_map"
-					) >/dev/null 2>&1 &
-				fi
-				# DNS-quiet mode: the resolved address of each domain target is
-				# cached for 30 minutes and later probes ping the IP literal —
-				# the DNS server (AdGuardHome etc.) sees each domain once per
-				# 10 minutes instead of once per second. A timeout on a cached
-				# IP drops the entry so the next probe re-resolves (heals DNS
-				# rotation); the cache file is only rewritten when it changes.
-				DNS_MAP=""
-				_cache_read /tmp/hwdash_dns.cache && DNS_MAP=$C_VAL
-				# -n (no reverse DNS) is an iputils flag and the fix for the
-				# 5s resolver-hang; busybox ping builds vary, so probe loopback
-				# once (cached 1h) and only pass -n where it is accepted.
-				PING_N=""
-				if _cache_read /tmp/hwdash_ping_n.cache; then
-					PING_N=$C_VAL
-				else
-					ping -4 -c 1 -w 1 -n 127.0.0.1 >/dev/null 2>&1 && PING_N="-n"
-					_cache_write /tmp/hwdash_ping_n.cache 3600 "$PING_N"
-				fi
-				_PT_TMP="/tmp/hwdash_ping.$$"
-				_pi=0
-				_ping_pids=""
-				while read -r _pt_h _pt_f; do
-					[ -z "$_pt_h" ] && continue
-					_tgt=$_pt_h
-					case "$_pt_h" in
-						*:*) ;;
-						*[!0-9.]*)
-							case ";$DNS_MAP;" in
-								*";$_pt_h|$_pt_f="*)
-									_tgt=";$DNS_MAP;"
-									_tgt=${_tgt#*";$_pt_h|$_pt_f="}
-									_tgt=${_tgt%%;*}
-									[ -z "$_tgt" ] && _tgt=$_pt_h
-									;;
-							esac
-							;;
-					esac
-					(
-						# Still a name here means the 30-minute map had no
-						# entry. Resolve it ourselves rather than letting ping
-						# hand it to the local resolver. Done inside the
-						# subshell so every cold target resolves in parallel
-						# with the others, not one after another.
-						case "$_tgt" in
-							*[!0-9.:]*)
-								_rip=$(_resolve_off_resolver "$_tgt" "$_pt_f")
-								[ -n "$_rip" ] && _tgt=$_rip
-								;;
-						esac
-						# family FIRST, -w 2 = hard 2s deadline (route/connect
-						# hangs that -W does not cap), -n = no reverse-DNS
-						# (its resolver timeout was the 5s stall when the
-						# internet/DNS was unreachable).
-						#
-						# Two packets, not one. Large anycast targets rate-limit
-						# ICMP, so a single probe drops often enough to blank a
-						# row that is perfectly healthy: measured 60 paired
-						# rounds against youtube.com, -c 1 got no reply 4 times
-						# and -c 2 zero times, rescuing every one. -A sends the
-						# second packet as soon as the first reply lands instead
-						# of waiting out the 1s interval, so the cost is ~2x RTT
-						# (~140ms to a distant target, ~25ms to the gateway)
-						# rather than the full second -c 2 would otherwise take.
-						# stderr is folded in, not discarded: "ping: bad address
-						# '<host>'" is written there, and it is the only signal
-						# distinguishing a name that never resolved from a host
-						# that did not answer. Safe to merge, because every field
-						# parsed out of this capture keys on "time=" or the "PING
-						# host (ip)" banner, neither of which stderr can produce.
-						_out=$(ping -"$_pt_f" -c 2 -A -w 2 -W 1 $PING_N "$_tgt" 2>&1)
-						# resolved address from the "PING host (ip)" banner — the
-						# IP this probe ACTUALLY hit (visible through DNS rotation)
-						_ip=""
-						case "$_out" in
-							*"("*")"*)
-								_ip=${_out#*\(}
-								_ip=${_ip%%\)*}
-								case "$_ip" in *[!0-9a-fA-F:.]*) _ip="" ;; esac
-								;;
-						esac
-						_t=""
-						case "$_out" in
-							*time=*)
-								_t=${_out##*time=}
-								# keep only the leading numeric run (handles both
-								# "time=48.9 ms" and "time=48.9ms" formats)
-								_t=${_t%%[!0-9.]*}
-								case "$_t" in ''|.|*.*.*) _t="" ;; esac
-								;;
-						esac
-						# Real ICMP packet counts, for the card's loss column.
-						# (Inferring loss from a poll returning nothing only
-						# catches a probe that lost EVERY packet, so with more
-						# than one packet per probe it under-reports badly.)
-						#
-						# Counted by tallying reply lines rather than reading
-						# ping's summary, because neither summary field can be
-						# trusted across these builds:
-						#   - BusyBox 1.37 prints "2 packets received",
-						#     1.38 prints "2 received" -- a parser keyed on
-						#     either wording silently yields 0 on the other,
-						#     i.e. a permanent fake 100% loss.
-						#   - "transmitted" is inflated whenever -w cuts the run
-						#     short mid-flight: a healthy link routinely reports
-						#     "3 packets transmitted, 2 received, 33% loss".
-						# The count we asked for is the honest denominator, and
-						# a "time=" line is an unambiguous reply on every build.
-						# ("time 59ms" in the 1.38 summary has no '=', so it
-						# cannot be miscounted as a reply.)
-						# A name that would not resolve is not packet loss. busybox
-						# ping prints "ping: bad address '<host>'" and puts nothing
-						# on the wire, but this used to fall through with _snt=2
-						# and _rcv=0 -- reporting 100% loss for a target against
-						# which no ICMP packet was ever sent, indistinguishable on
-						# the card from a real outage. Zero sent means the reader
-						# derives no ratio at all, and "?" marks the cause as
-						# unresolved rather than unanswered.
-						case "$_out" in
-							*"bad address"*|*"unknown host"*|*"Name or service not known"*)
-								printf '%s %s %s %s' '?' 0 0 '' > "$_PT_TMP.$_pi"
-								exit 0
-								;;
-						esac
-						_snt=2; _rcv=0
-						_pp=$_out
-						while :; do
-							case "$_pp" in
-								*time=*) _rcv=$((_rcv + 1)); _pp=${_pp#*time=} ;;
-								*) break ;;
-							esac
-						done
-						[ "$_rcv" -gt "$_snt" ] && _rcv=$_snt
-						# "x" marks no-reply so the reader can still pick up the
-						# IP. Counts come before the address because the address
-						# is the field that can legitimately be empty, and a
-						# trailing empty field is the only one `read` handles
-						# without shifting everything after it.
-						if [ -n "$_t$_ip" ] || [ "$_snt" -gt 0 ]; then
-							printf '%s %s %s %s' "${_t:-x}" "$_snt" "$_rcv" "$_ip" > "$_PT_TMP.$_pi"
-						fi
-					) &
-					_ping_pids="$_ping_pids $!"
-					_pi=$((_pi + 1))
-				done <<EOF
+EOF
+		case "$_nm" in *[!A-Za-z0-9.-]*) _nm="-" ;; esac
+		_map="${_map:+$_map;}$_rip=$_nm"
+	done
+	_cache_write /tmp/hwdash_rdns.cache 1800 "$_map"
+}
+
+# -n (no reverse DNS) is an iputils flag that some busybox ping builds reject,
+# so it is tried once on loopback and the answer cached for an hour.
+_ping_n_flag() {
+	PING_N=""
+	if _cache_read /tmp/hwdash_ping_n.cache; then
+		PING_N=$C_VAL
+	else
+		ping -4 -c 1 -w 1 -n 127.0.0.1 >/dev/null 2>&1 && PING_N="-n"
+		_cache_write /tmp/hwdash_ping_n.cache 3600 "$PING_N"
+	fi
+}
+
+# Pings $1 (family $2) and leaves "<ms|x|?> <sent> <recv> <ip>" in file $3: "x"
+# is no reply, "?" a name that never resolved. The address goes last because it
+# can be empty, and only a trailing empty field survives `read`.
+_probe() {
+	_tgt=$1
+	# Still a name means the address map missed. Resolving here, inside the
+	# job, keeps it off the local resolver and lets cold names run in parallel.
+	case "$_tgt" in
+		*[!0-9.:]*)
+			_rip=$(_resolve_off_resolver "$_tgt" "$2")
+			[ -n "$_rip" ] && _tgt=$_rip
+			;;
+	esac
+	# Two packets: anycast targets rate-limit ICMP, so one often blanks a
+	# healthy row. -A sends the second as soon as the first reply lands, and
+	# -w 2 caps the route/connect hangs that -W does not.
+	# stderr is kept because "bad address" is the only sign that a name never
+	# resolved; the parsing below keys on the banner and "time=", which stderr
+	# never prints.
+	_out=$(ping -"$2" -c 2 -A -w 2 -W 1 $PING_N "$_tgt" 2>&1)
+	case "$_out" in
+		*"bad address"*|*"unknown host"*|*"Name or service not known"*)
+			printf '%s %s %s %s' '?' 0 0 '' > "$3"
+			return
+			;;
+	esac
+	# The address actually hit, from the "PING host (ip)" banner.
+	_ip=""
+	case "$_out" in
+		*"("*")"*)
+			_ip=${_out#*\(}
+			_ip=${_ip%%\)*}
+			case "$_ip" in *[!0-9a-fA-F:.]*) _ip="" ;; esac
+			;;
+	esac
+	# The last reply's time, as "time=48.9 ms" or "time=48.9ms".
+	_t=""
+	case "$_out" in
+		*time=*)
+			_t=${_out##*time=}
+			_t=${_t%%[!0-9.]*}
+			case "$_t" in ''|.|*.*.*) _t="" ;; esac
+			;;
+	esac
+	# Replies are "time=" lines counted against the 2 asked for. The summary is
+	# no use: busybox 1.37 and 1.38 word it differently, and "transmitted"
+	# overcounts when -w cuts a run short.
+	_rcv=0; _pp=$_out
+	while :; do
+		case "$_pp" in
+			*time=*) _rcv=$((_rcv + 1)); _pp=${_pp#*time=} ;;
+			*) break ;;
+		esac
+	done
+	[ "$_rcv" -gt 2 ] && _rcv=2
+	printf '%s %s %s %s' "${_t:-x}" 2 "$_rcv" "$_ip" > "$3"
+}
+
+# Every target probes in parallel, so the call takes as long as the slowest.
+_probe_all() {
+	_pi=0; _ping_pids=""
+	while read -r _pt_h _pt_f; do
+		[ -z "$_pt_h" ] && continue
+		_tgt=$_pt_h
+		if _is_name "$_pt_h"; then
+			_map_get "$DNS_MAP" "$_pt_h|$_pt_f"
+			[ -n "$_MV" ] && _tgt=$_MV
+		fi
+		_probe "$_tgt" "$_pt_f" "$_PT_TMP.$_pi" &
+		_ping_pids="$_ping_pids $!"
+		_pi=$((_pi + 1))
+	done <<EOF
 $_PT_LIST
 EOF
-				# Wait ONLY for the ping children, never a bare `wait` — a bare
-				# wait also blocks on the detached reverse-DNS nslookup child,
-				# whose NXDOMAIN timeout (~5s) was stalling every ping call.
-				for _wp in $_ping_pids; do wait "$_wp" 2>/dev/null; done
-				PINGS="["
-				_pi=0
-				_PF=1
-				_NEW_MAP=""
-				_MAP_DIRTY=0
-				while read -r _pt_h _pt_f; do
-					[ -z "$_pt_h" ] && continue
-					_ms="null"; _pip=""; _psnt=0; _prcv=0; _unres=0
-					if [ -f "$_PT_TMP.$_pi" ]; then
-						read -r _ms _psnt _prcv _pip < "$_PT_TMP.$_pi" 2>/dev/null
-						rm -f "$_PT_TMP.$_pi" 2>/dev/null
-						# "?" means the name never resolved, so no packet was sent.
-						# Captured before the sanitiser below folds every
-						# non-numeric token into "null", which would otherwise make
-						# it indistinguishable from a probe that timed out.
-						[ "$_ms" = "?" ] && _unres=1
-						case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
-						case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
-						case "$_psnt" in ''|*[!0-9]*) _psnt=0 ;; esac
-						case "$_prcv" in ''|*[!0-9]*) _prcv=0 ;; esac
-						[ "$_prcv" -gt "$_psnt" ] && _prcv=$_psnt
-					fi
-					# maintain the domain->IP cache from this probe result
-					case "$_pt_h" in
-						*:*) ;;
-						*[!0-9.]*)
-							_old=""
-							case ";$DNS_MAP;" in
-								*";$_pt_h|$_pt_f="*)
-									_old=";$DNS_MAP;"
-									_old=${_old#*";$_pt_h|$_pt_f="}
-									_old=${_old%%;*}
-									;;
-							esac
-							if [ "$_ms" != "null" ] && [ -n "$_pip" ]; then
-								_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$_pt_h|$_pt_f=$_pip"
-								[ "$_pip" != "$_old" ] && _MAP_DIRTY=1
-							elif [ "$_ms" = "null" ] && [ -n "$_old" ]; then
-								_MAP_DIRTY=1
-							elif [ -n "$_old" ]; then
-								_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$_pt_h|$_pt_f=$_old"
-							fi
-							;;
-					esac
-					_rdns=""
-					case ";$RDNS_MAP;" in
-						*";$_pt_h="*)
-							_rdns=";$RDNS_MAP;"
-							_rdns=${_rdns#*";$_pt_h="}
-							_rdns=${_rdns%%;*}
-							[ "$_rdns" = "-" ] && _rdns=""
-							;;
-					esac
-					json_esc "$_rdns"; _rdj=$JSV
-					# report hosts without the internal %zone suffix
-					json_esc "${_pt_h%%%*}"
-					_unres_j="false"
-					[ "$_unres" = "1" ] && _unres_j="true"
-					[ $_PF -eq 0 ] && PINGS="$PINGS,"
-					PINGS="$PINGS{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms,\"sent\":$_psnt,\"recv\":$_prcv,\"unresolved\":$_unres_j}"
-					_PF=0
-					_pi=$((_pi + 1))
-				done <<EOF
+	# Never a bare wait: it would also block on the detached reverse-DNS job,
+	# whose NXDOMAIN timeout is about 5 s.
+	for _wp in $_ping_pids; do wait "$_wp" 2>/dev/null; done
+}
+
+# Reads and sanitises probe result file $1 into _ms _psnt _prcv _pip _unres.
+_read_result() {
+	_ms="null"; _pip=""; _psnt=0; _prcv=0; _unres=0
+	[ -f "$1" ] || return
+	read -r _ms _psnt _prcv _pip < "$1" 2>/dev/null
+	rm -f "$1" 2>/dev/null
+	# Before the sanitiser turns "?" into null, which would read as a timeout.
+	[ "$_ms" = "?" ] && _unres=1
+	case "$_ms" in ''|x|*[!0-9.]*) _ms="null" ;; esac
+	case "$_pip" in *[!0-9a-fA-F:.]*) _pip="" ;; esac
+	case "$_psnt" in ''|*[!0-9]*) _psnt=0 ;; esac
+	case "$_prcv" in ''|*[!0-9]*) _prcv=0 ;; esac
+	[ "$_prcv" -gt "$_psnt" ] && _prcv=$_psnt
+}
+
+# DNS-quiet mode: a name's address is cached for 30 minutes and later probes
+# ping the literal. A timeout drops the entry so the next probe re-resolves,
+# which heals DNS rotation. $1 is the "host|family" key.
+_dns_map_update() {
+	_map_get "$DNS_MAP" "$1"
+	if [ "$_ms" != "null" ] && [ -n "$_pip" ]; then
+		_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$1=$_pip"
+		[ "$_pip" != "$_MV" ] && _MAP_DIRTY=1
+	elif [ "$_ms" = "null" ] && [ -n "$_MV" ]; then
+		_MAP_DIRTY=1
+	elif [ -n "$_MV" ]; then
+		_NEW_MAP="${_NEW_MAP:+$_NEW_MAP;}$1=$_MV"
+	fi
+}
+
+# Builds the PINGS array from the probe results, in target order.
+_collect() {
+	PINGS=""; _pi=0
+	_NEW_MAP=""; _MAP_DIRTY=0
+	while read -r _pt_h _pt_f; do
+		[ -z "$_pt_h" ] && continue
+		_read_result "$_PT_TMP.$_pi"
+		_pi=$((_pi + 1))
+		_is_name "$_pt_h" && _dns_map_update "$_pt_h|$_pt_f"
+		_map_get "$RDNS_MAP" "$_pt_h"
+		[ "$_MV" = "-" ] && _MV=""
+		json_esc "$_MV"; _rdj=$JSV
+		_unres_j=false; [ "$_unres" = "1" ] && _unres_j=true
+		json_esc "${_pt_h%%%*}"
+		PINGS="$PINGS${PINGS:+,}{\"host\":\"$JSV\",\"fam\":$_pt_f,\"ip\":\"$_pip\",\"rdns\":\"$_rdj\",\"ms\":$_ms,\"sent\":$_psnt,\"recv\":$_prcv,\"unresolved\":$_unres_j}"
+	done <<EOF
 $_PT_LIST
 EOF
-				PINGS="$PINGS]"
-				[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 1800 "$_NEW_MAP"
-				json_esc "${_GW6%%%*}"
-				echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
-				;;
+	PINGS="[$PINGS]"
+}
+
+_ping() {
+	HWDASH_NOW=$(date +%s 2>/dev/null)
+	_dns_bypass
+	_IN=""
+	IFS= read -r _IN 2>/dev/null
+	_ping_targets "$_IN"
+	_gateway4
+	_gateway6
+	_prepend_gateways
+	_rdns_refresh
+	DNS_MAP=""
+	_cache_read /tmp/hwdash_dns.cache && DNS_MAP=$C_VAL
+	_ping_n_flag
+	_PT_TMP="/tmp/hwdash_ping.$$"
+	_probe_all
+	_collect
+	[ "$_MAP_DIRTY" = "1" ] && _cache_write /tmp/hwdash_dns.cache 1800 "$_NEW_MAP"
+	json_esc "${_GW6%%%*}"
+	echo "{\"gateway\":\"$_GW\",\"gateway6\":\"$JSV\",\"targets\":$PINGS}"
+}
+
+case "$1" in
+	list)
+		echo '{ "ping": { } }'
+		;;
+	call)
+		case "$2" in
+			ping) _ping ;;
 		esac
 		;;
 esac

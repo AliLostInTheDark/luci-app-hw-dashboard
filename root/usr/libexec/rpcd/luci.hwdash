@@ -2,21 +2,19 @@
 
 . /usr/share/hwdash/rpcd-common.sh
 
-_JS_TAB=$(printf '\t')
-_JS_CR=$(printf '\r')
+_TAB=$(printf '\t')
+_CR=$(printf '\r')
 
-# Strip leading/trailing spaces, tabs and carriage returns from the variable
-# named $1 using parameter expansion only — replaces the per-value
-# `sed 's/[[:space:]]*$//'` forks (sysfs model/serial strings are padded with
-# trailing spaces; some debugfs and iwinfo outputs carry a trailing CR).
+# Trims spaces, tabs and CRs around the variable named $1 without forking sed:
+# sysfs model strings are space-padded and some iwinfo output ends in a CR.
 trim_ws() {
 	local __v
 	eval "__v=\$$1"
-	while [ "${__v% }" != "$__v" ] || [ "${__v%$_JS_TAB}" != "$__v" ] || [ "${__v%$_JS_CR}" != "$__v" ]; do
-		__v=${__v% }; __v=${__v%$_JS_TAB}; __v=${__v%$_JS_CR}
+	while [ "${__v% }" != "$__v" ] || [ "${__v%$_TAB}" != "$__v" ] || [ "${__v%$_CR}" != "$__v" ]; do
+		__v=${__v% }; __v=${__v%$_TAB}; __v=${__v%$_CR}
 	done
-	while [ "${__v# }" != "$__v" ] || [ "${__v#$_JS_TAB}" != "$__v" ] || [ "${__v#$_JS_CR}" != "$__v" ]; do
-		__v=${__v# }; __v=${__v#$_JS_TAB}; __v=${__v#$_JS_CR}
+	while [ "${__v# }" != "$__v" ] || [ "${__v#$_TAB}" != "$__v" ] || [ "${__v#$_CR}" != "$__v" ]; do
+		__v=${__v# }; __v=${__v#$_TAB}; __v=${__v#$_CR}
 	done
 	eval "$1=\$__v"
 }
@@ -61,9 +59,7 @@ get_disk_meta() {
 			local ubi_dev=${ubi_vol%_*}
 			local mtd_num
 			read_file mtd_num "/sys/class/ubi/ubi${ubi_dev}/mtd_num" ""
-			# Do NOT set parent=$dev — that would read the UBI volume size
-			# (e.g. 26 MB for rootfs), not the physical NAND chip size.
-			# Read the parent MTD device size directly here instead.
+			# The volume's own size is not the chip's: use the parent MTD.
 			parent=""
 			if [ -n "$mtd_num" ] && [ -f "/sys/class/mtd/mtd${mtd_num}/type" ]; then
 				local t sz
@@ -130,21 +126,11 @@ _ethtool_refresh() {
 		case "$eth" in
 			lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
 		esac
-		# Name patterns above cover every naming scheme this driver
-		# stack is known to use, but a radio's actual netdev name is
-		# whatever the vendor build chose. The one thing every wifi
-		# netdev has in common, regardless of name, is a phy80211
-		# symlink -- the same structural check WIFI_SURVEY and
-		# wifi_clients already key on elsewhere in this file. Belt-
-		# and-braces: without it, a radio named outside the known
-		# patterns silently ran ethtool against a device that was
-		# never a wired port.
+		# A radio can have any netdev name; phy80211 is what marks it.
 		[ -e "$netdev/phy80211" ] && continue
 		[ -f "$netdev/speed" ] || continue
-		# One pass over the settings: autoneg, and the fastest mode each end
-		# advertises. When both ends offer more than they negotiated, the link
-		# has fallen back -- nearly always a damaged or two-pair cable, since
-		# gigabit needs all four pairs.
+		# Autoneg and the fastest mode each end advertises: when both offer more
+		# than they negotiated, the link fell back, nearly always a bad cable.
 		_an=""; _adv_max=0; _lp_max=0; _modes=""
 		while IFS= read -r _line; do
 			case "$_line" in
@@ -179,6 +165,7 @@ EOF
 		done <<EOF
 $(ethtool -a "$eth" 2>/dev/null)
 EOF
+		# ethtool 6.15 prints the EEE state as two bare words, not "EEE status:".
 		_e1=""; _e2=""
 		while read -r _w _rest; do
 			[ -n "$_rest" ] && continue
@@ -287,7 +274,6 @@ EOF
 			{ [ -z "$channel" ] || [ "$channel" = "unknown" ]; } && channel="Unknown"
 			{ [ -z "$bitrate" ] || [ "$bitrate" = "unknown" ]; } && bitrate="Unknown"
 
-			# Band detection
 			case "$freq" in
 				2.*) band="2.4 GHz" ;;
 				5.*) band="5 GHz" ;;
@@ -301,7 +287,6 @@ EOF
 				esac
 			fi
 
-			# sysfs phyname lookup
 			read_file phyname "/sys/class/net/$iface/phy80211/name" ""
 			[ -z "$phyname" ] && phyname=$phyname_info
 			[ -z "$phyname" ] && phyname="Unknown"
@@ -381,15 +366,13 @@ EOF
 	_cache_write "$WIFI_CACHE" 30 "$WIFI_RADIOS"
 }
 
-# UBI devices and the MTD partition table with its ECC counters, cached for 30 s.
-_storage_inv_refresh() {
-	# Legacy UBI compat
+# UBI devices with their wear counters and volumes; ubi0's totals feed the alerts.
+_ubi_devices() {
 	UBI_MAX_EC=0
 	UBI_BAD_PEB=0
 	[ -f /sys/class/ubi/ubi0/max_ec ] && UBI_MAX_EC=$(cat /sys/class/ubi/ubi0/max_ec 2>/dev/null || echo 0)
 	[ -f /sys/class/ubi/ubi0/bad_peb_count ] && UBI_BAD_PEB=$(cat /sys/class/ubi/ubi0/bad_peb_count 2>/dev/null || echo 0)
 
-	# Full UBI device enumeration
 	UBI_DEVS="["
 	FIRST_UBI_DEV=1
 	for ubi_dp in /sys/class/ubi/ubi[0-9]*; do
@@ -430,23 +413,16 @@ _storage_inv_refresh() {
 		FIRST_UBI_DEV=0
 	done
 	UBI_DEVS="$UBI_DEVS]"
+}
 
-	# ECC baseline: first-seen counter snapshot. Accumulating bitflips
-	# since a fixed baseline are the real NAND health signal, so the
-	# baseline has to outlive a reboot -- kept in tmpfs it was rebuilt
-	# from the current counters on every boot, which made "+N since
-	# <date>" measure nothing but uptime.
-	#
-	# It lives outside /tmp/hwdash* on purpose: postinst clears those
-	# so a schema change can never serve stale cache, but this is
-	# recorded hardware history, not cache, and must survive upgrades.
-	# Writes cost nothing in flash wear -- the file is written once
-	# per device, and again only if the counters regress, which means
-	# the chip was reflashed.
+# The ECC baseline is the first counter snapshot; bitflips accumulated since
+# then are the NAND health signal. It is hardware history, not cache, so it
+# lives in /etc/hwdash, which postinst leaves alone, and is rewritten only
+# when the counters go backwards, i.e. after a reflash.
+_ecc_baseline_load() {
 	ECC_BASE_DIR=/etc/hwdash
 	ECC_BASE_FILE=$ECC_BASE_DIR/ecc.baseline
-	# Carry over a baseline left by a version that kept it in tmpfs,
-	# so upgrading does not discard history that is still valid.
+	# Carry over a baseline from versions that kept it in tmpfs.
 	if [ ! -f "$ECC_BASE_FILE" ] && [ -f /tmp/hwdash/ecc.baseline ]; then
 		mkdir -p "$ECC_BASE_DIR" 2>/dev/null
 		cat /tmp/hwdash/ecc.baseline > "$ECC_BASE_FILE" 2>/dev/null
@@ -454,11 +430,7 @@ _storage_inv_refresh() {
 	PERSISTDIR_V=""; PERSISTDIR=""
 	[ -f /tmp/hwdash_wanmon/.persist_dir ] && . /tmp/hwdash_wanmon/.persist_dir 2>/dev/null
 	[ "$PERSISTDIR_V" != "1" ] && PERSISTDIR=""
-	# Internal flash has no baseline at all -- most likely a full
-	# reflash or a fresh install -- but the external drive still
-	# does. This is the one place persist_dir genuinely outlives
-	# more than a graceful reboot: NAND wear history that would
-	# otherwise restart counting from zero on the new install.
+	# After a reflash only the persistent directory may still have one.
 	if [ ! -f "$ECC_BASE_FILE" ] && [ -n "$PERSISTDIR" ] \
 		&& [ -f "$PERSISTDIR/ecc.baseline" ] && _persist_mount_ok "$PERSISTDIR"; then
 		mkdir -p "$ECC_BASE_DIR" 2>/dev/null
@@ -470,10 +442,12 @@ _storage_inv_refresh() {
 		case "$_eb_hdr" in DATE=*) ECC_BASE_DATE=${_eb_hdr#DATE=} ;; esac
 		case "$ECC_BASE_DATE" in ''|*[!0-9]*) ECC_BASE_DATE=0 ;; esac
 	fi
+}
+
+# The MTD partition table with each partition's ECC counters and baseline.
+_mtd_parts() {
 	_ECC_SNAP=""
 	_ECC_RESET=0
-
-	# MTD partition table
 	MTD_PARTS="["
 	FM=1
 	if [ -f /proc/mtd ]; then
@@ -492,8 +466,7 @@ _storage_inv_refresh() {
 				: "${_mecc_c:=0}" "${_mecc_f:=0}"
 			fi
 			[ -f "/sys/class/mtd/mtd${mn}/ecc_strength" ] && read_file _mecc_str "/sys/class/mtd/mtd${mn}/ecc_strength" 0
-			# Baseline lookup for this partition; counter lower than the
-			# baseline means a reflash/reset — rebuild the baseline.
+			# Counters below the baseline mean a reflash: rebuild it.
 			_eb_c=$_mecc_c; _eb_f=$_mecc_f
 			if [ "$ECC_BASE_DATE" != "0" ]; then
 				while read -r _eb_n _eb_c2 _eb_f2; do
@@ -513,6 +486,9 @@ _storage_inv_refresh() {
 		done < /proc/mtd
 	fi
 	MTD_PARTS="$MTD_PARTS]"
+}
+
+_ecc_baseline_save() {
 	if [ -n "$_ECC_SNAP" ] && { [ "$ECC_BASE_DATE" = "0" ] || [ "$_ECC_RESET" = "1" ]; }; then
 		mkdir -p "$ECC_BASE_DIR" 2>/dev/null
 		{
@@ -525,6 +501,14 @@ _storage_inv_refresh() {
 			cat "$ECC_BASE_FILE" > "$PERSISTDIR/ecc.baseline" 2>/dev/null
 		fi
 	fi
+}
+
+# UBI devices and the MTD partition table, cached for 30 s.
+_storage_inv_refresh() {
+	_ubi_devices
+	_ecc_baseline_load
+	_mtd_parts
+	_ecc_baseline_save
 	{
 		printf "_SI_EXP=%s\n" "$((${HWDASH_NOW:-0} + 30))"
 		printf "UBI_MAX_EC=%s\n" "${UBI_MAX_EC:-0}"
@@ -624,11 +608,8 @@ hw_identity() {
 	} > "$HW_ID_CACHE.$$" 2>/dev/null && mv "$HW_ID_CACHE.$$" "$HW_ID_CACHE" 2>/dev/null
 }
 
-# /proc/stat, clocks, load, pressure and conntrack: all builtin reads.
-cpu_stats() {
-	# Single pass over /proc/stat collects the per-CPU lines AND the
-	# aggregate ticks / context switches / interrupts — this used to
-	# be a second read of the file through a forked awk.
+# One pass over /proc/stat: per-CPU lines, total ticks, context switches, interrupts.
+cpu_counters() {
 	CPUS="["
 	FIRST=1
 	CPU_TICKS=0; CTXT=0; INTR=0
@@ -657,7 +638,10 @@ cpu_stats() {
 		esac
 	done < /proc/stat
 	CPUS="$CPUS]"
+}
 
+# The current clock of each CPU, and time spent at each clock since boot.
+cpu_clocks() {
 	CPU_FREQS="["
 	FIRST=1
 	i=0
@@ -675,9 +659,7 @@ cpu_stats() {
 	done
 	CPU_FREQS="$CPU_FREQS]"
 
-	# Cumulative time spent in each OPP (cpufreq policy 0). Shows
-	# whether the CPU ever boosts or sits pinned. Absent when the
-	# kernel lacks CONFIG_CPU_FREQ_STAT — the UI hides the section.
+	# Policy 0 only; absent without CONFIG_CPU_FREQ_STAT.
 	FREQ_STATS="["
 	_FS_FIRST=1
 	if [ -f /sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state ]; then
@@ -690,7 +672,10 @@ cpu_stats() {
 		done < /sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state
 	fi
 	FREQ_STATS="$FREQ_STATS]"
+}
 
+# Load, uptime, governor, pressure and conntrack fill.
+cpu_load() {
 	read -r LOAD_1 LOAD_5 LOAD_15 TASKS _ < /proc/loadavg
 	[ -z "$TASKS" ] && TASKS="0/0"
 	read -r UPTIME _ < /proc/uptime 2>/dev/null; UPTIME=${UPTIME%%.*}
@@ -706,12 +691,8 @@ cpu_stats() {
 		PSI_JSON="{\"cpu\":$_pc,\"mem\":$_pm,\"mem_full\":$_pmf,\"io\":$_pio}"
 	fi
 
-	# Do NOT use read_file here: busybox ash's read builtin fetches
-	# one byte per read(2), and /proc/sys/net/* sysctl handlers
-	# return EOF for reads at offset > 0 — so a builtin read sees
-	# only the FIRST DIGIT of the value (83 -> "8"). cat reads the
-	# whole value in one syscall; one fork covers both files.
-	# (Re-confirmed on all three targets: 31232 reads as 3, 16384 as 1.)
+	# Not read_file: busybox's read takes a byte per read(2) and these sysctl
+	# files return EOF past offset 0, so it would see only the first digit.
 	CONN_COUNT=0; CONN_MAX=0
 	if [ -f /proc/sys/net/netfilter/nf_conntrack_count ]; then
 		set -- $(cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
@@ -720,7 +701,13 @@ cpu_stats() {
 	fi
 }
 
-mem_stats() {
+cpu_stats() {
+	cpu_counters
+	cpu_clocks
+	cpu_load
+}
+
+mem_usage() {
 	MEM_TOTAL=0; MEM_FREE=0; MEM_AVAIL=0; MEM_BUFF=0; MEM_CACH=0; SWAP_TOTAL=0; SWAP_FREE=0; MEM_DIRTY=0; MEM_WRITEBACK=0
 	while read -r key val _; do
 		case "$key" in
@@ -753,14 +740,11 @@ mem_stats() {
 		ZRAM_USED=$(( zused / 1024 ))
 		ZRAM_ORIG=$(( zorig / 1024 ))
 	fi
+}
 
-	# DDR speed: only obtainable by decoding SMBIOS/DMI tables, which
-	# needs the optional `dmidecode` package (not installed by
-	# default, and pointless on embedded boards with no DMI tables
-	# at all — so this is a soft runtime check, never a hard
-	# dependency of this package). Genuinely static hardware data,
-	# so it's cached for a full day rather than the usual few
-	# seconds, same as the other slow/never-changing lookups.
+# DDR type and speed come only from SMBIOS via the optional dmidecode, and
+# never change, so the answer is cached for a day.
+mem_speed() {
 	MEM_SPEED_LINE=""
 	if command -v dmidecode >/dev/null; then
 		_ddr_cache="/tmp/hwdash_ddr_speed"
@@ -796,6 +780,11 @@ EOF_DMI
 	[ -z "$MEM_SPEED_LINE" ] && MEM_SPEED_JSON="null"
 }
 
+mem_stats() {
+	mem_usage
+	mem_speed
+}
+
 # Mounted filesystems from one df -k pass, which also gives overlay and /tmp use.
 disk_usage() {
 	DF_JSON="["
@@ -808,8 +797,7 @@ disk_usage() {
 		[ "$mountpoint" = "/tmp" ] && { TMP_TOTAL=$blocks; TMP_USED=$used; }
 		[ -z "$fs" ] || [ "$fs" = "Filesystem" ] && continue
 
-		# Harvest overlay usage from this same df pass — this used to
-		# be a separate grep + df + awk fork trio later in the script.
+		# Overlay use comes from the same pass.
 		if [ "$mountpoint" = "/overlay" ]; then
 			case "$blocks$used$avail" in
 				*[!0-9]*) ;;
@@ -828,8 +816,7 @@ disk_usage() {
 		realdev=""
 		if [ "$mountpoint" = "/" ]; then
 			devname="root"
-			# Glob + builtin read instead of ls|grep|head + mount|awk
-			# (4 forks per poll on NAND boards).
+			# Builtin glob and reads: this runs on every poll.
 			ubiblk=""
 			for _ub in /sys/class/block/ubiblock*; do
 				[ -e "$_ub" ] && ubiblk=${_ub##*/} && break
@@ -844,13 +831,8 @@ disk_usage() {
 					fi
 				done < /proc/mounts
 			fi
-			# No squashfs+overlay split — root itself is the
-			# writable filesystem (plain ext4/f2fs/etc. image,
-			# e.g. an x86 NVMe/SSD install) and /dev/root often
-			# isn't even a real devnode. Resolve via the mount's
-			# major:minor from mountinfo instead of guessing a
-			# name — same diskstats cross-reference technique
-			# already used for /rom's synthetic /dev/root above.
+			# Root is the writable filesystem itself (an x86 ext4 image, say) and
+			# /dev/root is often no real node: resolve it by major:minor.
 			if [ -z "$realdev" ] && [ -f /proc/self/mountinfo ]; then
 				_root_mm=$(awk '$5=="/" {print $3; exit}' /proc/self/mountinfo 2>/dev/null)
 				if [ -n "$_root_mm" ]; then
@@ -867,11 +849,8 @@ disk_usage() {
 				# Canonical device node — the name IS the real device.
 				realdev=$_base
 			else
-				# Non-canonical node (/dev/root, mapper, …): resolve its
-				# major:minor against /proc/diskstats once per boot. The
-				# mapping is fixed until reboot and /tmp is tmpfs, so a
-				# plain no-TTL cache file is exactly right — the old code
-				# forked ls + awk for this on every poll.
+				# A non-canonical node (/dev/root, mapper): resolve its major:minor
+				# once per boot; the answer cannot change before /tmp is cleared.
 				_rd_cache="/tmp/hwdash_realdev_$_base"
 				if [ -f "$_rd_cache" ]; then
 					read -r realdev < "$_rd_cache" 2>/dev/null
@@ -901,11 +880,7 @@ EOF
 		hw_model=${tmp_meta#*:}
 		case "$hw_size" in ''|*[!0-9]*) hw_size=$blocks ;; esac
 		[ "$hw_size" -eq 0 ] && hw_size=$blocks
-		# /rom is always the read-only squashfs base image on a
-		# standard OpenWrt layout — its source is the synthetic
-		# "/dev/root" node (not a real /sys/block entry, so
-		# get_disk_meta above can't identify it), so the type is
-		# known outright rather than guessed.
+		# /rom is the squashfs base image; its /dev/root source can't be identified.
 		[ "$mountpoint" = "/rom" ] && hw_type="SquashFS"
 
 		if [ $FIRST_DF -eq 0 ]; then DF_JSON="$DF_JSON,"; fi
@@ -918,8 +893,8 @@ EOF
 	DF_JSON="$DF_JSON]"
 }
 
-# Internal storage detail: inodes, flash layout and wear, eMMC, NVMe, f2fs.
-storage_stats() {
+# Inode use for the same mounts disk_usage lists.
+inode_usage() {
 	DF_INODES="{"
 	FIRST_INODE=1
 	while read -r fs inodes iused ifree ipct mountpoint; do
@@ -937,7 +912,10 @@ storage_stats() {
 $(df -i 2>/dev/null)
 EOF
 	DF_INODES="$DF_INODES}"
+}
 
+# Whole-disk and MTD chip sizes.
+storage_totals() {
 	total_phys=0
 	block_count=0
 	for dev in /sys/class/block/*; do
@@ -979,18 +957,16 @@ EOF
 		fi
 	fi
 
-	# NAND/NOR flash chips are always power-of-two sized. MediaTek layouts
-	# (and some others) don't expose a partition spanning the whole device
-	# and reserve a tail region, so the partition sum lands just under the
-	# real chip size (e.g. ~240 MB of partitions on a 256 MB chip). Round
-	# the reported physical total up to the next power of two so it reflects
-	# the actual chip rather than the partitioned area.
+	# Flash chips are power-of-two sized, but some layouts leave the tail
+	# unpartitioned, so round the partition sum up to the chip size.
 	if [ "$mtd_phys" -gt 0 ]; then
 		_p2=1
 		while [ "$_p2" -lt "$mtd_phys" ]; do _p2=$((_p2 * 2)); done
 		mtd_phys=$_p2
 	fi
+}
 
+disk_counters() {
 	DSK_STATS="{"
 	FIRST_DSK=1
 	while read -r major minor devname reads merged_reads sectors_read ms_read writes merged_writes sectors_written ms_written ios ms_io ms_weighted; do
@@ -999,18 +975,14 @@ EOF
 		FIRST_DSK=0
 	done < /proc/diskstats
 	DSK_STATS="$DSK_STATS}"
+}
 
-	# UBI device tree + MTD partition table are hardware inventory:
-	# the layout is fixed at flash time and wear/ECC counters move on
-	# minute-plus timescales. Enumerating them every poll was the
-	# largest remaining fork cluster (~one cat per MTD partition for
-	# the type, plus json_str). Cache the assembled JSON for 30s, the
-	# same volatile pattern used for the WiFi block. postinst clears
-	# /tmp/hwdash_* on upgrade so the schema can never go stale.
+# The UBI and MTD layout changes only on reflash and the wear counters move
+# slowly, so they come from a 30 s cache refreshed in the background.
+flash_inventory() {
 	STORAGE_INV_CACHE=/tmp/hwdash_storage_inv_v2.sh
 	UBI_DEVS=""; MTD_PARTS=""; UBI_MAX_EC=0; UBI_BAD_PEB=0; ECC_BASE_DATE=0
-	# Sourced cache carries its own expiry epoch (_SI_EXP); sourcing a
-	# stale file is harmless since the vars get recomputed below.
+	# The cache is a sourced file carrying its own expiry (_SI_EXP).
 	_SI_EXP=0
 	[ -f "$STORAGE_INV_CACHE" ] && . "$STORAGE_INV_CACHE" 2>/dev/null
 	case "$_SI_EXP" in ''|*[!0-9]*) _SI_EXP=0 ;; esac
@@ -1024,7 +996,10 @@ EOF
 	fi
 	[ -z "$UBI_DEVS" ] && UBI_DEVS="[]"
 	[ -z "$MTD_PARTS" ] && MTD_PARTS="[]"
-	# eMMC / SD health
+}
+
+# eMMC/SD identity and wear estimates.
+emmc_health() {
 	EMMC_INFO="null"
 	for mmc in /sys/class/block/mmcblk[0-9]*; do
 		[ -d "$mmc/device" ] || continue
@@ -1062,20 +1037,11 @@ EOF
 		EMMC_INFO="{\"dev\":\"${mmc##*/}\",\"name\":\"$_n\",\"vendor\":\"$JSV\",\"type\":\"$em_type\",\"fwrev\":\"$em_fwrev\",\"hwrev\":\"$em_hwrev\",\"pre_eol\":$peo_i,\"life_a\":$lt_a_i,\"life_b\":$lt_b_i,\"date\":\"$em_date\"}"
 		break
 	done
+}
 
-	# SquashFS (/rom) superblock details. Its mount source is the
-	# synthetic /dev/root node (not a stat-able /sys/block entry),
-	# so the real backing device is resolved via the kernel's own
-	# early-boot mount line ("...squashfs filesystem) readonly on
-	# device MAJ:MIN") cross-referenced against /proc/diskstats —
-	# the same major:minor technique already used elsewhere in
-	# this script for non-canonical device nodes. Compression/
-	# block-size/exact-size are read straight from the superblock
-	# (fixed little-endian layout, stable since squashfs 4.0) when
-	# `od` is available; a full coreutils od isn't always present
-	# on a minimal busybox userland, so this degrades to null
-	# rather than guessing. Genuinely static once mounted, so it's
-	# cached for a full day like the other slow/static lookups.
+# Compression and size from the squashfs superblock behind /rom, found by
+# major:minor since its source is the synthetic /dev/root. Cached for a day.
+squashfs_info() {
 	SQUASHFS_INFO="null"
 	_sqfs_cache="/tmp/hwdash_squashfs_info"
 	if _cache_read "$_sqfs_cache"; then
@@ -1113,8 +1079,9 @@ EOF
 		fi
 		_cache_write "$_sqfs_cache" 86400 "$SQUASHFS_INFO"
 	fi
+}
 
-	# NVMe sysfs info
+nvme_info() {
 	NVME_INFO="null"
 	for nvme in /sys/class/block/nvme[0-9]*n[0-9]*; do
 		[ -d "$nvme/device" ] || continue
@@ -1129,9 +1096,7 @@ EOF
 		json_esc "$nv_model"; _m=$JSV
 		json_esc "$nv_serial"; _s=$JSV
 		json_esc "$nv_fw"
-		# TRIM/discard support is a static device capability
-		# (sysfs queue param), not something worth actually
-		# running fstrim/blkdiscard for — read-only status only.
+		# Discard support is a static queue property; nothing is ever trimmed.
 		read_file nv_discard_gran "/sys/block/${nvme##*/}/queue/discard_granularity" 0
 		case "$nv_discard_gran" in ''|*[!0-9]*) nv_discard_gran=0 ;; esac
 		nv_discard_mount=0
@@ -1144,10 +1109,10 @@ EOF
 		NVME_INFO="{\"dev\":\"${nvme##*/}\",\"model\":\"$_m\",\"serial\":\"$_s\",\"fw\":\"$JSV\",\"transport\":\"$nv_transport\",\"discard_gran\":$nv_discard_gran,\"discard_mount\":$nv_discard_mount}"
 		break
 	done
+}
 
-	# NVMe SMART / health log (requires smartmontools, optional
-	# package — protocol-universal, so the same tool/shape can
-	# extend to SATA SSD/HDD SMART later without a rewrite).
+# The NVMe health log through the optional smartctl, cached for 30 s.
+nvme_smart() {
 	NVME_SMART="null"
 	if [ "$NVME_INFO" != "null" ] && command -v smartctl >/dev/null && command -v jsonfilter >/dev/null; then
 		_nvme_ns=$(printf '%s' "$NVME_INFO" | jsonfilter -e '@.dev' 2>/dev/null)
@@ -1204,8 +1169,9 @@ EOF
 			fi
 		fi
 	fi
+}
 
-	# f2fs filesystem stats
+f2fs_stats() {
 	F2FS_INFO="["
 	FF=1
 	for f2p in /sys/fs/f2fs/*; do
@@ -1224,30 +1190,40 @@ EOF
 	F2FS_INFO="$F2FS_INFO]"
 }
 
-thermal_stats() {
-	THERMALS="["
-	FIRST=1
-	SEEN_TYPES=" "
+storage_stats() {
+	inode_usage
+	storage_totals
+	disk_counters
+	flash_inventory
+	emmc_health
+	squashfs_info
+	nvme_info
+	nvme_smart
+	f2fs_stats
+}
+
+# Sets CRIT_TEMP and PASS_TEMP from the trip points under directory $1,
+# keeping their current values where it has none.
+read_trips() {
+	for trip in "$1"/trip_point_*_type; do
+		[ -f "$trip" ] || continue
+		trip_type=""
+		read -r trip_type < "$trip" 2>/dev/null
+		case "$trip_type" in
+			critical|hot|emergency) read_file CRIT_TEMP "${trip%_type}_temp" "$CRIT_TEMP" ;;
+			passive|active|max) read_file PASS_TEMP "${trip%_type}_temp" "$PASS_TEMP" ;;
+		esac
+	done
+}
+
+thermal_zones() {
 	for t in /sys/class/thermal/thermal_zone*; do
 		if [ -f "$t/type" ] && [ -f "$t/temp" ]; then
 			read_file TYPE "$t/type" "Unknown"
 			read_file TEMP "$t/temp" "0"
-			_tn=$TEMP
-			case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
-			[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
 			CRIT_TEMP="null"
 			PASS_TEMP="null"
-			for trip in "$t"/trip_point_*_type; do
-				[ -f "$trip" ] || continue
-				trip_type=""
-				read -r trip_type < "$trip" 2>/dev/null
-				trip_temp_file="${trip%_type}_temp"
-				if [ "$trip_type" = "critical" ] || [ "$trip_type" = "hot" ] || [ "$trip_type" = "emergency" ]; then
-					read_file CRIT_TEMP "$trip_temp_file" "$CRIT_TEMP"
-				elif [ "$trip_type" = "passive" ] || [ "$trip_type" = "active" ] || [ "$trip_type" = "max" ]; then
-					read_file PASS_TEMP "$trip_temp_file" "$PASS_TEMP"
-				fi
-			done
+			read_trips "$t"
 			SEEN_TYPES="${SEEN_TYPES}${TYPE} "
 			if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
 			json_esc "$TYPE"
@@ -1255,6 +1231,10 @@ thermal_stats() {
 			FIRST=0
 		fi
 	done
+}
+
+# Every hwmon temperature channel, labelled and made unique.
+hwmon_temps() {
 	_th_owd=$PWD
 	for h in /sys/class/hwmon/hwmon*; do
 		[ -d "$h" ] || continue
@@ -1266,10 +1246,8 @@ thermal_stats() {
 
 			read_file LABEL "${tinput%_input}_label" ""
 			if [ -z "$LABEL" ] && [ -L "$h/device" ]; then
-				# cd -P rather than a readlink fork: this runs for every
-				# unlabelled hwmon on every poll -- 15 of them on an
-				# IPQ9554, which made it the costliest block in the whole
-				# poll -- only to spot the one or two ath11k radios.
+				# cd -P rather than a readlink fork: every unlabelled channel
+				# passes here on every poll just to spot the ath11k radios.
 				_phy_name=""
 				cd -P "$h/device" 2>/dev/null && _phy_name=${PWD##*/}
 				cd "$_th_owd" 2>/dev/null
@@ -1292,9 +1270,6 @@ thermal_stats() {
 				TYPE="${TYPE} #${_dup_idx}"
 			fi
 			SEEN_TYPES="${SEEN_TYPES}${TYPE} "
-			_tn=$TEMP
-			case "$_tn" in *[!0-9-]*) _tn=0 ;; esac
-			[ "$_tn" -gt 1000 ] && _tn=$((_tn / 1000))
 
 			CRIT_TEMP="null"
 			PASS_TEMP="null"
@@ -1308,17 +1283,7 @@ thermal_stats() {
 			read_file PASS_TEMP "${tinput%_input}_max" "null"
 
 			if [ "$CRIT_TEMP" = "null" ] && [ "$PASS_TEMP" = "null" ] && [ -d "$h/device" ]; then
-				for trip in "$h/device"/trip_point_*_type; do
-					[ -f "$trip" ] || continue
-					trip_type=""
-					read -r trip_type < "$trip" 2>/dev/null
-					trip_temp_file="${trip%_type}_temp"
-					if [ "$trip_type" = "critical" ] || [ "$trip_type" = "hot" ] || [ "$trip_type" = "emergency" ]; then
-						read_file CRIT_TEMP "$trip_temp_file" "$CRIT_TEMP"
-					elif [ "$trip_type" = "passive" ] || [ "$trip_type" = "active" ] || [ "$trip_type" = "max" ]; then
-						read_file PASS_TEMP "$trip_temp_file" "$PASS_TEMP"
-					fi
-				done
+				read_trips "$h/device"
 			fi
 
 			if [ $FIRST -eq 0 ]; then THERMALS="$THERMALS,"; fi
@@ -1327,30 +1292,24 @@ thermal_stats() {
 			FIRST=0
 		done
 	done
+}
+
+thermal_stats() {
+	THERMALS="["
+	FIRST=1
+	SEEN_TYPES=" "
+	thermal_zones
+	hwmon_temps
 	THERMALS="$THERMALS]"
 }
 
-hwmon_stats() {
-	# Non-temperature hwmon channels: voltage rails, fans, power,
-	# current and PWM fan duty. Most routers expose none (the card
-	# hides itself); boards with a PMIC or a Super I/O chip get free
-	# telemetry. Builtin reads only.
-	#
-	# A pwm-fan with no tachometer has pwmN but no fanN_input, so it
-	# used to be invisible; its duty cycle is reported instead, and
-	# where both exist the duty rides on the RPM row.
-	#
-	# Alarms are only believed where the channel has a limit to
-	# break. A desktop BIOS commonly leaves a Super I/O chip's
-	# min/max at 0, and the chip then flags every rail as out of
-	# range -- twelve of fifteen on the Z490 this was tested on.
-	#
-	# Super I/O voltage inputs are raw pin readings, most of them
-	# behind a board-specific divider (the 12 V rail reads about
-	# 1 V), so unlabelled they mean nothing and are left out. The
-	# few with a fixed meaning across the NCT6775 family are named.
-	# Super I/O fan headers reading 0 RPM with no alarm are empty
-	# headers and are left out too.
+# Voltage, fan, power, current and PWM duty channels. A fan without a tach is
+# shown by its duty; where both exist the duty rides on the RPM row. Alarms
+# count only where the channel has a limit set, since a desktop BIOS often
+# leaves Super I/O limits at 0 and every rail then alarms. Unlabelled Super
+# I/O voltages are raw pin readings behind board-specific dividers, so only
+# the few with a fixed meaning are named, and idle fan headers are skipped.
+hwmon_channels() {
 	HWMON_EXTRA="["
 	_HX_FIRST=1
 	for h in /sys/class/hwmon/hwmon*; do
@@ -1426,12 +1385,10 @@ hwmon_stats() {
 		done
 	done
 	HWMON_EXTRA="$HWMON_EXTRA]"
+}
 
-	# RAPL package/core/dram energy counters (x86 only — the
-	# directory simply doesn't exist on ARM/MIPS boards, no
-	# special-casing needed). Raw cumulative microjoules; the
-	# frontend derives Watts from the delta between polls, the
-	# same client-side pattern already used for disk I/O speed.
+# Intel RAPL energy counters in µJ; the page turns the deltas into watts.
+rapl_stats() {
 	RAPL="["
 	_RP_FIRST=1
 	for _rp in /sys/class/powercap/intel-rapl:[0-9]*; do
@@ -1449,13 +1406,15 @@ hwmon_stats() {
 	RAPL="$RAPL]"
 }
 
-port_stats() {
-	# --- ethtool PHY details: autoneg, NEGOTIATED flow control
-	# (the real state — config RX/TX are often off while the link
-	# negotiates pause anyway) and EEE. 4 ethtool forks per port,
-	# but only once per 30s window; parsed with builtin reads.
-	# ethtool 6.15 prints EEE state as two bare enabled/disabled
-	# lines instead of "EEE status:" — handle both.
+hwmon_stats() {
+	hwmon_channels
+	rapl_stats
+}
+
+# ethtool detail costs four forks per port, so it comes from a 30 s cache
+# refreshed in the background. Pause is the negotiated state: the configured
+# RX/TX are often off while the link negotiates pause anyway.
+ethtool_stats() {
 	ETHTOOL_JSON="{}"
 	if command -v ethtool >/dev/null; then
 		if _cache_read /tmp/hwdash_ethtool.cache; then
@@ -1471,7 +1430,10 @@ port_stats() {
 		fi
 	fi
 	[ -z "$ETHTOOL_JSON" ] && ETHTOOL_JSON="{}"
+}
 
+# Wired ports: link state and counters from sysfs.
+eth_links() {
 	ETH_LINKS="["
 	FIRST_ETH=1
 	for netdev in /sys/class/net/*; do
@@ -1480,10 +1442,7 @@ port_stats() {
 			case "$eth" in
 				lo|wlan*|wl*|ath*|br*|tun*|tap*|veth*|wg*|pppoe*|*ifb*|mon.*|gre*|ipsec*|phy*|*ap*|*sta*) continue ;;
 			esac
-			# See the matching comment on the ethtool loop above: a wifi
-			# radio outside the known name patterns is still a radio, and
-			# phy80211 is the one structural marker every driver sets
-			# regardless of what it calls the netdev.
+			# A radio can have any netdev name; phy80211 is what marks it.
 			[ -e "$netdev/phy80211" ] && continue
 			if [ -f "$netdev/speed" ]; then
 				read_file speed "$netdev/speed" ""
@@ -1498,18 +1457,9 @@ port_stats() {
 				read_file rx_b "$netdev/statistics/rx_bytes" "0"
 				read_file tx_b "$netdev/statistics/tx_bytes" "0"
 				if [ "$speed" = "-1" ] || [ -z "$speed" ]; then speed="Down"; fi
-				# DSA conduit (the SoC's single MAC into an external switch
-				# chip, e.g. eth0 on a Filogic/IPQ board with lan1-4+wan as
-				# the real DSA "user" ports) carries the traffic of every
-				# port behind it, twice -- once inbound, once back out --
-				# since packets routed between two ports both cross this one
-				# link. Measured live: WAN downloading at 800 Mbps down /
-				# 12.6 Mbps up reported the conduit itself at 815/813, i.e.
-				# roughly the WAN download mirrored onto BOTH directions --
-				# correct for that wire, but unreadable next to per-port
-				# figures in a card titled "Ports Topology". Only a conduit
-				# netdev has its own dsa/ subdirectory; a DSA user port has
-				# DEVTYPE=dsa in its uevent but no dsa/ dir of its own.
+				# A DSA conduit (the SoC MAC feeding the switch) carries every
+				# port's traffic, twice when routed between ports. Only a
+				# conduit has a dsa/ directory of its own.
 				_conduit=false
 				[ -d "$netdev/dsa" ] && _conduit=true
 				if [ $FIRST_ETH -eq 0 ]; then ETH_LINKS="$ETH_LINKS,"; fi
@@ -1521,13 +1471,15 @@ port_stats() {
 	ETH_LINKS="$ETH_LINKS]"
 }
 
-usb_stats() {
-	# One row per physical host controller, with the slowest and fastest
-	# bus it offers. An xHCI controller registers two root hubs (a USB 2.0
-	# bus and a USB 3.x bus), so listing root hubs showed every controller
-	# twice. Root hubs are grouped by their parent device, which `cd -P`
-	# resolves without forking readlink. USB/IP and dummy_hcd are software
-	# controllers with no port behind them.
+port_stats() {
+	ethtool_stats
+	eth_links
+}
+
+# One row per host controller with its slowest and fastest bus: an xHCI has a
+# USB 2 and a USB 3 root hub, grouped here by parent device (cd -P, no fork).
+# USB/IP and dummy_hcd are software controllers with no port behind them.
+usb_controllers() {
 	USB_PORTS="["
 	FIRST_USB=1
 	_usb_seen=" "
@@ -1555,11 +1507,11 @@ usb_stats() {
 	done
 	cd "$_usb_owd" 2>/dev/null
 	USB_PORTS="$USB_PORTS]"
+}
 
-	# Connected peripherals only. Hubs are skipped: an on-board hub
-	# chip is always enumerated, so with nothing plugged in it would
-	# still be listed as a connected device. Anything plugged into a
-	# hub enumerates on its own and still shows.
+# Plugged-in peripherals. Hubs are skipped: an on-board hub chip always
+# enumerates, so it would look like a connected device.
+usb_devices() {
 	USB_DEVS="["
 	FIRST_USB=1
 	for usb in /sys/bus/usb/devices/*; do
@@ -1590,16 +1542,14 @@ usb_stats() {
 	USB_DEVS="$USB_DEVS]"
 }
 
-# Every block device outside internal flash, for the External Storage cards.
-ext_stats() {
-	# Correlate raw partitions that back an active loop device (e.g.
-	# x86 images that carve out a raw partition for the f2fs
-	# overlay and loop-mount it directly, with no filesystem of
-	# its own on the partition itself) so the frontend can explain
-	# *why* a sizeable partition shows no format/mount instead of
-	# just a bare dash. One line per match: "<backing-devname>
-	# <loopdev> <fs> <mountpoint>". Small, fixed-size loop; a
-	# handful of iterations at most.
+usb_stats() {
+	usb_controllers
+	usb_devices
+}
+
+# Partitions behind a mounted loop device (x86 images loop-mount a raw overlay
+# partition), as "<dev> <loop> <fs> <mountpoint>" lines.
+loop_backing() {
 	LOOP_BACKING=""
 	for _lp in /sys/class/block/loop*; do
 		[ -f "$_lp/loop/backing_file" ] || continue
@@ -1618,21 +1568,11 @@ ext_stats() {
 		LOOP_BACKING="$LOOP_BACKING$_lpback $_lpname $_lpfs $_lpmnt
 "
 	done
+}
 
-	# Real device + fs type backing "/" — /proc/mounts lists root's
-	# source as the synthetic "/dev/root" alias, not the real
-	# partition name, so the per-device /proc/mounts match below
-	# can never find it on its own (same aliasing issue already
-	# resolved for the df loop's iodev, via the same mountinfo
-	# major:minor technique). Without this, the partition that IS
-	# root shows up in External Storage as unmounted with no
-	# detected filesystem.
-	#
-	# Which device backs "/" cannot change while the system is running,
-	# but resolving it cost three awk forks on every single poll. Cache
-	# it: /tmp is a tmpfs, so a reboot (the only thing that can change
-	# the answer) drops the cache anyway. The TTL is belt-and-braces so
-	# a bad read can never be pinned for the whole uptime.
+# The device and fs type behind "/", which /proc/mounts lists only as
+# /dev/root. Fixed until reboot, but cached with a TTL so a bad read can't stick.
+root_device() {
 	ROOT_DEV_CACHE=/tmp/hwdash_rootdev_v1.cache
 	ROOT_REALDEV=""
 	ROOT_FSTYPE=""
@@ -1642,8 +1582,7 @@ ext_stats() {
 		[ "$ROOT_REALDEV" = "-" ] && ROOT_REALDEV=""
 		[ "$ROOT_FSTYPE" = "-" ] && ROOT_FSTYPE=""
 	elif [ -f /proc/self/mountinfo ]; then
-		# One awk pass yields both the major:minor and the fs type; the
-		# pair used to be two separate scans of the same file.
+		# One awk pass yields both the major:minor and the fs type.
 		_root_mi=$(awk '$5=="/" {mm=$3; for(i=6;i<=NF;i++) if($i=="-") {print mm" "$(i+1); exit}}' /proc/self/mountinfo 2>/dev/null)
 		_root_mm=${_root_mi%% *}
 		ROOT_FSTYPE=${_root_mi#* }
@@ -1655,23 +1594,20 @@ ext_stats() {
 		fi
 		_cache_write "$ROOT_DEV_CACHE" 600 "${ROOT_REALDEV:--}:${ROOT_FSTYPE:--}"
 	fi
+}
 
+# Every block device outside internal flash, for External Storage.
+block_devices() {
 	BLOCK_DEVS="["
 	FIRST_BDEV=1
 	for dev in /sys/class/block/*; do
 		[ ! -d "$dev" ] && continue
 		devname=${dev##*/}
-		# Ignore loop/ram/mtd/mmcblk/ubi/zram blocks. mmcblk is fully
-		# covered by the dedicated EMMC_INFO block below with richer
-		# health data; ubi/zram have no meaningful "external storage"
-		# identity. hw_dash.js discards all of these from block_devs
-		# unconditionally, so skip them here rather than shipping JSON
-		# the client throws away.
+		# mmcblk, mtd and ubi belong to Internal Storage; loop, ram and zram are virtual.
 		case "$devname" in
 			loop*|ram*|mtdblock*|mmcblk*|ubi*|zram*) continue ;;
 		esac
 
-		# Get model/type
 		model="Unknown"
 		dtype="Unknown"
 		removable="0"
@@ -1695,19 +1631,15 @@ ext_stats() {
 				;;
 		esac
 
-		# Get size
 		read_file _bsz "$dev/size" 0
 		size_bytes=$((_bsz * 512))
 
-		# Get IO stats
 		read_bytes=0
 		write_bytes=0
 		read_ios=0
 		write_ios=0
 		if [ -f "$dev/stat" ]; then
-			# /sys/block/X/stat fields: 1=read ios, 3=sectors read,
-			# 5=write ios, 7=sectors written. One builtin read instead
-			# of cat + four echo|awk pipelines.
+			# Fields 1, 3, 5 and 7: read IOs, sectors read, write IOs, sectors written.
 			read _rio _ _rsec _ _wio _ _wsec _ < "$dev/stat" 2>/dev/null
 			read_ios=${_rio:-0}
 			write_ios=${_wio:-0}
@@ -1715,12 +1647,7 @@ ext_stats() {
 			write_bytes=$(( ${_wsec:-0} * 512 ))
 		fi
 
-		# Mount point + fs type straight from /proc/mounts with the
-		# builtin read — zero forks. `block info` (which exec()s blkid
-		# machinery) is only consulted for unmounted devices, and its
-		# result is cached for 60s since a device's fs type effectively
-		# never changes between polls. Previously this exec'd block info
-		# AND a full df -T pipeline per block device on every poll.
+		# Mount point and fs type from /proc/mounts; block info only for unmounted devices.
 		mount_point=""
 		fs_type=""
 		while read -r _mdev _mp _mfs _; do
@@ -1735,8 +1662,7 @@ ext_stats() {
 			fs_type="$ROOT_FSTYPE"
 		fi
 		if [ -z "$fs_type" ]; then
-			# A device's fs type only changes on reformat — 10 min TTL
-			# is still conservative, and /tmp clears it on reboot.
+			# A fs type changes only on reformat.
 			_fs_cache="/tmp/hwdash_fstype_${devname}"
 			if _cache_read "$_fs_cache"; then
 				fs_type=$C_VAL
@@ -1747,7 +1673,6 @@ ext_stats() {
 		fi
 		[ -z "$fs_type" ] && fs_type="Unknown"
 
-		# Trim + escape without the unconditional per-device sed fork.
 		trim_ws model
 		json_esc "$model"
 		model=$JSV
@@ -1773,10 +1698,15 @@ EOF
 	BLOCK_DEVS="$BLOCK_DEVS]"
 }
 
-wifi_stats() {
-	# iw list parsing takes seconds on some chips — never on the
-	# request path. Generated once by a detached child; radios show
-	# without phycap for the first seconds and pick it up next cycle.
+ext_stats() {
+	loop_backing
+	root_device
+	block_devices
+}
+
+# iw list takes seconds on some chips, so the capability table is built once by
+# a detached child; the radios gain it on a later poll.
+wifi_caps() {
 	if [ ! -f "$HWDASH_PERSIST_DIR/wifi_cap_v4.json" ] && command -v iw >/dev/null; then
 		if ! _cache_read /tmp/hwdash_wificap.lock; then
 			_cache_write /tmp/hwdash_wificap.lock 120 generating
@@ -1787,10 +1717,10 @@ wifi_stats() {
 			) >/dev/null 2>&1 &
 		fi
 	fi
+}
 
-	# WiFi radio info is the single biggest CPU cost (dozens of
-	# iwinfo/iw/uci/awk forks per radio). Channel/txpower/bitrate
-	# change slowly, so cache the whole block for 30 s.
+# Radio details cost dozens of forks per radio and change slowly: 30 s cache.
+wifi_radios() {
 	WIFI_CACHE=/tmp/hwdash_wifi_radios_v2.cache
 	if _cache_read "$WIFI_CACHE"; then
 		WIFI_RADIOS=$C_VAL
@@ -1804,20 +1734,11 @@ wifi_stats() {
 		_wifi_refresh
 	fi
 	[ -z "$WIFI_RADIOS" ] && WIFI_RADIOS="[]"
+}
 
-	# Channel survey (noise + airtime). Kept apart from the WiFi radio
-	# cache so busy% stays live, but held for 9 s: probing every radio
-	# on every 3 s poll was the second-costliest block, and the airtime
-	# counters only need a fresh sample every few polls. The frontend
-	# keeps the last live busy% when a poll repeats the same counters.
-	#
-	# `iw survey dump` reports the *PHY's* channel, so every VAP on a
-	# radio returns byte-identical output. Probing per netdev therefore
-	# paid a subshell + iw + awk for each extra SSID (16 forks on a
-	# 2-radio/4-SSID box) to recompute two distinct answers — this was
-	# the single most expensive block in the whole poll. Probe once per
-	# phy and fan the result back out to that phy's netdevs, which are
-	# what the frontend keys on.
+# Noise and airtime counters, held for 9 s. The survey describes the phy's
+# channel, so each phy is probed once and the answer shared by its netdevs.
+wifi_survey() {
 	if _cache_read /tmp/hwdash_survey.cache; then
 		WIFI_SURVEY=$C_VAL
 	else
@@ -1871,7 +1792,13 @@ EOF
 	fi
 }
 
-sys_info_stats() {
+wifi_stats() {
+	wifi_caps
+	wifi_radios
+	wifi_survey
+}
+
+sys_static() {
 	# Kernel, release, CPU caches, soc0 and vulnerabilities cannot change before
 	# a reboot or upgrade, so they are kept in /tmp/hwdash (postinst clears it).
 	# Only the hostname, overlay use, clock and crash state are read live.
@@ -1939,13 +1866,8 @@ sys_info_stats() {
 				0x51-0xc00) L1D_SIZE=32768;  L1I_SIZE=32768  ;;  # Falkor (Qualcomm server)
 			esac
 		fi
-		# --- CPU detail -------------------------------------
-		# lscpu (util-linux) gives the richest answer, but it is not
-		# part of a default OpenWrt image, so every field here has a
-		# /proc/cpuinfo fallback and the card degrades instead of
-		# disappearing. Lives in the static cache: none of this can
-		# change without swapping the SoC, so it costs nothing per
-		# poll.
+		# lscpu gives the richest CPU detail but is optional; every field has a
+		# /proc/cpuinfo fallback.
 		CPU_ISA=""; CPU_BOGO=""; CPU_FEATURES=""; CPU_BYTEORDER=""
 		CPU_OPMODE=""; CPU_VENDOR=""; CPU_VIRT=""; CPU_LSCPU=0
 		CPU_CORE=""; CPU_STEPPING=""
@@ -1954,9 +1876,7 @@ sys_info_stats() {
 			while IFS=: read -r _lk _lv; do
 				trim_ws _lv
 				case "$_lk" in
-					# NOT Architecture: lscpu reports uname -m there,
-					# which the existing arch field already shows.
-					# The ARM ISA level below is the informative one.
+					# Not Architecture: lscpu reports uname -m there.
 					"Model name") CPU_CORE=$_lv ;;
 					Stepping) CPU_STEPPING=$_lv ;;
 					"Byte Order") CPU_BYTEORDER=$_lv ;;
@@ -1998,9 +1918,7 @@ EOF_LSCPU
 			fi
 		fi
 		[ -z "$CPU_ISA" ] && CPU_ISA=$SYS_ARCH
-		# x86 runs to ~116 flags / ~860 chars, so the old 600-char cap
-		# cut the list mid-token. Bound it well above that and trim
-		# back to a space so a partial flag name is never emitted.
+		# Bounded well above x86's ~860 chars, cut back to a whole flag.
 		if [ ${#CPU_FEATURES} -gt 2048 ]; then
 			CPU_FEATURES=$(printf '%s' "$CPU_FEATURES" | cut -c1-2048)
 			CPU_FEATURES=${CPU_FEATURES% *}
@@ -2025,15 +1943,11 @@ EOF_LSCPU
 		mkdir -p "$HWDASH_PERSIST_DIR" 2>/dev/null
 		printf '%s' "$SYS_STATIC_FRAG" > "$SYS_STATIC_CACHE.$$" 2>/dev/null && mv "$SYS_STATIC_CACHE.$$" "$SYS_STATIC_CACHE" 2>/dev/null
 	fi
-	read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
-	read_file WD_BOOTSTATUS /sys/class/watchdog/watchdog0/bootstatus "-1"
-	case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
-	# Clock sync as busybox ntpd last reported it, through the hotplug hook
-	# this package installs (/etc/hotplug.d/ntp/99-hwdash-ntp); procd picks
-	# the new folder up as soon as it appears, so no reboot is needed. Only
-	# synced/stratum go out -- no age -- so System Info is not rebuilt on
-	# every poll. Before the first event the state is unknown, unless the
-	# clock is plainly unset: earlier than 2025.
+}
+
+# Clock sync as busybox ntpd last reported it through /etc/hotplug.d/ntp.
+# Before the first event it is unknown, unless the clock is plainly unset.
+ntp_state() {
 	NTP_JSON="null"
 	if [ -f /var/run/hwdash-ntp.state ]; then
 		read -r _ntp_event _stratum _ntp_time < /var/run/hwdash-ntp.state
@@ -2044,13 +1958,12 @@ EOF_LSCPU
 	elif [ "${HWDASH_NOW:-0}" -gt 0 ] && [ "$HWDASH_NOW" -lt 1735689600 ]; then
 		NTP_JSON="{\"synced\":0,\"stratum\":-1}"
 	fi
-	# Kernel crash records pstore/ramoops kept across a reboot. A dmesg-*
-	# record's first line names why it was written: Panic, Oops and
-	# Emergency are crashes, while Shutdown, Restart, Halt and Poweroff are
-	# ordinary reboots that some builds also log (console-* is simply the
-	# previous boot's console). Records stay until deleted, so this says a
-	# crash log exists and when it was written, not that the latest boot
-	# crashed. Its one fork (date -r) is cached: records only change at boot.
+}
+
+# Crash records kept by pstore. A dmesg-* record's first line names its cause:
+# Panic, Oops and Emergency are crashes; Shutdown and the like are ordinary
+# reboots. Records only change at boot, so the answer is cached.
+crash_log() {
 	CRASH_JSON="null"
 	if _cache_read /tmp/hwdash_pstore.cache; then
 		CRASH_JSON=$C_VAL
@@ -2067,7 +1980,16 @@ EOF_LSCPU
 		[ $_crashes -gt 0 ] && CRASH_JSON="{\"count\":$_crashes,\"time\":$_crash_time,\"reason\":\"$_crash_reason\"}"
 		_cache_write /tmp/hwdash_pstore.cache 600 "$CRASH_JSON"
 	fi
-	# OV_TOTAL/OV_USED/OV_FREE come from the df -k pass in disk_usage.
+}
+
+# Overlay use (OV_*) comes from disk_usage.
+sys_info_stats() {
+	sys_static
+	ntp_state
+	crash_log
+	read_file SYS_HOSTNAME /proc/sys/kernel/hostname ""
+	read_file WD_BOOTSTATUS /sys/class/watchdog/watchdog0/bootstatus "-1"
+	case "$WD_BOOTSTATUS" in ''|*[!0-9-]*) WD_BOOTSTATUS=-1 ;; esac
 	json_esc "$SYS_HOSTNAME"
 	SYS_INFO_JSON="{\"hostname\":\"$JSV\",$SYS_STATIC_FRAG,\"wd_bootstatus\":$WD_BOOTSTATUS,\"mem_phys_mb\":${MEM_PHYS_MB:-0},\"overlay_total\":$OV_TOTAL,\"overlay_used\":$OV_USED,\"overlay_free\":$OV_FREE,\"ntp\":$NTP_JSON,\"crash\":$CRASH_JSON}"
 }
