@@ -597,6 +597,7 @@
 
 @media (max-width: 768px) {
 	.hw-cols { flex-direction: column; }
+	.hw-flash { align-items: stretch; }
 	.hw-col + .hw-col {
 		margin: 20px 0 0;
 		padding: 20px 0 0;
